@@ -266,11 +266,13 @@ do_uninstall() {
         log_ok "Purged state, cache, themes, and installation directory."
     fi
 
-    # 4. Terminate active tmux server so in-memory hooks are flushed
+    # 4. Terminate active tmux server and background processes so in-memory hooks are flushed
     if tmux info >/dev/null 2>&1; then
         tmux kill-server 2>/dev/null || true
         log_ok "Terminated running tmux server to flush in-memory hooks."
     fi
+    pkill -f "tmux-session-dock" 2>/dev/null || true
+    pkill -f "tmux-session-launcher" 2>/dev/null || true
     log_ok "Uninstallation complete. Zero residual hooks."
 }
 
