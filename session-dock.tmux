@@ -30,12 +30,14 @@ DEFAULT_WIDTH="$(get_tmux_option "@session-dock-width" "34")"
 SUBPANE_POS="$(get_tmux_option "@session-dock-subpane-position" "bottom")"
 
 # 2. Keybindings Registration
-tmux bind-key -N "🗂️ Toggle Session Dock" "$TOGGLE_KEY" run-shell "$BIN_PATH --toggle-sidebar"
-tmux bind-key -N "🔄 Swap Subpane Position (Top/Bottom)" "$SUBPANE_KEY" run-shell "$BIN_PATH --swap-subpane-position"
-tmux bind-key -N "🎨 Session Dock Theme Picker" "$THEME_KEY" display-popup -E -w 75% -h 65% "$CURRENT_DIR/scripts/tmux-theme-picker"
-tmux bind-key -N "📖 Session Dock Interactive Help" "$HELP_KEY" display-popup -E -w 70% -h 65% "$CURRENT_DIR/scripts/tmux-help-viewer"
-tmux bind-key -N "⌨️ Session Dock Command Palette" "$PALETTE_KEY" display-popup -E -w 70% -h 60% "env TMUX_PANE='#{pane_id}' $CURRENT_DIR/scripts/tmux-command-palette"
+tmux bind-key -N "🗂️ Toggle Session Dock" "$TOGGLE_KEY" run-shell "$BIN_PATH --toggle-sidebar" 2>/dev/null || tmux bind-key "$TOGGLE_KEY" run-shell "$BIN_PATH --toggle-sidebar" 2>/dev/null || true
+tmux bind-key -N "🔄 Swap Subpane Position (Top/Bottom)" "$SUBPANE_KEY" run-shell "$BIN_PATH --swap-subpane-position" 2>/dev/null || tmux bind-key "$SUBPANE_KEY" run-shell "$BIN_PATH --swap-subpane-position" 2>/dev/null || true
+tmux bind-key -N "🎨 Session Dock Theme Picker" "$THEME_KEY" display-popup -E -w 75% -h 65% "$CURRENT_DIR/scripts/tmux-theme-picker" 2>/dev/null || tmux bind-key "$THEME_KEY" display-popup -E -w 75% -h 65% "$CURRENT_DIR/scripts/tmux-theme-picker" 2>/dev/null || true
+tmux bind-key -N "📖 Session Dock Interactive Help" "$HELP_KEY" display-popup -E -w 70% -h 65% "$CURRENT_DIR/scripts/tmux-help-viewer" 2>/dev/null || tmux bind-key "$HELP_KEY" display-popup -E -w 70% -h 65% "$CURRENT_DIR/scripts/tmux-help-viewer" 2>/dev/null || true
+tmux bind-key -N "⌨️ Session Dock Command Palette" "$PALETTE_KEY" display-popup -E -w 70% -h 60% "env TMUX_PANE='#{pane_id}' $CURRENT_DIR/scripts/tmux-command-palette" 2>/dev/null || tmux bind-key "$PALETTE_KEY" display-popup -E -w 70% -h 60% "env TMUX_PANE='#{pane_id}' $CURRENT_DIR/scripts/tmux-command-palette" 2>/dev/null || true
 
 # 3. Work-Pane Safe Split Wrappers
-tmux bind-key -N "✂️ Safe Horizontal Split" | run-shell "$BIN_PATH --split-horizontal"
-tmux bind-key -N "✂️ Safe Vertical Split" _ run-shell "$BIN_PATH --split-vertical"
+tmux bind-key -N "✂️ Safe Horizontal Split" "|" run-shell "$BIN_PATH --split-horizontal" 2>/dev/null || tmux bind-key "|" run-shell "$BIN_PATH --split-horizontal" 2>/dev/null || true
+tmux bind-key -N "✂️ Safe Vertical Split" "_" run-shell "$BIN_PATH --split-vertical" 2>/dev/null || tmux bind-key "_" run-shell "$BIN_PATH --split-vertical" 2>/dev/null || true
+tmux bind-key -N "✂️ Safe Horizontal Split (Default)" "%" run-shell "$BIN_PATH --split-horizontal" 2>/dev/null || tmux bind-key "%" run-shell "$BIN_PATH --split-horizontal" 2>/dev/null || true
+tmux bind-key -N "✂️ Safe Vertical Split (Default)" '"' run-shell "$BIN_PATH --split-vertical" 2>/dev/null || tmux bind-key '"' run-shell "$BIN_PATH --split-vertical" 2>/dev/null || true
