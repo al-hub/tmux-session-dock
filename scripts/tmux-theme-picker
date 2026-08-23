@@ -136,8 +136,8 @@ fi
 # Main Interactive Theme Picker
 # ==============================================================================
 
-THEME_DIR="$HOME/.config/tmux/themes"
-CONFIG_THEME_FILE="$HOME/.config/tmux/theme.conf"
+THEME_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/tmux/themes"
+CONFIG_THEME_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/tmux/theme.conf"
 
 # 테마 디렉토리가 없거나 비어있는 경우 자동 채우기
 if [ ! -d "$THEME_DIR" ] || [ -z "$(find "$THEME_DIR" -name "*.conf" 2>/dev/null)" ]; then

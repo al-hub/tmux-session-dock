@@ -30,7 +30,36 @@ if [ "$ERGONOMICS_MODE" = "on" ] || [ "$ERGONOMICS_MODE" = "1" ] || [ "$ERGONOMI
     fi
 fi
 
-# 1. Option Parsing & Defaults
+# 1. Theme Loading (Persistence & Defaults)
+USER_THEME_CONF="${XDG_CONFIG_HOME:-$HOME/.config}/tmux/theme.conf"
+CONFIGURED_THEME="$(get_tmux_option "@session-dock-theme" "")"
+
+if [ -f "$USER_THEME_CONF" ]; then
+    tmux source-file "$USER_THEME_CONF" 2>/dev/null || true
+elif [ -n "$CONFIGURED_THEME" ]; then
+    THEME_SEARCH_DIRS=("${XDG_CONFIG_HOME:-$HOME/.config}/tmux/themes" "$CURRENT_DIR/themes")
+    THEME_FILE=""
+    for dir in "${THEME_SEARCH_DIRS[@]}"; do
+        if [ -f "$dir/${CONFIGURED_THEME}.conf" ]; then
+            THEME_FILE="$dir/${CONFIGURED_THEME}.conf"
+            break
+        elif [ -f "$dir/${CONFIGURED_THEME}" ]; then
+            THEME_FILE="$dir/${CONFIGURED_THEME}"
+            break
+        else
+            matched="$(find "$dir" -maxdepth 1 -name "*${CONFIGURED_THEME}*.conf" 2>/dev/null | head -n 1 || true)"
+            if [ -n "$matched" ] && [ -f "$matched" ]; then
+                THEME_FILE="$matched"
+                break
+            fi
+        fi
+    done
+    if [ -n "$THEME_FILE" ] && [ -f "$THEME_FILE" ]; then
+        tmux source-file "$THEME_FILE" 2>/dev/null || true
+    fi
+fi
+
+# 2. Option Parsing & Defaults
 TOGGLE_KEY="$(get_tmux_option "@session-dock-key" "s")"
 SUBPANE_KEY="$(get_tmux_option "@session-dock-subpane-key" "P")"
 THEME_KEY="$(get_tmux_option "@session-dock-theme-key" "T")"

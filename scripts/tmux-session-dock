@@ -998,9 +998,13 @@ session_is_managed()
 
 managed_session_names()
 {
+    local session_name_value
     while IFS= read -r session_name_value; do
-        session_is_managed "$session_name_value" && printf '%s\n' "$session_name_value"
+        [ -n "$session_name_value" ] || continue
+        session_is_managed "$session_name_value" || continue
+        printf '%s\n' "$session_name_value"
     done < <(sidebar_tmux_cmd list-sessions -F '#{session_name}' 2>/dev/null || true)
+    return 0
 }
 
 _sidebar_hooks_installed=false

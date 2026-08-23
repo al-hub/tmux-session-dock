@@ -5,6 +5,7 @@
 # ==============================================================================
 set -euo pipefail
 
+VERSION="v0.1.1"
 REPO_URL="https://github.com/al-hub/tmux-session-dock.git"
 INSTALL_DIR="${TMUX_DOCK_INSTALL_DIR:-$HOME/.local/share/tmux-session-dock}"
 BIN_DIR="${TMUX_DOCK_BIN_DIR:-$HOME/.local/bin}"
@@ -96,7 +97,7 @@ do_test() {
 
 do_status() {
     echo -e "${CYAN}${BOLD}======================================================================${NC}"
-    echo -e "  ${BOLD}tmux-session-dock - Status & Diagnostics${NC}"
+    echo -e "  ${BOLD}tmux-session-dock - Status & Diagnostics (${VERSION})${NC}"
     echo -e "${CYAN}${BOLD}======================================================================${NC}"
     
     # Check binary in BIN_DIR

@@ -12,3 +12,7 @@
 # Test artifacts
 tests/lib/*.so
 tests/lib/pty-bridge
+
+# AI agent workspaces
+.agents/
+skills-lock.json
