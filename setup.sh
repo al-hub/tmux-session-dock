@@ -47,13 +47,14 @@ resolve_repo_root() {
 SCRIPT_DIR="$(resolve_repo_root)"
 
 ensure_repo_present() {
-    if [ ! -f "$SCRIPT_DIR/scripts/build-dist.sh" ]; then
-        log_info "Downloading tmux-session-dock into $INSTALL_DIR..."
+    if [ "$SCRIPT_DIR" = "$INSTALL_DIR" ] || [ ! -f "$SCRIPT_DIR/scripts/build-dist.sh" ]; then
         mkdir -p "$(dirname "$INSTALL_DIR")"
         if [ ! -d "$INSTALL_DIR/.git" ]; then
+            log_info "Downloading tmux-session-dock into $INSTALL_DIR..."
             git clone "$REPO_URL" "$INSTALL_DIR"
         else
-            cd "$INSTALL_DIR" && git pull --ff-only origin main || git pull origin master || true
+            log_info "Syncing latest changes in $INSTALL_DIR..."
+            (cd "$INSTALL_DIR" && git pull --ff-only origin main 2>/dev/null || git pull origin master 2>/dev/null || true)
         fi
         SCRIPT_DIR="$INSTALL_DIR"
     fi
@@ -174,17 +175,18 @@ do_install() {
     if [ "$no_conf" -eq 0 ]; then
         touch "$CONFIG_FILE"
         local marker="# >>> tmux-session-dock configuration >>>"
-        if ! grep -q "$marker" "$CONFIG_FILE" 2>/dev/null; then
-            log_info "Registering configuration snippet in $CONFIG_FILE..."
-            cat <<CONF_EOF >> "$CONFIG_FILE"
+        if grep -q "$marker" "$CONFIG_FILE" 2>/dev/null; then
+            sed -i '/# >>> tmux-session-dock configuration >>>/,/# <<< tmux-session-dock configuration <<</d' "$CONFIG_FILE"
+        fi
+        log_info "Registering configuration snippet in $CONFIG_FILE..."
+        cat <<CONF_EOF >> "$CONFIG_FILE"
 
 # >>> tmux-session-dock configuration >>>
 # Auto-managed by tmux-session-dock setup controller
 run-shell "$SCRIPT_DIR/session-dock.tmux" 2>/dev/null || run-shell "~/.local/share/tmux-session-dock/session-dock.tmux" 2>/dev/null || true
 # <<< tmux-session-dock configuration <<<
 CONF_EOF
-            log_ok "Snippet injected into $CONFIG_FILE"
-        fi
+        log_ok "Snippet injected into $CONFIG_FILE"
     fi
 
     # 5. Hot-reload active tmux server if running
