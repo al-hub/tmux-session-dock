@@ -1,0 +1,14 @@
+# Logs & temporary files
+*.log
+*.tmp
+.DS_Store
+
+# State and cache files
+.local/
+.cache/
+/tmp/tmux-*
+/tmp/dock-*
+
+# Test artifacts
+tests/lib/*.so
+tests/lib/pty-bridge

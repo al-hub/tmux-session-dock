@@ -1,0 +1,49 @@
+name: CI Suite
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  lint-and-build:
+    name: Lint & Build Standalone Bundle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Syntax Lint
+        run: make lint
+
+      - name: Build Dist Bundle
+        run: make build
+
+      - name: Verify Bundle Integrity
+        run: |
+          test -x dist/tmux-session-dock
+          test -x dist/tmux-sidebar-tmux-adapter
+
+  test-suite:
+    name: Test Matrix (Tmux 3.2a+)
+    needs: lint-and-build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tmux bc xclip build-essential
+
+      - name: Build Dist Bundle
+        run: make build
+
+      - name: Run Gate A Tests
+        run: make gate-a
+
+      - name: Run Subpane Tests
+        run: make subpane
+
+      - name: Run Gradient Tests
+        run: make gradient
