@@ -5,7 +5,8 @@
 # ==============================================================================
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_URL="https://github.com/al-hub/tmux-session-dock.git"
+INSTALL_DIR="${TMUX_DOCK_INSTALL_DIR:-$HOME/.local/share/tmux-session-dock}"
 BIN_DIR="${TMUX_DOCK_BIN_DIR:-$HOME/.local/bin}"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/tmux-session-dock"
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/tmux-session-dock"
@@ -24,6 +25,39 @@ log_info()  { echo -e "${BLUE}${BOLD}[INFO]${NC} $*"; }
 log_ok()    { echo -e "${GREEN}${BOLD}[OK]${NC} $*"; }
 log_warn()  { echo -e "${YELLOW}${BOLD}[WARN]${NC} $*"; }
 log_error() { echo -e "${RED}${BOLD}[ERROR]${NC} $*" >&2; }
+
+resolve_repo_root() {
+    local src="${BASH_SOURCE[0]:-}"
+    if [ -n "$src" ] && [ -f "$src" ]; then
+        local dir
+        dir="$(cd "$(dirname "$src")" 2>/dev/null && pwd || echo "")"
+        if [ -n "$dir" ] && [ -f "$dir/scripts/build-dist.sh" ]; then
+            echo "$dir"
+            return 0
+        fi
+    fi
+    if [ -f "./scripts/build-dist.sh" ]; then
+        pwd
+        return 0
+    fi
+    # If running remotely via curl, use INSTALL_DIR
+    echo "$INSTALL_DIR"
+}
+
+SCRIPT_DIR="$(resolve_repo_root)"
+
+ensure_repo_present() {
+    if [ ! -f "$SCRIPT_DIR/scripts/build-dist.sh" ]; then
+        log_info "Downloading tmux-session-dock into $INSTALL_DIR..."
+        mkdir -p "$(dirname "$INSTALL_DIR")"
+        if [ ! -d "$INSTALL_DIR/.git" ]; then
+            git clone "$REPO_URL" "$INSTALL_DIR"
+        else
+            cd "$INSTALL_DIR" && git pull --ff-only origin main || git pull origin master || true
+        fi
+        SCRIPT_DIR="$INSTALL_DIR"
+    fi
+}
 
 usage() {
     echo -e "${BOLD}tmux-session-dock - Universal Setup & Lifecycle Controller${NC}"
@@ -47,12 +81,14 @@ usage() {
 }
 
 do_build() {
+    ensure_repo_present
     log_info "Building production standalone bundle..."
     bash "$SCRIPT_DIR/scripts/build-dist.sh"
     log_ok "Bundle ready: $SCRIPT_DIR/dist/tmux-session-dock"
 }
 
 do_test() {
+    ensure_repo_present
     log_info "Running test matrix..."
     bash "$SCRIPT_DIR/tests/run-tests.sh" "$@"
 }
@@ -77,8 +113,10 @@ do_status() {
     fi
 
     # Check themes
-    local theme_count
-    theme_count=$(find "$SCRIPT_DIR/themes" -name "*.conf" 2>/dev/null | wc -l)
+    local theme_count=0
+    if [ -d "$SCRIPT_DIR/themes" ]; then
+        theme_count=$(find "$SCRIPT_DIR/themes" -name "*.conf" 2>/dev/null | wc -l)
+    fi
     echo -e "  Themes:       ${GREEN}$theme_count themes available${NC} ($SCRIPT_DIR/themes)"
 
     # Check tmux requirement
@@ -110,6 +148,7 @@ do_install() {
     done
 
     log_info "Installing tmux-session-dock..."
+    ensure_repo_present
 
     # 1. Build dist bundle if missing
     if [ ! -f "$SCRIPT_DIR/dist/tmux-session-dock" ]; then
@@ -137,11 +176,11 @@ do_install() {
         local marker="# >>> tmux-session-dock configuration >>>"
         if ! grep -q "$marker" "$CONFIG_FILE" 2>/dev/null; then
             log_info "Registering configuration snippet in $CONFIG_FILE..."
-            cat <<'CONF_EOF' >> "$CONFIG_FILE"
+            cat <<CONF_EOF >> "$CONFIG_FILE"
 
 # >>> tmux-session-dock configuration >>>
 # Auto-managed by tmux-session-dock setup controller
-run-shell -b "~/.local/share/tmux-session-dock/session-dock.tmux" 2>/dev/null || run-shell -b "$HOME/workspace/tmux-session-dock/session-dock.tmux"
+run-shell -b "$SCRIPT_DIR/session-dock.tmux" 2>/dev/null || run-shell -b "~/.local/share/tmux-session-dock/session-dock.tmux"
 # <<< tmux-session-dock configuration <<<
 CONF_EOF
             log_ok "Snippet injected into $CONFIG_FILE"
@@ -159,6 +198,7 @@ CONF_EOF
 
 do_update() {
     log_info "Updating tmux-session-dock..."
+    ensure_repo_present
     cd "$SCRIPT_DIR"
     if [ -d ".git" ]; then
         git pull --ff-only origin main || git pull origin master || true
@@ -198,7 +238,10 @@ do_uninstall() {
     if [ "$purge" -eq 1 ]; then
         log_warn "Purging state and cache directories..."
         rm -rf "$STATE_DIR" "$CACHE_DIR"
-        log_ok "Purged $STATE_DIR and $CACHE_DIR"
+        if [ -d "$INSTALL_DIR" ]; then
+            rm -rf "$INSTALL_DIR"
+        fi
+        log_ok "Purged state, cache, and installation directory."
     fi
 
     if tmux info >/dev/null 2>&1; then
@@ -207,8 +250,8 @@ do_uninstall() {
     log_ok "Uninstallation complete. Zero residual hooks."
 }
 
-# Auto-dispatch based on invocation filename (install.sh / uninstall.sh symlink compat)
-INVOKED_AS="$(basename "$0")"
+# Auto-dispatch based on invocation filename
+INVOKED_AS="$(basename "${0:-setup.sh}")"
 if [ "$INVOKED_AS" = "install.sh" ] && [ $# -eq 0 ]; then
     set -- "install"
 elif [ "$INVOKED_AS" = "uninstall.sh" ] && [ $# -eq 0 ]; then
