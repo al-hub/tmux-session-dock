@@ -19,11 +19,20 @@ BG_DARK="\033[48;5;235m"
 # Hide cursor and restore on exit
 printf '\033[?25l'
 trap "printf '\033[?25h\033[0m'" EXIT
+trap "draw_help" WINCH
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+REPO_DIR="$(cd "$SCRIPT_DIR/.." 2>/dev/null && pwd)"
+VERSION="v0.1.1"
+if [ -f "$REPO_DIR/setup.sh" ]; then
+    VERSION_FROM_SETUP="$(grep -E '^VERSION=' "$REPO_DIR/setup.sh" 2>/dev/null | cut -d'"' -f2 || true)"
+    [ -n "$VERSION_FROM_SETUP" ] && VERSION="$VERSION_FROM_SETUP"
+fi
 
 draw_help() {
     clear 2>/dev/null || true
     printf "${CYAN}${BOLD}╭──────────────────────────────────────────────────────────────────╮${RESET}\n"
-    printf "${CYAN}${BOLD}│${RESET}  ${YELLOW}${BOLD}📖 tmux-session-dock 주요 단축키 가이드 (Quick Reference)${RESET}     ${CYAN}${BOLD}│${RESET}\n"
+    printf "${CYAN}${BOLD}│${RESET}  ${YELLOW}${BOLD}📖 tmux-session-dock ${VERSION} • 주요 단축키 가이드${RESET}                ${CYAN}${BOLD}│${RESET}\n"
     printf "${CYAN}${BOLD}╰──────────────────────────────────────────────────────────────────╯${RESET}\n"
     printf "  ${GRAY}기본 Prefix:${RESET} ${BOLD}${CYAN}Ctrl + a${RESET}  ${DIM}(모든 Prefix 단축키는 Ctrl+a 입력 후 실행)${RESET}\n\n"
 

@@ -23,6 +23,10 @@ if ! echo "$output" | grep -q "주요 단축키 가이드"; then
     echo "FAIL: Help viewer output missing title header!"
     exit 1
 fi
+if ! echo "$output" | grep -q "v0.1.1"; then
+    echo "FAIL: Help viewer output missing version string!"
+    exit 1
+fi
 if ! echo "$output" | grep -q "Ctrl+a s"; then
     echo "FAIL: Help viewer output missing Ctrl+a s sidebar toggle!"
     exit 1
