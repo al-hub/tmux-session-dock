@@ -20,6 +20,16 @@ get_tmux_option() {
     fi
 }
 
+# 0. Batteries-Included Ergonomics Preset
+DOTFILES_MODE="$(get_tmux_option "@session-dock-dotfiles-mode" "off")"
+ERGONOMICS_MODE="$(get_tmux_option "@session-dock-ergonomics" "$DOTFILES_MODE")"
+
+if [ "$ERGONOMICS_MODE" = "on" ] || [ "$ERGONOMICS_MODE" = "1" ] || [ "$ERGONOMICS_MODE" = "full" ]; then
+    if [ -f "$CURRENT_DIR/presets/dotfiles-tmux.conf" ]; then
+        tmux source-file "$CURRENT_DIR/presets/dotfiles-tmux.conf" 2>/dev/null || true
+    fi
+fi
+
 # 1. Option Parsing & Defaults
 TOGGLE_KEY="$(get_tmux_option "@session-dock-key" "s")"
 SUBPANE_KEY="$(get_tmux_option "@session-dock-subpane-key" "P")"

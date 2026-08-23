@@ -141,14 +141,17 @@ do_status() {
 
 do_install() {
     local no_conf=0
+    local dotfiles_mode="on"
     for arg in "$@"; do
         case "$arg" in
             --no-tmux-conf) no_conf=1 ;;
+            --minimal)      dotfiles_mode="off" ;;
+            --full|--with-dotfiles) dotfiles_mode="on" ;;
             --bin-dir) shift; BIN_DIR="${1:-$BIN_DIR}" ;;
         esac
     done
 
-    log_info "Installing tmux-session-dock..."
+    log_info "Installing tmux-session-dock (ergonomics mode: $dotfiles_mode)..."
     ensure_repo_present
 
     # 1. Build dist bundle if missing
@@ -183,6 +186,7 @@ do_install() {
 
 # >>> tmux-session-dock configuration >>>
 # Auto-managed by tmux-session-dock setup controller
+set -g @session-dock-dotfiles-mode "$dotfiles_mode"
 run-shell 'bash "$SCRIPT_DIR/session-dock.tmux" 2>/dev/null || bash ~/.local/share/tmux-session-dock/session-dock.tmux 2>/dev/null || true'
 # <<< tmux-session-dock configuration <<<
 CONF_EOF
