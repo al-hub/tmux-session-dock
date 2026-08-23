@@ -29,6 +29,7 @@ set -g @plugin 'al-hub/tmux-session-dock'
 set -g @session-dock-key 's'              # 사이드바 토글 키 (기본: Prefix + s)
 set -g @session-dock-width '34'           # 사이드바 너비
 set -g @session-dock-theme 'open-tokyonight' # 기본 테마
+set -g @session-dock-dotfiles-mode 'on'   # [옵션] Ctrl+a, 상단 경로 보더, Alt+화살표 인체공학 프리셋 활성화
 
 run '~/.tmux/plugins/tpm/tpm'
 ```
@@ -36,14 +37,14 @@ run '~/.tmux/plugins/tpm/tpm'
 ### 2. 원라인 cURL 자동 설치
 
 ```bash
-# 설치
-curl -fsSL https://raw.githubusercontent.com/al-hub/tmux-session-dock/master/setup.sh | bash -s -- install
+# 기본 풀 인체공학 모드 설치 (권장)
+curl -fsSL https://raw.githubusercontent.com/al-hub/tmux-session-dock/refs/heads/main/setup.sh | bash -s -- install
 
 # 업데이트
-curl -fsSL https://raw.githubusercontent.com/al-hub/tmux-session-dock/master/setup.sh | bash -s -- update
+curl -fsSL https://raw.githubusercontent.com/al-hub/tmux-session-dock/refs/heads/main/setup.sh | bash -s -- update
 
-# 완전 삭제
-curl -fsSL https://raw.githubusercontent.com/al-hub/tmux-session-dock/master/setup.sh | bash -s -- uninstall
+# 완전 삭제 (Purge)
+curl -fsSL https://raw.githubusercontent.com/al-hub/tmux-session-dock/refs/heads/main/setup.sh | bash -s -- purge
 ```
 
 ### 3. 로컬 Git Clone 및 `setup.sh` 관리

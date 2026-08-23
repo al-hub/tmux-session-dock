@@ -37,6 +37,7 @@ set -g @plugin 'al-hub/tmux-session-dock'
 set -g @session-dock-key 's'              # Toggle sidebar key (Prefix + s)
 set -g @session-dock-width '34'           # Sidebar column width
 set -g @session-dock-theme 'open-tokyonight' # Default theme
+set -g @session-dock-dotfiles-mode 'on'   # [Optional] Enable full ergonomics preset (Ctrl+a, path border, Alt-Nav)
 
 run '~/.tmux/plugins/tpm/tpm'
 ```
@@ -45,14 +46,14 @@ Press `Prefix + I` inside tmux to install and activate.
 ### 2. Standalone One-Line cURL Installer
 
 ```bash
-# Install
-curl -fsSL https://raw.githubusercontent.com/al-hub/tmux-session-dock/master/setup.sh | bash -s -- install
+# Install full ergonomics mode (Recommended)
+curl -fsSL https://raw.githubusercontent.com/al-hub/tmux-session-dock/refs/heads/main/setup.sh | bash -s -- install
 
 # Update
-curl -fsSL https://raw.githubusercontent.com/al-hub/tmux-session-dock/master/setup.sh | bash -s -- update
+curl -fsSL https://raw.githubusercontent.com/al-hub/tmux-session-dock/refs/heads/main/setup.sh | bash -s -- update
 
-# Clean Uninstall
-curl -fsSL https://raw.githubusercontent.com/al-hub/tmux-session-dock/master/setup.sh | bash -s -- uninstall
+# Clean Purge
+curl -fsSL https://raw.githubusercontent.com/al-hub/tmux-session-dock/refs/heads/main/setup.sh | bash -s -- purge
 ```
 
 ### 3. Local Git Clone & Universal Setup Controller
