@@ -183,7 +183,7 @@ do_install() {
 
 # >>> tmux-session-dock configuration >>>
 # Auto-managed by tmux-session-dock setup controller
-run-shell "$SCRIPT_DIR/session-dock.tmux" 2>/dev/null || run-shell "~/.local/share/tmux-session-dock/session-dock.tmux" 2>/dev/null || true
+run-shell 'bash "$SCRIPT_DIR/session-dock.tmux" 2>/dev/null || bash ~/.local/share/tmux-session-dock/session-dock.tmux 2>/dev/null || true'
 # <<< tmux-session-dock configuration <<<
 CONF_EOF
         log_ok "Snippet injected into $CONFIG_FILE"
