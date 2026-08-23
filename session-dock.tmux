@@ -61,6 +61,7 @@ fi
 
 # 2. Option Parsing & Defaults
 TOGGLE_KEY="$(get_tmux_option "@session-dock-key" "s")"
+QUICK_JUMP_KEY="$(get_tmux_option "@session-dock-quick-jump-key" "M-s")"
 SUBPANE_KEY="$(get_tmux_option "@session-dock-subpane-key" "P")"
 THEME_KEY="$(get_tmux_option "@session-dock-theme-key" "T")"
 HELP_KEY="$(get_tmux_option "@session-dock-help-key" "h")"
@@ -69,6 +70,7 @@ DEFAULT_WIDTH="$(get_tmux_option "@session-dock-width" "34")"
 SUBPANE_POS="$(get_tmux_option "@session-dock-subpane-position" "bottom")"
 
 # 2. Keybindings Registration
+tmux bind-key -n -N "⚡ Quick Jump to Session Dock" "$QUICK_JUMP_KEY" run-shell "$BIN_PATH --focus-sidebar" 2>/dev/null || tmux bind-key -n "$QUICK_JUMP_KEY" run-shell "$BIN_PATH --focus-sidebar" 2>/dev/null || true
 tmux bind-key -N "🗂️ Toggle Session Dock" "$TOGGLE_KEY" run-shell "$BIN_PATH --toggle-sidebar" 2>/dev/null || tmux bind-key "$TOGGLE_KEY" run-shell "$BIN_PATH --toggle-sidebar" 2>/dev/null || true
 tmux bind-key -N "🔄 Swap Subpane Position (Top/Bottom)" "$SUBPANE_KEY" run-shell "$BIN_PATH --swap-subpane-position" 2>/dev/null || tmux bind-key "$SUBPANE_KEY" run-shell "$BIN_PATH --swap-subpane-position" 2>/dev/null || true
 tmux bind-key -N "🎨 Session Dock Theme Picker" "$THEME_KEY" display-popup -E -w 75% -h 65% "$CURRENT_DIR/scripts/tmux-theme-picker" 2>/dev/null || tmux bind-key "$THEME_KEY" display-popup -E -w 75% -h 65% "$CURRENT_DIR/scripts/tmux-theme-picker" 2>/dev/null || true

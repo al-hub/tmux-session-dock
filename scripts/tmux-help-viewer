@@ -37,6 +37,7 @@ draw_help() {
     printf "  ${GRAY}기본 Prefix:${RESET} ${BOLD}${CYAN}Ctrl + a${RESET}  ${DIM}(모든 Prefix 단축키는 Ctrl+a 입력 후 실행)${RESET}\n\n"
 
     printf "  ${EMERALD}${BOLD}[ 🗂️ 세션 도크 & TUI 관리 ]${RESET}\n"
+    printf "    ${CYAN}${BOLD}Alt + s${RESET}          ${GRAY}─${RESET}  ⚡ 세션 도크 0ms 즉시 포커스 점프 / 복귀\n"
     printf "    ${CYAN}${BOLD}Ctrl+a s${RESET}         ${GRAY}─${RESET}  세션 도크 사이드바 열기 / 닫기 (토글)\n"
     printf "    ${CYAN}${BOLD}Ctrl+a P${RESET}         ${GRAY}─${RESET}  서브페인(터미널) 상단 ↔ 하단 위치 즉시 스왑\n"
     printf "    ${CYAN}${BOLD}Ctrl+a T${RESET}         ${GRAY}─${RESET}  🎨 38종 프리미엄 테마 피커 팝업 열기\n"

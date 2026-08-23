@@ -2265,6 +2265,35 @@ open_sidebar()
     return 0
 }
 
+focus_or_toggle_sidebar()
+{
+    local target_arg="${1:-}"
+    local target_win=""
+    if [ -n "$target_arg" ]; then
+        target_win="$target_arg"
+    else
+        target_win="$(active_client_window 2>/dev/null || true)"
+        [ -n "$target_win" ] || target_win="$(sidebar_tmux_cmd display-message -p '#{window_id}' 2>/dev/null || true)"
+    fi
+    [ -n "$target_win" ] || return 0
+
+    local sidebar_info
+    sidebar_info="$(sidebar_tmux_cmd list-panes -t "$target_win" -F '#{pane_id}|#{pane_title}|#{@dotfiles_sidebar_pane}|#{pane_active}' 2>/dev/null | awk -F '|' '($2=="dotfiles-session-sidebar" || $3=="1"){print $1"|"$4; exit}')"
+
+    if [ -n "$sidebar_info" ]; then
+        local pane_id="${sidebar_info%%|*}"
+        local is_active="${sidebar_info##*|}"
+        if [ "$is_active" = "1" ]; then
+            sidebar_tmux_cmd last-pane 2>/dev/null || true
+        else
+            sidebar_tmux_cmd select-pane -t "$pane_id" 2>/dev/null || true
+        fi
+    else
+        toggle_current_sidebar "$target_win"
+    fi
+    return 0
+}
+
 toggle_current_sidebar()
 {
     local target_arg="${1:-}"
@@ -7671,6 +7700,10 @@ main()
             ;;
         --swap-subpane-position|--toggle-subpane-position)
             sidebar_subpane_swap_position "${2:-}"
+            return 0
+            ;;
+        --focus-sidebar|--quick-jump-sidebar|--focus-or-toggle)
+            focus_or_toggle_sidebar "${2:-}"
             return 0
             ;;
         --toggle-sidebar)
