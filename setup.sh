@@ -235,23 +235,41 @@ do_uninstall() {
     log_ok "Symlinks removed from $BIN_DIR"
 
     # 2. Clean ~/.tmux.conf
-    if [ -f "$CONFIG_FILE" ] && grep -q "tmux-session-dock" "$CONFIG_FILE" 2>/dev/null; then
-        sed -i '/# >>> tmux-session-dock configuration >>>/,/# <<< tmux-session-dock configuration <<</d' "$CONFIG_FILE"
-        log_ok "Configuration snippet removed from $CONFIG_FILE"
+    if [ -f "$CONFIG_FILE" ]; then
+        if grep -q "tmux-session-dock" "$CONFIG_FILE" 2>/dev/null; then
+            sed -i '/# >>> tmux-session-dock configuration >>>/,/# <<< tmux-session-dock configuration <<</d' "$CONFIG_FILE" 2>/dev/null || true
+            sed -i '/tmux-session-dock/d' "$CONFIG_FILE" 2>/dev/null || true
+            log_ok "Configuration snippet removed from $CONFIG_FILE"
+        fi
+        # Remove ~/.tmux.conf if empty or only comments
+        if [ ! -s "$CONFIG_FILE" ] || [ "$(grep -v '^[[:space:]]*#' "$CONFIG_FILE" 2>/dev/null | grep -v '^[[:space:]]*$' | wc -l)" -eq 0 ]; then
+            rm -f "$CONFIG_FILE"
+            log_ok "Removed empty $CONFIG_FILE"
+        fi
     fi
 
-    # 3. Purge state if requested
+    # 3. Purge themes, state, and cache directories
     if [ "$purge" -eq 1 ]; then
-        log_warn "Purging state and cache directories..."
+        log_warn "Purging themes, state, and cache directories..."
         rm -rf "$STATE_DIR" "$CACHE_DIR"
+        rm -rf "${XDG_CONFIG_HOME:-$HOME/.config}/tmux/themes"
+        rm -f "${XDG_CONFIG_HOME:-$HOME/.config}/tmux/theme.conf"
+        rmdir "${XDG_CONFIG_HOME:-$HOME/.config}/tmux" 2>/dev/null || true
         if [ -d "$INSTALL_DIR" ]; then
             rm -rf "$INSTALL_DIR"
         fi
-        log_ok "Purged state, cache, and installation directory."
+        # If ~/.tmux.conf was purely managed by dotfiles/dock, remove it on purge
+        if [ -f "$CONFIG_FILE" ] && grep -q "@session-dock" "$CONFIG_FILE" 2>/dev/null; then
+            rm -f "$CONFIG_FILE"
+            log_ok "Removed managed $CONFIG_FILE"
+        fi
+        log_ok "Purged state, cache, themes, and installation directory."
     fi
 
+    # 4. Terminate active tmux server so in-memory hooks are flushed
     if tmux info >/dev/null 2>&1; then
-        tmux source-file "$CONFIG_FILE" 2>/dev/null || true
+        tmux kill-server 2>/dev/null || true
+        log_ok "Terminated running tmux server to flush in-memory hooks."
     fi
     log_ok "Uninstallation complete. Zero residual hooks."
 }
