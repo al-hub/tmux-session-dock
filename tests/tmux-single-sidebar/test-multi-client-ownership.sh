@@ -19,19 +19,19 @@ cleanup()
 trap cleanup EXIT
 
 "${TMUX[@]}" new-session -d -s multi-a -c "$REPO_ROOT" 'sleep 60'
-"${TMUX[@]}" split-window -d -t '=multi-a:0' -h -b -l 35 "$REPO_ROOT/scripts/tmux-session-launcher --sidebar"
+"${TMUX[@]}" split-window -d -t '=multi-a:' -h -b -l 35 "$REPO_ROOT/scripts/tmux-session-launcher --sidebar"
 for attempt in $(seq 1 50); do
     [ "$("${TMUX[@]}" list-panes -a -F '#{pane_title}' | awk '$0 == "dotfiles-session-sidebar" { count++ } END { print count + 0 }')" -eq 1 ] && break
     sleep 0.05
 done
 
-script -qefc "${TMUX[*]} attach-session -t multi-a" "$RUN_DIR/client-a.log" >/dev/null 2>&1 &
+script -qefc "TERM=xterm ${TMUX[*]} attach-session -t multi-a" "$RUN_DIR/client-a.log" >/dev/null 2>&1 &
 CLIENT_A_PID=$!
 for attempt in $(seq 1 50); do
     [ "$("${TMUX[@]}" list-clients 2>/dev/null | wc -l | tr -d ' ')" -ge 1 ] && break
     sleep 0.05
 done
-script -qefc "${TMUX[*]} attach-session -t multi-a" "$RUN_DIR/client-b.log" >/dev/null 2>&1 &
+script -qefc "TERM=xterm ${TMUX[*]} attach-session -t multi-a" "$RUN_DIR/client-b.log" >/dev/null 2>&1 &
 CLIENT_B_PID=$!
 for attempt in $(seq 1 50); do
     [ "$("${TMUX[@]}" list-clients 2>/dev/null | wc -l | tr -d ' ')" -ge 2 ] && break

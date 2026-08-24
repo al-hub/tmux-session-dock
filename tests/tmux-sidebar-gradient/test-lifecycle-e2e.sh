@@ -52,7 +52,7 @@ fake_command="\"$TMP_DIR/codex\" \"$FAKE_AI\" \"$CONTROL_FILE\""
 ai_pane="$(tmux -L "$SOCKET" new-session -d -P -F '#{pane_id}' -s gradient -x 100 -y 30 "$fake_command")"
 
 sidebar_command="env TMUX_SESSION_LAUNCHER_DEBUG=1 TMUX_SESSION_LAUNCHER_DEBUG_FILE=\"$DEBUG_FILE\" TMUX_SESSION_SIDEBAR_STATE_REFRESH_SECONDS=1 TMUX_SESSION_SIDEBAR_POLL_TIMEOUT=0.05 \"$LAUNCHER\" --sidebar"
-sidebar_pane="$(tmux -L "$SOCKET" split-window -d -P -F '#{pane_id}' -t '=gradient:0' -h -b -l 35 "$sidebar_command")"
+sidebar_pane="$(tmux -L "$SOCKET" split-window -d -P -F '#{pane_id}' -t "$ai_pane" -h -b -l 35 "$sidebar_command")"
 tmux -L "$SOCKET" select-pane -t "$ai_pane" -T fake-ai
 tmux -L "$SOCKET" select-pane -t "$sidebar_pane" -T dotfiles-session-sidebar
 tmux -L "$SOCKET" select-pane -t "$sidebar_pane"

@@ -108,6 +108,8 @@ case "${TARGET_SUITE}" in
             "${SINGLE_DIR}/test-batch-restore-observability.sh"
             "${SINGLE_DIR}/test-restore-history-no-pollution.sh"
             "${SINGLE_DIR}/test-help-viewer.sh"
+            "${SINGLE_DIR}/test-theme-persistence.sh"
+            "${SINGLE_DIR}/test-quick-jump.sh"
         )
         ;;
     gate_b)
@@ -215,6 +217,8 @@ case "${TARGET_SUITE}" in
             "${SINGLE_DIR}/test-keyboard-e2e-window-local-switch.sh"
             "${SINGLE_DIR}/test-batch-restore-layout-integrity.sh"
             "${SINGLE_DIR}/test-multi-client-ownership.sh"
+            "${SINGLE_DIR}/test-theme-persistence.sh"
+            "${SINGLE_DIR}/test-quick-jump.sh"
             "${GRADIENT_DIR}/test-render.sh"
             "${GRADIENT_DIR}/test-state.sh"
         )

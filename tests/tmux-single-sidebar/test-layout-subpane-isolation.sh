@@ -41,7 +41,8 @@ archive_panes_snapshot="$archive_snap"
 win_layout="$(tmux -L "$SOCKET" display-message -p -t "$win_id" '#{window_layout}')"
 
 # Test archiving window logic
-archived_work_layout="$(prepare_window_for_archive_snapshot "main" "0" "$win_layout")"
+win_idx="$(tmux -L "$SOCKET" display-message -p -t "$win_id" '#{window_index}')"
+archived_work_layout="$(prepare_window_for_archive_snapshot "main" "$win_idx" "$win_layout")"
 arch_pane_count="$(echo "$archived_work_layout" | grep -o '[0-9]\+x[0-9]\+' | wc -l)"
 if [ "$arch_pane_count" -ne 1 ]; then
     echo "FAIL: archived_work_layout contains $arch_pane_count panes (expected 1). Layout was: '$archived_work_layout'"

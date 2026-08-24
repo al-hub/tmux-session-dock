@@ -2718,14 +2718,7 @@ fault_injection()
 current_client_tty()
 {
     local tty
-    tty="$(tmux list-clients -F '#{client_control_mode}|#{client_tty}' 2>/dev/null |
-        awk -F '|' '$1 != 1 && $2 != "" { print $2; exit }')"
-    if [ -z "$tty" ]; then
-        tty="$(tmux display-message -p '#{client_tty}' 2>/dev/null || true)"
-    fi
-    if [ -z "$tty" ]; then
-        tty="$(tmux list-clients -F '#{client_tty}' 2>/dev/null | awk 'NF { print $1; exit }')"
-    fi
+    tty="$(tmux display-message -p '#{client_tty}' 2>/dev/null || true)"
     printf '%s\n' "$tty"
 }
 
@@ -2872,7 +2865,7 @@ sidebar_client_is_owner()
     owner="$(sidebar_owner_client)"
     [ -n "$owner" ] || return 0
     client_tty="$(current_client_tty)"
-    [ "$owner" = "$client_tty" ]
+    [ -n "$client_tty" ] && [ "$owner" = "$client_tty" ]
 }
 
 mark_session_managed()
@@ -4121,6 +4114,10 @@ open_sidebar()
     local existing_count
     existing_count="$(sidebar_tmux_sidebar_pane_count)"
     if [ "$existing_count" -gt 0 ]; then
+        if ! sidebar_client_is_owner; then
+            trace_event "sidebar.open.skip reason=non-owner"
+            return 0
+        fi
         set_sidebar_enabled 0
         remove_managed_sidebars || return 1
         return 0

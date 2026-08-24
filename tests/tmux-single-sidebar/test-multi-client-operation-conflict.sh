@@ -116,7 +116,7 @@ start_sidebar()
     # Leave enough deterministic time for the external client to attach after
     # the worker start marker and before its precondition check.
     "${TMUX[@]}" set-environment -g TMUX_SESSION_LAUNCHER_TEST_OPERATION_DELAY 2
-    "${TMUX[@]}" split-window -d -t '=owner:0' -h -b -l 35 "$LAUNCHER --sidebar"
+    "${TMUX[@]}" split-window -d -t '=owner:' -h -b -l 35 "$LAUNCHER --sidebar"
     for attempt in $(seq 1 80); do
         [ "$("${TMUX[@]}" list-panes -a -F '#{pane_title}' | awk '$0 == "dotfiles-session-sidebar" { count++ } END { print count + 0 }')" -eq 1 ] && break
         sleep 0.05
