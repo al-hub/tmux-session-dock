@@ -216,6 +216,177 @@ subpane_hub_swap_stack_position() {
     return 0
 }
 
+# ==============================================================================
+# subpane_hub_sweep_ghosts: Remove any extra subpane markers from a window that
+# are NOT registered hub slots. Protects against ghost pane accumulation.
+# ==============================================================================
+subpane_hub_sweep_ghosts() {
+    local target_win="${1:-}"
+    [ -n "$target_win" ] || return 0
+
+    local max_count
+    max_count="$(subpane_hub_get_count)"
+
+    # Collect IDs of all legitimate hub slot panes (currently parked anywhere)
+    local legitimate_ids=" "
+    local slot
+    for slot in $(seq 1 "${max_count}"); do
+        local sp
+        sp="$(subpane_hub_get_pane "$slot" || true)"
+        [ -n "$sp" ] && legitimate_ids="$legitimate_ids $sp "
+    done
+
+    # Any pane in the target window marked as subpane but NOT a legitimate slot => ghost
+    local p_id
+    while IFS= read -r p_id; do
+        [ -n "$p_id" ] || continue
+        if [[ "$legitimate_ids" != *" $p_id "* ]]; then
+            # Remove subpane marker and move to hub to prevent layout damage
+            sidebar_tmux_cmd set-option -p -q -u -t "$p_id" @dotfiles_sidebar_subpane 2>/dev/null || true
+            sidebar_tmux_cmd set-option -p -q -u -t "$p_id" @dotfiles_subpane_slot 2>/dev/null || true
+            local hub_sess
+            hub_sess="$(subpane_hub_session_name)"
+            if subpane_hub_is_alive; then
+                sidebar_tmux_cmd join-pane -d -s "$p_id" -t "=$hub_sess:" 2>/dev/null || true
+            fi
+        fi
+    done < <(sidebar_tmux_cmd list-panes -t "$target_win" \
+        -F '#{pane_id}|#{@dotfiles_sidebar_subpane}' 2>/dev/null \
+        | awk -F '|' '$2 == "1" { print $1 }')
+}
+
+# ==============================================================================
+# subpane_hub_atomic_migrate: 2-Phase Atomic Detach-Ingress Transaction Engine
+#   Phase 1 (Egress): Forcibly return ALL active slots from ANY window to hub.
+#   Phase 2 (Ingress): Inject them into target_win with exact custom heights.
+# This is the single authoritative entry point for any subpane window change.
+# ==============================================================================
+subpane_hub_atomic_migrate() {
+    local target_launcher="$1"
+    local height="${2:-}" sub_title="${3:-dotfiles-sidebar-subpane}"
+    [ -n "$target_launcher" ] || return 1
+
+    local max_count
+    max_count="$(subpane_hub_get_count)"
+    [ -n "$max_count" ] || max_count=1
+
+    local target_win
+    target_win="$(sidebar_tmux_cmd display-message -p -t "$target_launcher" '#{window_id}' 2>/dev/null || true)"
+    [ -n "$target_win" ] || return 1
+
+    local sub_pos="bottom"
+    if declare -f sidebar_subpane_get_position >/dev/null 2>&1; then
+        sub_pos="$(sidebar_subpane_get_position 2>/dev/null || echo bottom)"
+    fi
+
+    local hub_sess
+    hub_sess="$(subpane_hub_session_name)"
+    subpane_hub_ensure_session
+
+    # ------------------------------------------------------------------
+    # Phase 1 (Atomic Egress): return every known slot to hub, regardless
+    # of which window currently holds it. Clears all ghost sources.
+    # ------------------------------------------------------------------
+    local slot
+    for slot in $(seq 1 "$max_count"); do
+        local sp
+        sp="$(subpane_hub_get_pane "$slot" || true)"
+        [ -n "$sp" ] || continue
+        local sp_win
+        sp_win="$(sidebar_tmux_cmd display-message -p -t "$sp" '#{window_id}' 2>/dev/null || true)"
+        if [ -n "$sp_win" ] && [ "$sp_win" != "$(sidebar_tmux_cmd display-message -p -t "=$hub_sess:" '#{window_id}' 2>/dev/null || true)" ]; then
+            sidebar_tmux_cmd join-pane -d -s "$sp" -t "=$hub_sess:" 2>/dev/null || true
+        fi
+    done
+
+    # Phase 1b: sweep any residual ghost markers from target window
+    subpane_hub_sweep_ghosts "$target_win"
+
+    # ------------------------------------------------------------------
+    # Phase 2 (Atomic Ingress): resolve heights (default only on first
+    # join, preserved once set in-session), then join with Cumulative Join.
+    # ------------------------------------------------------------------
+
+    # Use default height only if no session-level saved height exists yet.
+    # tmux restart clears global options -> back to default.
+    local default_slot_h=14
+    if [ -z "$height" ]; then
+        if declare -f sidebar_subpane_get_height >/dev/null 2>&1; then
+            local saved_h
+            saved_h="$(sidebar_subpane_get_height 2>/dev/null || true)"
+            [ -n "$saved_h" ] && [ "$saved_h" -ge 4 ] 2>/dev/null && height="$saved_h"
+        fi
+        [ -n "$height" ] || height=$((default_slot_h * max_count))
+    fi
+
+    local resolved_panes=() resolved_heights=()
+    for slot in $(seq 1 "$max_count"); do
+        local sp
+        sp="$(subpane_hub_get_pane "$slot" || true)"
+        [ -n "$sp" ] || continue
+
+        # Prefer session-scoped saved height; fall back to equal division.
+        local slot_h
+        slot_h="$(sidebar_tmux_cmd show-option -gqv "@dotfiles_subpane_slot_${slot}_height" 2>/dev/null || true)"
+        if [ -z "$slot_h" ] || ! [ "$slot_h" -ge 2 ] 2>/dev/null; then
+            slot_h="$((height / max_count))"
+            [ "$slot_h" -ge 4 ] || slot_h=4
+        fi
+
+        resolved_panes+=("$sp")
+        resolved_heights+=("$slot_h")
+    done
+
+    local total_slots="${#resolved_panes[@]}"
+    [ "$total_slots" -gt 0 ] || return 1
+
+    local last_attached="$target_launcher" first_pane=""
+    for ((idx=0; idx<total_slots; idx++)); do
+        local sp="${resolved_panes[$idx]}"
+        local slot_h="${resolved_heights[$idx]}"
+
+        # Cumulative join length for correct hierarchical sizing
+        local cum_h=0
+        for ((j=idx; j<total_slots; j++)); do
+            cum_h=$((cum_h + ${resolved_heights[$j]}))
+        done
+        local remaining_borders=$((total_slots - 1 - idx))
+        local join_l=$((cum_h + remaining_borders))
+
+        local slot_pos_flag=""
+        if [ "$idx" -eq 0 ] && [ "$sub_pos" = "top" ]; then
+            slot_pos_flag="-b"
+        fi
+
+        if ! sidebar_tmux_cmd join-pane -d $slot_pos_flag \
+                -s "$sp" -t "$last_attached" -v -l "$join_l" 2>/dev/null; then
+            sidebar_tmux_cmd join-pane -d $slot_pos_flag \
+                -s "$sp" -t "$last_attached" -v 2>/dev/null || true
+        fi
+
+        sidebar_tmux_cmd set-option -p -q -t "$sp" allow-rename off 2>/dev/null || true
+        sidebar_tmux_cmd select-pane -t "$sp" -T "${sub_title}-$((idx + 1))" 2>/dev/null || true
+        sidebar_tmux_cmd set-option -p -q -t "$sp" @dotfiles_subpane_hub_pane 1 2>/dev/null || true
+        sidebar_tmux_cmd set-option -p -q -t "$sp" @dotfiles_sidebar_subpane 1 2>/dev/null || true
+        sidebar_tmux_cmd set-option -p -q -t "$sp" @dotfiles_subpane_slot "$((idx + 1))" 2>/dev/null || true
+        # Persist resolved height for this session
+        sidebar_tmux_cmd set-option -gq "@dotfiles_subpane_slot_$((idx + 1))_height" "$slot_h" 2>/dev/null || true
+
+        [ -z "$first_pane" ] && first_pane="$sp"
+        last_attached="$sp"
+    done
+
+    sidebar_tmux_cmd select-pane -t "$target_launcher" 2>/dev/null || true
+    local client_tty
+    while IFS= read -r client_tty; do
+        [ -n "$client_tty" ] || continue
+        sidebar_tmux_cmd select-pane -t "$target_launcher" -c "$client_tty" 2>/dev/null || true
+    done < <(sidebar_tmux_cmd list-clients -F '#{client_tty}' 2>/dev/null || true)
+
+    subpane_hub_acquire_lease "$target_win"
+    printf '%s\n' "${first_pane:-$target_launcher}"
+}
+
 subpane_hub_acquire_pane() {
     local target_launcher="$1" height="${2:-}" sub_title="${3:-dotfiles-sidebar-subpane}"
     [ -n "$target_launcher" ] || return 1

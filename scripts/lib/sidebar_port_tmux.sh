@@ -411,7 +411,10 @@ provision_sidebar_subpane() {
         fi
     fi
 
-    if declare -f subpane_hub_acquire_pane >/dev/null 2>&1; then
+    if declare -f subpane_hub_atomic_migrate >/dev/null 2>&1; then
+        subpane_hub_atomic_migrate "$launcher_pane" "$height"
+        return $?
+    elif declare -f subpane_hub_acquire_pane >/dev/null 2>&1; then
         subpane_hub_acquire_pane "$launcher_pane" "$height"
         return $?
     fi
@@ -479,18 +482,17 @@ ensure_sidebar_subpane_window() {
     enabled="$(sidebar_subpane_get_enabled)"
 
     if [ "$enabled" = "1" ]; then
-        local current_slot_count=0 expected_count=1
-        if declare -f subpane_hub_get_window_subpanes >/dev/null 2>&1; then
-            current_slot_count="$(subpane_hub_get_window_subpanes "$window_id" | wc -l | tr -d ' ')"
-        fi
+        local expected_count=1
         if declare -f subpane_hub_get_count >/dev/null 2>&1; then
             expected_count="$(subpane_hub_get_count)"
         fi
         [ -n "$expected_count" ] || expected_count=1
 
-        if [ "$current_slot_count" -lt "$expected_count" ]; then
-            provision_sidebar_subpane "$window_id" "$launcher_pane" "" "" >/dev/null 2>&1 || true
-        fi
+        # Always run through atomic_migrate (Egress-first) so that any stale/ghost
+        # panes left from a previous window are swept out before ingress.
+        # The old count-based short-circuit is intentionally removed here.
+        provision_sidebar_subpane "$window_id" "$launcher_pane" "" "" >/dev/null 2>&1 || true
+
     else
         local sub_pane
         sub_pane="$(sidebar_window_subpane "$window_id" || true)"
