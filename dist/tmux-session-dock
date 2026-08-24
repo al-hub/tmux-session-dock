@@ -7320,23 +7320,72 @@ prompt_text()
                 ;;
         esac
     else
-        stty < /dev/tty echo icanon icrnl min 1 time 0 2>/dev/null || stty -F /dev/tty echo icanon icrnl min 1 time 0 2>/dev/null || stty echo icanon icrnl 2>/dev/tty 2>/dev/null || true
-        render_prompt_box "$prompt"
-        debug_log "prompt_text before read"
-        if ! IFS= read -r prompt_result </dev/tty 2>/dev/null; then
-            if ! IFS= read -r prompt_result 2>/dev/null; then
+        stty < /dev/tty -echo -icanon min 1 time 0 2>/dev/null || true
+        local input_buf=""
+        local char=""
+        local dec=""
+
+        while true; do
+            render_prompt_box "$prompt$input_buf"
+            char=""
+            if ! IFS= read -r -n 1 char </dev/tty 2>/dev/null; then
                 prompt_cancelled=true
                 prompt_result=""
+                break
             fi
-        fi
-        debug_log "prompt_text after read result='$prompt_result' cancelled='$prompt_cancelled'"
-        prompt_result="${prompt_result%%$'\r'}"
-        case "$prompt_result" in
-            $'\033'*|[Qq]|[Nn])
+
+            # Handle Escape key (Esc cancels immediately)
+            if [ "$char" = $'\033' ]; then
+                local esc_rest=""
+                IFS= read -r -n 2 -t 0.05 esc_rest </dev/tty 2>/dev/null || true
+                if [ -z "$esc_rest" ]; then
+                    prompt_cancelled=true
+                    prompt_result=""
+                    break
+                fi
+                continue
+            fi
+
+            # Handle Enter key (confirm input)
+            if [ "$char" = $'\n' ] || [ "$char" = $'\r' ] || [ -z "$char" ]; then
+                prompt_result="$input_buf"
+                prompt_cancelled=false
+                break
+            fi
+
+            # Handle Ctrl+c
+            if [ "$char" = $'\x03' ]; then
                 prompt_cancelled=true
                 prompt_result=""
-                ;;
-        esac
+                break
+            fi
+
+            # Handle Backspace / Delete
+            if [ "$char" = $'\x7f' ] || [ "$char" = $'\x08' ]; then
+                if [ -n "$input_buf" ]; then
+                    input_buf="${input_buf%?}"
+                fi
+                continue
+            fi
+
+            # UTF-8 Multi-byte assembly (for Korean and special characters)
+            dec=$(printf '%d' "'$char" 2>/dev/null || echo "0")
+            if [ "$dec" -ge 224 ] && [ "$dec" -le 239 ]; then
+                local b2="" b3=""
+                IFS= read -r -n 1 -t 0.05 b2 </dev/tty 2>/dev/null || true
+                IFS= read -r -n 1 -t 0.05 b3 </dev/tty 2>/dev/null || true
+                char="$char$b2$b3"
+            elif [ "$dec" -ge 192 ] && [ "$dec" -le 223 ]; then
+                local b2=""
+                IFS= read -r -n 1 -t 0.05 b2 </dev/tty 2>/dev/null || true
+                char="$char$b2"
+            fi
+
+            # Append printable characters
+            if [ "$dec" -ge 32 ] || [ "$dec" -ge 128 ]; then
+                input_buf+="$char"
+            fi
+        done
     fi
 
     sidebar_runtime_set "$SIDEBAR_PROMPT_READY_OPTION" 0
