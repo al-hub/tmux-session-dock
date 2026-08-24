@@ -2267,6 +2267,43 @@ open_sidebar()
     return 0
 }
 
+smart_navigate_pane()
+{
+    local dir="${1:-L}"
+    local active_pane active_win
+    active_pane="$(sidebar_tmux_cmd display-message -p '#{pane_id}' 2>/dev/null || true)"
+    active_win="$(sidebar_tmux_cmd display-message -p '#{window_id}' 2>/dev/null || true)"
+    [ -n "$active_win" ] || return 0
+
+    local sidebar_info subpane_info
+    sidebar_info="$(sidebar_tmux_cmd list-panes -t "$active_win" -F '#{pane_id}|#{pane_title}|#{@dotfiles_sidebar_pane}' 2>/dev/null | awk -F '|' '($2=="dotfiles-session-sidebar" || $3=="1"){print $1; exit}')"
+    subpane_info="$(sidebar_tmux_cmd list-panes -t "$active_win" -F '#{pane_id}|#{pane_title}|#{@dotfiles_sidebar_subpane}' 2>/dev/null | awk -F '|' '($2=="dotfiles-sidebar-subpane" || $3=="1"){print $1; exit}')"
+
+    case "$dir" in
+        L|left)
+            # If moving Left from a main work pane (not sidebar, not subpane), ALWAYS prioritize the main sidebar session dock!
+            if [ -n "$sidebar_info" ] && [ "$active_pane" != "$sidebar_info" ] && [ "$active_pane" != "$subpane_info" ]; then
+                sidebar_tmux_cmd select-pane -t "$sidebar_info" 2>/dev/null || true
+            else
+                sidebar_tmux_cmd select-pane -L 2>/dev/null || true
+            fi
+            ;;
+        R|right)
+            sidebar_tmux_cmd select-pane -R 2>/dev/null || true
+            ;;
+        U|up)
+            sidebar_tmux_cmd select-pane -U 2>/dev/null || true
+            ;;
+        D|down)
+            sidebar_tmux_cmd select-pane -D 2>/dev/null || true
+            ;;
+        *)
+            sidebar_tmux_cmd select-pane "-$dir" 2>/dev/null || true
+            ;;
+    esac
+    return 0
+}
+
 focus_or_toggle_sidebar()
 {
     declare -f sidebar_ime_switch_to_english >/dev/null 2>&1 && sidebar_ime_switch_to_english "sidebar" || true
@@ -7808,6 +7845,10 @@ main()
             ;;
         --swap-subpane-position|--toggle-subpane-position)
             sidebar_subpane_swap_position "${2:-}"
+            return 0
+            ;;
+        --smart-pane|--navigate-pane)
+            smart_navigate_pane "${2:-L}"
             return 0
             ;;
         --focus-sidebar|--quick-jump-sidebar|--focus-or-toggle)

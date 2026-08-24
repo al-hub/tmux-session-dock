@@ -106,3 +106,9 @@ tmux bind-key -N "✂️ Safe Horizontal Split" "|" run-shell "$BIN_PATH --split
 tmux bind-key -N "✂️ Safe Vertical Split" "_" run-shell "$BIN_PATH --split-vertical" 2>/dev/null || tmux bind-key "_" run-shell "$BIN_PATH --split-vertical" 2>/dev/null || true
 tmux bind-key -N "✂️ Safe Horizontal Split (Default)" "%" run-shell "$BIN_PATH --split-horizontal" 2>/dev/null || tmux bind-key "%" run-shell "$BIN_PATH --split-horizontal" 2>/dev/null || true
 tmux bind-key -N "✂️ Safe Vertical Split (Default)" '"' run-shell "$BIN_PATH --split-vertical" 2>/dev/null || tmux bind-key '"' run-shell "$BIN_PATH --split-vertical" 2>/dev/null || true
+
+# 4. Smart Focus Navigation (Prioritizes Sidebar Session Dock when moving Left from Work Pane)
+tmux bind-key -n -N "🧭 Smart Focus Left" 'M-Left' run-shell -b "$BIN_PATH --smart-pane L" 2>/dev/null || tmux bind-key -n 'M-Left' run-shell -b "$BIN_PATH --smart-pane L" 2>/dev/null || true
+tmux bind-key -n -N "🧭 Smart Focus Right" 'M-Right' run-shell -b "$BIN_PATH --smart-pane R" 2>/dev/null || tmux bind-key -n 'M-Right' run-shell -b "$BIN_PATH --smart-pane R" 2>/dev/null || true
+tmux bind-key -n -N "🧭 Smart Focus Up" 'M-Up' run-shell -b "$BIN_PATH --smart-pane U" 2>/dev/null || tmux bind-key -n 'M-Up' run-shell -b "$BIN_PATH --smart-pane U" 2>/dev/null || true
+tmux bind-key -n -N "🧭 Smart Focus Down" 'M-Down' run-shell -b "$BIN_PATH --smart-pane D" 2>/dev/null || tmux bind-key -n 'M-Down' run-shell -b "$BIN_PATH --smart-pane D" 2>/dev/null || true
