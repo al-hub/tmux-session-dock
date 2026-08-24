@@ -7052,19 +7052,19 @@ read_key()
     fi
 
     case "$key" in
-        j) key_result=down ;;
-        k) key_result=up ;;
-        c) key_result=create ;;
-        r) key_result=rename ;;
-        d) key_result=delete ;;
+        j|J|ㅓ) key_result=down ;;
+        k|K|ㅏ) key_result=up ;;
+        c|C|ㅊ) key_result=create ;;
+        r|R|ㄱ) key_result=rename ;;
+        d|D|ㅇ) key_result=delete ;;
         /) key_result=filter ;;
-        o) key_result=history ;;
-        h|H|\?) key_result=help ;;
+        o|O|ㅐ|ㅒ) key_result=history ;;
+        h|H|ㅗ|\?) key_result=help ;;
         ' ') key_result=mark ;;
-        a) key_result=mark-all ;;
-        s|S|m|M) key_result=toggle-subpane ;;
-        p|P) key_result=swap-subpane-position ;;
-        q) key_result=quit ;;
+        a|A|ㅁ) key_result=mark-all ;;
+        s|S|ㄴ) key_result=toggle-subpane ;;
+        p|P|ㅔ|ㅖ) key_result=swap-subpane-position ;;
+        q|Q|ㅂ) key_result=quit ;;
         ''|$'\n'|$'\r')
             key_result=enter
             [ -n "$key_raw" ] || key_raw=$'\r'
@@ -7447,12 +7447,12 @@ run_tui()
                     toggle_history_mark_all
                 fi
                 ;;
-            s|S|m|M|toggle-subpane)
+            s|S|ㄴ|toggle-subpane)
                 trace_event "action.begin type=toggle-subpane"
                 toggle_sidebar_subpane_global "${SIDEBAR_WINDOW_ID:-}"
                 request_full_render subpane-toggle
                 ;;
-            p|P|swap-subpane-position)
+            p|P|ㅔ|ㅖ|swap-subpane-position)
                 trace_event "action.begin type=swap-subpane-position"
                 sidebar_subpane_swap_position "${SIDEBAR_WINDOW_ID:-}"
                 request_full_render subpane-swap

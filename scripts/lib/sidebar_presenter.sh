@@ -5,11 +5,17 @@ set -euo pipefail
 sidebar_presenter_map_key() {
     local key="$1"
     case "$key" in
-        q|Q) echo "QUIT" ;;
-        s|S) echo "TOGGLE" ;;
-        j|J) echo "DOWN" ;;
-        k|K) echo "UP" ;;
-        o|O) echo "HISTORY" ;;
+        q|Q|ㅂ) echo "QUIT" ;;
+        s|S|ㄴ) echo "TOGGLE" ;;
+        j|J|ㅓ) echo "DOWN" ;;
+        k|K|ㅏ) echo "UP" ;;
+        o|O|ㅐ|ㅒ) echo "HISTORY" ;;
+        c|C|ㅊ) echo "CREATE" ;;
+        r|R|ㄱ) echo "RENAME" ;;
+        d|D|ㅇ) echo "DELETE" ;;
+        p|P|ㅔ|ㅖ) echo "SWAP_POSITION" ;;
+        a|A|ㅁ) echo "MARK_ALL" ;;
+        h|H|ㅗ|\?) echo "HELP" ;;
         *) echo "UNKNOWN" ;;
     esac
 }

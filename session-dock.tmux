@@ -62,19 +62,34 @@ fi
 # 2. Option Parsing & Defaults
 TOGGLE_KEY="$(get_tmux_option "@session-dock-key" "s")"
 QUICK_JUMP_KEY="$(get_tmux_option "@session-dock-quick-jump-key" "M-s")"
-SUBPANE_KEY="$(get_tmux_option "@session-dock-subpane-key" "P")"
 THEME_KEY="$(get_tmux_option "@session-dock-theme-key" "T")"
 HELP_KEY="$(get_tmux_option "@session-dock-help-key" "h")"
 PALETTE_KEY="$(get_tmux_option "@session-dock-palette-key" "/")"
 DEFAULT_WIDTH="$(get_tmux_option "@session-dock-width" "34")"
 SUBPANE_POS="$(get_tmux_option "@session-dock-subpane-position" "bottom")"
 
-# 2. Keybindings Registration
+# 2. Keybindings Registration (Supports English & 2-Set Korean IME)
 tmux bind-key -n -N "⚡ Quick Jump to Session Dock" "$QUICK_JUMP_KEY" run-shell "$BIN_PATH --focus-sidebar" 2>/dev/null || tmux bind-key -n "$QUICK_JUMP_KEY" run-shell "$BIN_PATH --focus-sidebar" 2>/dev/null || true
+if [ "$QUICK_JUMP_KEY" = "M-s" ]; then
+    tmux bind-key -n -N "⚡ Quick Jump to Session Dock (KR)" "M-ㄴ" run-shell "$BIN_PATH --focus-sidebar" 2>/dev/null || tmux bind-key -n "M-ㄴ" run-shell "$BIN_PATH --focus-sidebar" 2>/dev/null || true
+fi
+
 tmux bind-key -N "🗂️ Toggle Session Dock" "$TOGGLE_KEY" run-shell "$BIN_PATH --toggle-sidebar" 2>/dev/null || tmux bind-key "$TOGGLE_KEY" run-shell "$BIN_PATH --toggle-sidebar" 2>/dev/null || true
-tmux bind-key -N "🔄 Swap Subpane Position (Top/Bottom)" "$SUBPANE_KEY" run-shell "$BIN_PATH --swap-subpane-position" 2>/dev/null || tmux bind-key "$SUBPANE_KEY" run-shell "$BIN_PATH --swap-subpane-position" 2>/dev/null || true
+if [ "$TOGGLE_KEY" = "s" ]; then
+    tmux bind-key -N "🗂️ Toggle Session Dock (KR)" "ㄴ" run-shell "$BIN_PATH --toggle-sidebar" 2>/dev/null || tmux bind-key "ㄴ" run-shell "$BIN_PATH --toggle-sidebar" 2>/dev/null || true
+fi
+
 tmux bind-key -N "🎨 Session Dock Theme Picker" "$THEME_KEY" display-popup -E -w 75% -h 65% "$CURRENT_DIR/scripts/tmux-theme-picker" 2>/dev/null || tmux bind-key "$THEME_KEY" display-popup -E -w 75% -h 65% "$CURRENT_DIR/scripts/tmux-theme-picker" 2>/dev/null || true
+if [ "$THEME_KEY" = "T" ]; then
+    tmux bind-key -N "🎨 Session Dock Theme Picker (KR)" "ㅆ" display-popup -E -w 75% -h 65% "$CURRENT_DIR/scripts/tmux-theme-picker" 2>/dev/null || tmux bind-key "ㅆ" display-popup -E -w 75% -h 65% "$CURRENT_DIR/scripts/tmux-theme-picker" 2>/dev/null || true
+    tmux bind-key -N "🎨 Session Dock Theme Picker (KR)" "ㅅ" display-popup -E -w 75% -h 65% "$CURRENT_DIR/scripts/tmux-theme-picker" 2>/dev/null || tmux bind-key "ㅅ" display-popup -E -w 75% -h 65% "$CURRENT_DIR/scripts/tmux-theme-picker" 2>/dev/null || true
+fi
+
 tmux bind-key -N "📖 Session Dock Interactive Help" "$HELP_KEY" display-popup -E -w 70% -h 65% "$CURRENT_DIR/scripts/tmux-help-viewer" 2>/dev/null || tmux bind-key "$HELP_KEY" display-popup -E -w 70% -h 65% "$CURRENT_DIR/scripts/tmux-help-viewer" 2>/dev/null || true
+if [ "$HELP_KEY" = "h" ]; then
+    tmux bind-key -N "📖 Session Dock Interactive Help (KR)" "ㅗ" display-popup -E -w 70% -h 65% "$CURRENT_DIR/scripts/tmux-help-viewer" 2>/dev/null || tmux bind-key "ㅗ" display-popup -E -w 70% -h 65% "$CURRENT_DIR/scripts/tmux-help-viewer" 2>/dev/null || true
+fi
+
 tmux bind-key -N "⌨️ Session Dock Command Palette" "$PALETTE_KEY" display-popup -E -w 70% -h 60% "env TMUX_PANE='#{pane_id}' $CURRENT_DIR/scripts/tmux-command-palette" 2>/dev/null || tmux bind-key "$PALETTE_KEY" display-popup -E -w 70% -h 60% "env TMUX_PANE='#{pane_id}' $CURRENT_DIR/scripts/tmux-command-palette" 2>/dev/null || true
 
 # 3. Work-Pane Safe Split Wrappers

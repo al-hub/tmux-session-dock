@@ -23,7 +23,7 @@ if ! echo "$output" | grep -q "주요 단축키 가이드"; then
     echo "FAIL: Help viewer output missing title header!"
     exit 1
 fi
-if ! echo "$output" | grep -q "v0.1.2"; then
+if ! echo "$output" | grep -q "v0.1.3"; then
     echo "FAIL: Help viewer output missing version string!"
     exit 1
 fi
@@ -76,7 +76,15 @@ printf '?' | {
         exit 1
     fi
 }
-echo "PASS: Sidebar TUI correctly maps 'h' and '?' to 'help'."
+
+printf 'ㅗ' | {
+    read_key 0.1
+    if [ "$key_result" != "help" ]; then
+        echo "FAIL: 'ㅗ' key did not map to help! got: $key_result"
+        exit 1
+    fi
+}
+echo "PASS: Sidebar TUI correctly maps 'h', '?' and 'ㅗ' to 'help'."
 
 echo "=========================================================================="
 echo "ALL TESTS PASS: tmux-help-viewer and keybinding integration 100% verified!"

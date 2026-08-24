@@ -23,7 +23,7 @@ trap "draw_help" WINCH
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." 2>/dev/null && pwd)"
-VERSION="v0.1.2"
+VERSION="v0.1.3"
 if [ -f "$REPO_DIR/setup.sh" ]; then
     VERSION_FROM_SETUP="$(grep -E '^VERSION=' "$REPO_DIR/setup.sh" 2>/dev/null | cut -d'"' -f2 || true)"
     [ -n "$VERSION_FROM_SETUP" ] && VERSION="$VERSION_FROM_SETUP"
@@ -36,13 +36,12 @@ draw_help() {
     printf "${CYAN}${BOLD}╰──────────────────────────────────────────────────────────────────╯${RESET}\n"
     printf "  ${GRAY}기본 Prefix:${RESET} ${BOLD}${CYAN}Ctrl + a${RESET}  ${DIM}(모든 Prefix 단축키는 Ctrl+a 입력 후 실행)${RESET}\n\n"
 
-    printf "  ${EMERALD}${BOLD}[ 🗂️ 세션 도크 & TUI 관리 ]${RESET}\n"
-    printf "    ${CYAN}${BOLD}Alt + s${RESET}          ${GRAY}─${RESET}  ⚡ 세션 도크 0ms 즉시 포커스 점프 / 복귀\n"
-    printf "    ${CYAN}${BOLD}Ctrl+a s${RESET}         ${GRAY}─${RESET}  세션 도크 사이드바 열기 / 닫기 (토글)\n"
-    printf "    ${CYAN}${BOLD}Ctrl+a P${RESET}         ${GRAY}─${RESET}  서브페인(터미널) 상단 ↔ 하단 위치 즉시 스왑\n"
-    printf "    ${CYAN}${BOLD}Ctrl+a T${RESET}         ${GRAY}─${RESET}  🎨 38종 프리미엄 테마 피커 팝업 열기\n"
+    printf "  ${EMERALD}${BOLD}[ 🗂️ 세션 도크 & TUI 관리 (한/영 지원) ]${RESET}\n"
+    printf "    ${CYAN}${BOLD}Alt + s${RESET} / ${CYAN}${BOLD}ㄴ${RESET}      ${GRAY}─${RESET}  ⚡ 세션 도크 0ms 즉시 포커스 점프 / 복귀\n"
+    printf "    ${CYAN}${BOLD}Ctrl+a s${RESET} / ${CYAN}${BOLD}ㄴ${RESET}     ${GRAY}─${RESET}  세션 도크 사이드바 열기 / 닫기 (토글)\n"
+    printf "    ${CYAN}${BOLD}Ctrl+a T${RESET} / ${CYAN}${BOLD}ㅆ${RESET}     ${GRAY}─${RESET}  🎨 38종 프리미엄 테마 피커 팝업 열기\n"
     printf "    ${CYAN}${BOLD}Ctrl+a /${RESET}         ${GRAY}─${RESET}  ⌨️ 전체 단축키 검색 (커맨드 팔레트)\n"
-    printf "    ${CYAN}${BOLD}Ctrl+a h${RESET} / ${CYAN}${BOLD}?${RESET}     ${GRAY}─${RESET}  📖 본 도움말 가이드 팝업 열기\n\n"
+    printf "    ${CYAN}${BOLD}Ctrl+a h${RESET} / ${CYAN}${BOLD}ㅗ${RESET} / ${CYAN}${BOLD}?${RESET} ${GRAY}─${RESET}  📖 본 도움말 가이드 팝업 열기\n\n"
 
     printf "  ${BLUE}${BOLD}[ ✂️ 작업 영역 분할 & 윈도우 ]${RESET}\n"
     printf "    ${CYAN}${BOLD}Ctrl+a |${RESET}  또는 ${CYAN}${BOLD}%%%%${RESET}  ${GRAY}─${RESET}  가로 분할 (좌 / 우 split, 사이드바 보호)\n"
@@ -64,7 +63,7 @@ draw_help() {
     printf "    ${CYAN}${BOLD}Ctrl+a v${RESET}         ${GRAY}─${RESET}  현재 화면 캡처 후 새 Vim 에디터 창으로 열기\n\n"
 
     printf "${GRAY}────────────────────────────────────────────────────────────────────${RESET}\n"
-    printf "  ${DIM}도움말 닫기:${RESET} ${BOLD}${YELLOW}[ Esc ]${RESET} 또는 ${BOLD}${YELLOW}[ q ]${RESET} 또는 ${BOLD}${YELLOW}[ Enter ]${RESET}\n"
+    printf "  ${DIM}도움말 닫기:${RESET} ${BOLD}${YELLOW}[ Esc ]${RESET} 또는 ${BOLD}${YELLOW}[ q / ㅂ ]${RESET} 또는 ${BOLD}${YELLOW}[ Enter ]${RESET}\n"
 }
 
 draw_help
@@ -81,7 +80,7 @@ while IFS= read -rsn1 key; do
             read -rsn2 -t 0.05 extra 2>/dev/null || true
             exit 0
             ;;
-        q|Q|""|$'\n')
+        q|Q|ㅂ|""|$'\n')
             exit 0
             ;;
     esac
