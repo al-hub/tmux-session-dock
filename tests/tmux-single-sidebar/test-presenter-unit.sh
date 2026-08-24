@@ -35,6 +35,10 @@ key_action="$(sidebar_presenter_map_key "q")"
 [ "$(sidebar_presenter_map_key "ᅦ")" = "SWAP_POSITION" ] || { echo "FAIL: ᅦ expected SWAP_POSITION"; exit 1; }
 [ "$(sidebar_presenter_map_key "ᅨ")" = "SWAP_POSITION" ] || { echo "FAIL: ᅨ expected SWAP_POSITION"; exit 1; }
 [ "$(sidebar_presenter_map_key "ᄆ")" = "MARK_ALL" ] || { echo "FAIL: ᄆ expected MARK_ALL"; exit 1; }
-[ "$(sidebar_presenter_map_key "ᅩ")" = "HELP" ] || { echo "FAIL: ᅩ expected HELP"; exit 1; }
+# Test Universal Terminal Control Keys
+[ "$(sidebar_presenter_map_key $'\t')" = "HISTORY" ] || { echo "FAIL: Tab expected HISTORY"; exit 1; }
+[ "$(sidebar_presenter_map_key $'\x0e')" = "DOWN" ] || { echo "FAIL: Ctrl-n expected DOWN"; exit 1; }
+[ "$(sidebar_presenter_map_key $'\x10')" = "UP" ] || { echo "FAIL: Ctrl-p expected UP"; exit 1; }
+[ "$(sidebar_presenter_map_key $'\x03')" = "QUIT" ] || { echo "FAIL: Ctrl-c expected QUIT"; exit 1; }
 
 echo "PASS: presenter unit tests"

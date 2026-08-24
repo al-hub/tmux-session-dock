@@ -1620,11 +1620,11 @@ sidebar_switch_reconcile_cold() {
 sidebar_presenter_map_key() {
     local key="$1"
     case "$key" in
-        q|Q|ㅂ|ᄇ) echo "QUIT" ;;
+        q|Q|ㅂ|ᄇ|$'\x03') echo "QUIT" ;;
         s|S|ㄴ|ᄂ) echo "TOGGLE" ;;
-        j|J|ㅓ|ᅥ) echo "DOWN" ;;
-        k|K|ㅏ|ᅡ) echo "UP" ;;
-        o|O|ㅐ|ᅢ|ㅒ|ᅤ) echo "HISTORY" ;;
+        j|J|ㅓ|ᅥ|$'\x0e') echo "DOWN" ;;
+        k|K|ㅏ|ᅡ|$'\x10') echo "UP" ;;
+        o|O|ㅐ|ᅢ|ㅒ|ᅤ|$'\t') echo "HISTORY" ;;
         c|C|ㅊ|ᄎ) echo "CREATE" ;;
         r|R|ㄱ|ᄀ) echo "RENAME" ;;
         d|D|ㅇ|ᄋ) echo "DELETE" ;;
@@ -8991,19 +8991,19 @@ read_key()
     fi
 
     case "$key" in
-        j|J|ㅓ|ᅥ) key_result=down ;;
-        k|K|ㅏ|ᅡ) key_result=up ;;
+        j|J|ㅓ|ᅥ|$'\x0e') key_result=down ;;
+        k|K|ㅏ|ᅡ|$'\x10') key_result=up ;;
         c|C|ㅊ|ᄎ) key_result=create ;;
         r|R|ㄱ|ᄀ) key_result=rename ;;
         d|D|ㅇ|ᄋ) key_result=delete ;;
         /) key_result=filter ;;
-        o|O|ㅐ|ᅢ|ㅒ|ᅤ) key_result=history ;;
+        o|O|ㅐ|ᅢ|ㅒ|ᅤ|$'\t') key_result=history ;;
         h|H|ㅗ|ᅩ|\?) key_result=help ;;
         ' ') key_result=mark ;;
         a|A|ㅁ|ᄆ) key_result=mark-all ;;
         s|S|ㄴ|ᄂ) key_result=toggle-subpane ;;
         p|P|ㅔ|ᅦ|ㅖ|ᅨ) key_result=swap-subpane-position ;;
-        q|Q|ㅂ|ᄇ) key_result=quit ;;
+        q|Q|ㅂ|ᄇ|$'\x03') key_result=quit ;;
         ''|$'\n'|$'\r')
             key_result=enter
             [ -n "$key_raw" ] || key_raw=$'\r'
