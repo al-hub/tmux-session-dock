@@ -188,8 +188,12 @@ subpane_hub_swap_stack_position() {
     local idx=0
     for p_id in "${panes[@]}"; do
         local slot_h="${heights[$idx]:-6}"
-        if ! sidebar_tmux_cmd join-pane -d $pos_flag -s "$p_id" -t "$last_attached" -v -l "$slot_h" 2>/dev/null; then
-            sidebar_tmux_cmd join-pane -d $pos_flag -s "$p_id" -t "$last_attached" -v 2>/dev/null || true
+        local slot_pos_flag=""
+        if [ "$idx" -eq 0 ] && [ "$new_pos" = "top" ]; then
+            slot_pos_flag="-b"
+        fi
+        if ! sidebar_tmux_cmd join-pane -d $slot_pos_flag -s "$p_id" -t "$last_attached" -v -l "$slot_h" 2>/dev/null; then
+            sidebar_tmux_cmd join-pane -d $slot_pos_flag -s "$p_id" -t "$last_attached" -v 2>/dev/null || true
         fi
         sidebar_tmux_cmd resize-pane -t "$p_id" -y "$slot_h" 2>/dev/null || true
         sidebar_tmux_cmd set-option -p -q -t "$p_id" @dotfiles_subpane_hub_pane 1 2>/dev/null || true
@@ -231,12 +235,9 @@ subpane_hub_acquire_pane() {
     target_win="$(sidebar_tmux_cmd display-message -p -t "$target_launcher" '#{window_id}' 2>/dev/null || true)"
     [ -n "$target_win" ] || return 1
 
-    local sub_pos="bottom" pos_flag=""
+    local sub_pos="bottom"
     if declare -f sidebar_subpane_get_position >/dev/null 2>&1; then
         sub_pos="$(sidebar_subpane_get_position 2>/dev/null || echo bottom)"
-    fi
-    if [ "$sub_pos" = "top" ]; then
-        pos_flag="-b"
     fi
 
     # Calculate proportional height per slot
@@ -256,9 +257,14 @@ subpane_hub_acquire_pane() {
 
         local current_win
         current_win="$(sidebar_tmux_cmd display-message -p -t "$slot_pane" '#{window_id}' 2>/dev/null || true)"
+        local slot_pos_flag=""
+        if [ "$slot" -eq 1 ] && [ "$sub_pos" = "top" ]; then
+            slot_pos_flag="-b"
+        fi
+
         if [ "$current_win" != "$target_win" ]; then
-            if ! sidebar_tmux_cmd join-pane -d $pos_flag -s "$slot_pane" -t "$last_attached_pane" -v -l "$slot_h" 2>/dev/null; then
-                sidebar_tmux_cmd join-pane -d $pos_flag -s "$slot_pane" -t "$last_attached_pane" -v 2>/dev/null || true
+            if ! sidebar_tmux_cmd join-pane -d $slot_pos_flag -s "$slot_pane" -t "$last_attached_pane" -v -l "$slot_h" 2>/dev/null; then
+                sidebar_tmux_cmd join-pane -d $slot_pos_flag -s "$slot_pane" -t "$last_attached_pane" -v 2>/dev/null || true
             fi
         fi
 

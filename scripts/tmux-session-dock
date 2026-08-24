@@ -7878,8 +7878,8 @@ main()
             if is_infrastructure_session "$win_sess"; then
                 return 0
             fi
-            provision_sidebar_window "${2:-}" "${3:-$(sidebar_width)}"
-            return $?
+            provision_sidebar_window "${2:-}" "${3:-$(sidebar_width)}" || true
+            return 0
             ;;
         --ensure-sidebar-session)
             if is_infrastructure_session "${2:-}"; then
