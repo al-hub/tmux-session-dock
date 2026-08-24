@@ -106,6 +106,53 @@ else
     echo "ℹ️ [Test 2 PASS]: Heights preserved on session migration."
 fi
 
+# ------------------------------------------------------------------------------
+# Test 3: Live Mouse Resize Hook Simulation (remember_sidebar_subpane_height)
+# ------------------------------------------------------------------------------
+echo ""
+echo "=== [Test 3] Checking Live Mouse Resize Hook Simulation ==="
+NEW_H1=12
+NEW_H2=18
+# Simulate user dragging mouse borders in sess2 where subpanes are attached
+tmux -L "$TEST_SOCKET" resize-pane -t "$sess2_sidebar" -y 18
+tmux -L "$TEST_SOCKET" resize-pane -t "$s1_mig_pane" -y "$NEW_H1"
+
+# Trigger tmux hook that runs on resize
+TMUX_SESSION_LAUNCHER_SOCKET="$TEST_SOCKET" bash -c "
+    source '$REPO_ROOT/scripts/lib/sidebar_port_tmux.sh'
+    source '$REPO_ROOT/scripts/lib/sidebar_subpane_hub.sh'
+    remember_sidebar_subpane_height_for_window '$win2'
+"
+
+saved_slot1="$(tmux -L "$TEST_SOCKET" show-option -gqv "@dotfiles_subpane_slot_1_height")"
+saved_slot2="$(tmux -L "$TEST_SOCKET" show-option -gqv "@dotfiles_subpane_slot_2_height")"
+saved_total="$(tmux -L "$TEST_SOCKET" show-option -gqv "@dotfiles_sidebar_subpane_height")"
+
+echo "After Mouse Resize Hook:"
+echo "  Slot 1 Saved Height = $saved_slot1 (Expected $NEW_H1)"
+echo "  Slot 2 Saved Height = $saved_slot2 (Expected $NEW_H2)"
+echo "  Total Saved Height  = $saved_total (Expected $((NEW_H1 + NEW_H2)))"
+
+if [ "$saved_slot1" -ne "$NEW_H1" ] || [ "$saved_slot2" -ne "$NEW_H2" ] || [ "$saved_total" -ne "$((NEW_H1 + NEW_H2))" ]; then
+    echo "🚨 [DETECTED BUG 3]: remember_sidebar_subpane_height_for_window failed to snapshot all slots!"
+    exit 1
+else
+    echo "ℹ️ [Test 3 PASS]: Live mouse resize hook successfully snapshot all slot heights."
+fi
+
+# Further verify that swap and migration now respect the new heights (12, 18)
+TMUX_SESSION_LAUNCHER_SOCKET="$TEST_SOCKET" TMUX_PANE="$sess2_sidebar" bash "$BIN_SCRIPT" --swap-subpane-position
+h1_test3_swap="$(tmux -L "$TEST_SOCKET" display-message -p -t "$s1_mig_pane" '#{pane_height}')"
+h2_test3_swap="$(tmux -L "$TEST_SOCKET" display-message -p -t "$s2_mig_pane" '#{pane_height}')"
+echo "After Swap with New Heights: Slot 1=$h1_test3_swap, Slot 2=$h2_test3_swap"
+
+if [ "$h1_test3_swap" -ne "$NEW_H1" ] || [ "$h2_test3_swap" -ne "$NEW_H2" ]; then
+    echo "🚨 [DETECTED BUG 3.1]: Swap failed to preserve dynamically resized heights!"
+    exit 1
+else
+    echo "ℹ️ [Test 3.1 PASS]: Dynamically resized heights preserved on swap."
+fi
+
 echo ""
 echo "=========================================================================="
 echo "Height preservation test complete."
