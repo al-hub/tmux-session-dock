@@ -5177,15 +5177,32 @@ prompt_text()
         render_prompt_box "$prompt"
         local char=""
         IFS= read -r -n 1 char </dev/tty 2>/dev/null || true
+
+        # Robust multi-byte UTF-8 assembly for Korean IME
+        if [ -n "$char" ]; then
+            local dec
+            dec=$(printf '%d' "'$char" 2>/dev/null || echo "0")
+            if [ "$dec" -ge 224 ] && [ "$dec" -le 239 ]; then
+                local b2 b3
+                IFS= read -r -n 1 -t 0.05 b2 </dev/tty 2>/dev/null || true
+                IFS= read -r -n 1 -t 0.05 b3 </dev/tty 2>/dev/null || true
+                char="$char$b2$b3"
+            elif [ "$dec" -ge 192 ] && [ "$dec" -le 223 ]; then
+                local b2
+                IFS= read -r -n 1 -t 0.05 b2 </dev/tty 2>/dev/null || true
+                char="$char$b2"
+            fi
+        fi
+
         case "$char" in
-            $'\033'|[Qq]|[Nn])
+            $'\033'|[Qq]|[Nn]|ㅂ|ᄇ|ㅜ|ᅮ)
                 prompt_cancelled=true
                 prompt_result=""
                 ;;
-            [Yy])
+            [Yy]|ㅛ|ᅭ)
                 prompt_result="y"
                 ;;
-            'a'|'A')
+            'a'|'A'|ㅁ|ᄆ)
                 prompt_result="All"
                 ;;
             $'\n'|$'\r'|"")
@@ -6775,7 +6792,7 @@ delete_selected_archives()
     fi
     answer="$prompt_result"
     case "$answer" in
-        [Yy]|[Yy][Ee][Ss])
+        [Yy]|[Yy][Ee][Ss]|ㅛ|ᅭ)
             while IFS= read -r index; do
                 rm -f "${history_files[$index]}" "${history_files[$index]}${ARCHIVE_HISTORY_MARKER_SUFFIX}" 2>/dev/null || true
             done <<EOF
@@ -6906,7 +6923,7 @@ tui_delete_session()
             return 0
         fi
         case "$prompt_result" in
-            [Yy]|[Yy][Ee][Ss]) run_all_sessions_delete true ;;
+            [Yy]|[Yy][Ee][Ss]|ㅛ|ᅭ) run_all_sessions_delete true ;;
             *) run_all_sessions_delete false ;;
         esac
         exit 0
@@ -6918,7 +6935,7 @@ tui_delete_session()
     fi
 
     case "$answer" in
-        [Yy]|[Yy][Ee][Ss])
+        [Yy]|[Yy][Ee][Ss]|ㅛ|ᅭ)
             execute_tui_session_delete_action true
             ;;
         '')
