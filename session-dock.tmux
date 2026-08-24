@@ -85,6 +85,8 @@ if [ "$TOGGLE_KEY" = "s" ]; then
     tmux bind-key -N "🗂️ Toggle Session Dock (KR)" "ᄂ" run-shell "$BIN_PATH --toggle-sidebar" 2>/dev/null || tmux bind-key "ᄂ" run-shell "$BIN_PATH --toggle-sidebar" 2>/dev/null || true
 fi
 
+tmux bind-key -N "⚙️ Subpane Stack Configurator" "S" display-popup -E -w 70% -h 60% "$CURRENT_DIR/scripts/tmux-subpane-picker" 2>/dev/null || tmux bind-key "S" display-popup -E -w 70% -h 60% "$CURRENT_DIR/scripts/tmux-subpane-picker" 2>/dev/null || true
+
 tmux bind-key -N "🎨 Session Dock Theme Picker" "$THEME_KEY" display-popup -E -w 75% -h 65% "$CURRENT_DIR/scripts/tmux-theme-picker" 2>/dev/null || tmux bind-key "$THEME_KEY" display-popup -E -w 75% -h 65% "$CURRENT_DIR/scripts/tmux-theme-picker" 2>/dev/null || true
 if [ "$THEME_KEY" = "T" ]; then
     tmux bind-key -N "🎨 Session Dock Theme Picker (KR)" "ㅆ" display-popup -E -w 75% -h 65% "$CURRENT_DIR/scripts/tmux-theme-picker" 2>/dev/null || tmux bind-key "ㅆ" display-popup -E -w 75% -h 65% "$CURRENT_DIR/scripts/tmux-theme-picker" 2>/dev/null || true

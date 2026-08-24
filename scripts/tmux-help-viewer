@@ -27,7 +27,7 @@ trap "draw_help" WINCH
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." 2>/dev/null && pwd)"
-VERSION="v0.2.1"
+VERSION="v0.3.0"
 if [ -f "$REPO_DIR/setup.sh" ]; then
     VERSION_FROM_SETUP="$(grep -E '^VERSION=' "$REPO_DIR/setup.sh" 2>/dev/null | cut -d'"' -f2 || true)"
     [ -n "$VERSION_FROM_SETUP" ] && VERSION="$VERSION_FROM_SETUP"
@@ -50,6 +50,7 @@ draw_help() {
     printf "    ${CYAN}${BOLD}Tab${RESET}                 ${GRAY}─${RESET}  세션 목록 ↔ 아카이브(히스토리) 뷰 전환 ${DIM}(o / ㅐ)${RESET}\n"
     printf "    ${CYAN}${BOLD}Space${RESET}               ${GRAY}─${RESET}  세션 다중 선택 마크 토글 ${DIM}(a / ㅁ: 전체 선택)${RESET}\n"
     printf "    ${CYAN}${BOLD}s / ㄴ${RESET}               ${GRAY}─${RESET}  서브 터미널(Subpane) 열기 / 닫기 (토글)\n"
+    printf "    ${CYAN}${BOLD}S${RESET}                    ${GRAY}─${RESET}  ⚙️ 서브 터미널 스택 개수(1..3) 및 위치 설정\n"
     printf "    ${CYAN}${BOLD}p / ㅔ${RESET}               ${GRAY}─${RESET}  서브 터미널 상단 ↔ 하단 위치 즉시 스왑\n"
     printf "    ${CYAN}${BOLD}/${RESET}                   ${GRAY}─${RESET}  세션 이름 실시간 검색 및 필터링\n"
     printf "    ${CYAN}${BOLD}Esc${RESET} 또는 ${CYAN}${BOLD}Ctrl+c${RESET}     ${GRAY}─${RESET}  사이드바 닫기 및 메인 작업창 복귀 ${DIM}(q / ㅂ)${RESET}\n\n"
@@ -57,6 +58,7 @@ draw_help() {
     printf "  ${BLUE}${BOLD}[ ⚡ 전역 핫키 & 팝업 메뉴 (한/영 지원) ]${RESET}\n"
     printf "    ${CYAN}${BOLD}Alt + s${RESET} / ${CYAN}${BOLD}ㄴ${RESET}        ${GRAY}─${RESET}  ⚡ 세션 도크 0ms 즉시 포커스 점프 / 토글\n"
     printf "    ${CYAN}${BOLD}Ctrl+a s${RESET} / ${CYAN}${BOLD}ㄴ${RESET}       ${GRAY}─${RESET}  세션 도크 사이드바 열기 / 닫기\n"
+    printf "    ${CYAN}${BOLD}Ctrl+a S${RESET}              ${GRAY}─${RESET}  ⚙️ 서브 터미널 스택 설정 팝업 열기\n"
     printf "    ${CYAN}${BOLD}Ctrl+a T${RESET} / ${CYAN}${BOLD}ㅆ${RESET}       ${GRAY}─${RESET}  🎨 38종 프리미엄 테마 피커 팝업 열기\n"
     printf "    ${CYAN}${BOLD}Ctrl+a /${RESET}           ${GRAY}─${RESET}  ⌨️ 전체 단축키 검색 (커맨드 팔레트)\n"
     printf "    ${CYAN}${BOLD}Ctrl+a h${RESET} / ${CYAN}${BOLD}ㅗ${RESET} / ${CYAN}${BOLD}?${RESET}   ${GRAY}─${RESET}  📖 본 도움말 가이드 팝업 열기\n\n"

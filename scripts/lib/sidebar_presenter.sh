@@ -6,7 +6,8 @@ sidebar_presenter_map_key() {
     local key="$1"
     case "$key" in
         q|Q|ㅂ|ᄇ|$'\x03') echo "QUIT" ;;
-        s|S|ㄴ|ᄂ) echo "TOGGLE" ;;
+        s|ㄴ|ᄂ) echo "TOGGLE" ;;
+        S) echo "CONFIG_SUBPANE" ;;
         j|J|ㅓ|ᅥ|$'\x0e') echo "DOWN" ;;
         k|K|ㅏ|ᅡ|$'\x10') echo "UP" ;;
         o|O|ㅐ|ᅢ|ㅒ|ᅤ|$'\t') echo "HISTORY" ;;

@@ -7,6 +7,7 @@ Supports both standard English keys and Korean (2-Set IME) keys seamlessly witho
 | Keybinding (EN) | Keybinding (KR) | Action Description |
 | :--- | :--- | :--- |
 | **`Prefix + s`** | **`Prefix + ㄴ`** | Toggle session dock sidebar open / close |
+| **`Prefix + S`** | **`Prefix + S`** | ⚙️ Open subpane stack & position configurator popup |
 | **`Prefix + T`** | **`Prefix + ㅆ`** / **`ㅅ`** | Open 38-theme interactive picker with live ANSI preview |
 | **`Prefix + /`** | **`Prefix + /`** | Open searchable command palette |
 | **`Prefix + h`** / **`?`** | **`Prefix + ㅗ`** / **`?`** | Open interactive help viewer popup |
@@ -26,6 +27,7 @@ Supports both standard English keys and Korean (2-Set IME) keys seamlessly witho
 | **`+` / `Insert`** | **`c` / `ㅊ`** | Create new named session |
 | **`Tab`** | **`o` / `ㅐ`** | Toggle session archive & restoration view |
 | **`s` / `ㄴ`** | **`s` / `ㄴ`** | Toggle subpane (terminal) open / close |
+| **`S`** | **`S`** | ⚙️ Open subpane stack configurator popup |
 | **`p` / `ㅔ`** | **`p` / `ㅔ`** | Swap subpane position (Top ↔ Bottom) |
 | **`Space`** | **`Space`** | Mark / unmark selected row |
 | **`a` / `ㅁ`** | **`a` / `ㅁ`** | Mark / unmark all rows |

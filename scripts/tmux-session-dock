@@ -7595,10 +7595,15 @@ run_tui()
                     toggle_history_mark_all
                 fi
                 ;;
-            s|S|ㄴ|ᄂ|toggle-subpane)
+            s|ㄴ|ᄂ|toggle-subpane)
                 trace_event "action.begin type=toggle-subpane"
                 toggle_sidebar_subpane_global "${SIDEBAR_WINDOW_ID:-}"
                 request_full_render subpane-toggle
+                ;;
+            S|config-subpane)
+                trace_event "action.begin type=config-subpane"
+                tmux display-popup -E -w 70% -h 60% "$HOME/.local/bin/tmux-subpane-picker" 2>/dev/null || tmux display-popup -E -w 70% -h 60% "$LAUNCHER_DIR/tmux-subpane-picker" 2>/dev/null || true
+                request_full_render subpane-config-return
                 ;;
             p|P|ㅔ|ᅦ|ㅖ|ᅨ|swap-subpane-position)
                 trace_event "action.begin type=swap-subpane-position"

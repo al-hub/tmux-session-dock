@@ -5,7 +5,7 @@
 # ==============================================================================
 set -euo pipefail
 
-VERSION="v0.2.1"
+VERSION="v0.3.0"
 REPO_URL="https://github.com/al-hub/tmux-session-dock.git"
 INSTALL_DIR="${TMUX_DOCK_INSTALL_DIR:-$HOME/.local/share/tmux-session-dock}"
 BIN_DIR="${TMUX_DOCK_BIN_DIR:-$HOME/.local/bin}"
@@ -192,6 +192,7 @@ do_install() {
     ln -sf "$SCRIPT_DIR/dist/tmux-session-dock" "$BIN_DIR/tmux-session-dock"
     ln -sf "$SCRIPT_DIR/dist/tmux-sidebar-tmux-adapter" "$BIN_DIR/tmux-sidebar-tmux-adapter"
     ln -sf "$SCRIPT_DIR/scripts/tmux-theme-picker" "$BIN_DIR/tmux-theme-picker"
+    ln -sf "$SCRIPT_DIR/scripts/tmux-subpane-picker" "$BIN_DIR/tmux-subpane-picker"
     ln -sf "$SCRIPT_DIR/scripts/tmux-command-palette" "$BIN_DIR/tmux-command-palette"
     ln -sf "$SCRIPT_DIR/scripts/tmux-help-viewer" "$BIN_DIR/tmux-help-viewer"
     log_ok "Symlinks registered in $BIN_DIR"
@@ -242,6 +243,7 @@ do_update() {
     ln -sf "$SCRIPT_DIR/dist/tmux-session-dock" "$BIN_DIR/tmux-session-dock"
     ln -sf "$SCRIPT_DIR/dist/tmux-sidebar-tmux-adapter" "$BIN_DIR/tmux-sidebar-tmux-adapter"
     ln -sf "$SCRIPT_DIR/scripts/tmux-theme-picker" "$BIN_DIR/tmux-theme-picker"
+    ln -sf "$SCRIPT_DIR/scripts/tmux-subpane-picker" "$BIN_DIR/tmux-subpane-picker"
     ln -sf "$SCRIPT_DIR/scripts/tmux-command-palette" "$BIN_DIR/tmux-command-palette"
     ln -sf "$SCRIPT_DIR/scripts/tmux-help-viewer" "$BIN_DIR/tmux-help-viewer"
     log_ok "Symlinks updated in $BIN_DIR"

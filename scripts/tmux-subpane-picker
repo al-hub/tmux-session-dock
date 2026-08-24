@@ -1,0 +1,156 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# tmux-subpane-picker: Interactive Subpane Stack & Position Configurator
+# ==============================================================================
+set -euo pipefail
+
+export LC_ALL="${LC_ALL:-C.UTF-8}"
+export LANG="${LANG:-C.UTF-8}"
+
+BOLD="\033[1m"
+DIM="\033[2m"
+RESET="\033[0m"
+CYAN="\033[38;5;51m"
+BLUE="\033[38;5;39m"
+EMERALD="\033[38;5;48m"
+YELLOW="\033[38;5;220m"
+MAGENTA="\033[38;5;213m"
+GRAY="\033[38;5;244m"
+SELECTED_BG="\033[48;5;238m\033[38;5;51m\033[1m"
+
+printf '\033[?25l'
+trap "printf '\033[?25h\033[0m'" EXIT
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+REPO_DIR="$(cd "$SCRIPT_DIR/.." 2>/dev/null && pwd)"
+
+# Source lib if available
+[ -r "$REPO_DIR/scripts/lib/sidebar_port_tmux.sh" ] && source "$REPO_DIR/scripts/lib/sidebar_port_tmux.sh"
+[ -r "$REPO_DIR/scripts/lib/sidebar_subpane_hub.sh" ] && source "$REPO_DIR/scripts/lib/sidebar_subpane_hub.sh"
+
+get_subpane_count() {
+    tmux show-option -gqv "@session-dock-subpane-count" 2>/dev/null || echo "1"
+}
+
+get_subpane_pos() {
+    tmux show-option -gqv "@session-dock-subpane-position" 2>/dev/null || echo "bottom"
+}
+
+set_subpane_config() {
+    local cnt="$1" pos="$2"
+    tmux set-option -gq "@session-dock-subpane-count" "$cnt" 2>/dev/null || true
+    tmux set-option -gq "@session-dock-subpane-position" "$pos" 2>/dev/null || true
+}
+
+CURRENT_COUNT="$(get_subpane_count)"
+[ -n "$CURRENT_COUNT" ] || CURRENT_COUNT="1"
+CURRENT_POS="$(get_subpane_pos)"
+[ -n "$CURRENT_POS" ] || CURRENT_POS="bottom"
+
+OPTIONS=(
+    "1|1 Slot (Single Subpane)|기본 1개 터미널 (14줄 전체 할당)"
+    "2|2 Slots (Dual Stack)|수직 2단 직렬 스택 (7줄 + 7줄 분할)"
+    "3|3 Slots (Triple Stack)|수직 3단 직렬 스택 (5줄 + 5줄 + 5줄 분할)"
+    "POS|Toggle Position (Top ↔ Bottom)|현재 위치: ${CURRENT_POS^^}"
+)
+
+SELECTED_IDX=0
+case "$CURRENT_COUNT" in
+    1) SELECTED_IDX=0 ;;
+    2) SELECTED_IDX=1 ;;
+    3) SELECTED_IDX=2 ;;
+esac
+
+draw_picker() {
+    clear 2>/dev/null || true
+    CURRENT_POS="$(get_subpane_pos)"
+    [ -n "$CURRENT_POS" ] || CURRENT_POS="bottom"
+    CURRENT_COUNT="$(get_subpane_count)"
+    [ -n "$CURRENT_COUNT" ] || CURRENT_COUNT="1"
+
+    printf "${CYAN}${BOLD}╭──────────────────────────────────────────────────────────────────────────╮${RESET}\n"
+    printf "${CYAN}${BOLD}│${RESET}  ${YELLOW}${BOLD}⚙️ 서브 터미널 스택 설정 (Subpane Stack Configurator)${RESET}             ${CYAN}${BOLD}│${RESET}\n"
+    printf "${CYAN}${BOLD}╰──────────────────────────────────────────────────────────────────────────╯${RESET}\n"
+    printf "  ${GRAY}사이드바 컬럼 내에서 수직(Vertical Stack)으로 쌓을 서브페인 개수를 설정합니다.${RESET}\n\n"
+
+    local i=0
+    for opt in "${OPTIONS[@]}"; do
+        local id title desc
+        id="$(echo "$opt" | cut -d'|' -f1)"
+        title="$(echo "$opt" | cut -d'|' -f2)"
+        desc="$(echo "$opt" | cut -d'|' -f3)"
+
+        local is_active=false
+        if [ "$id" = "$CURRENT_COUNT" ]; then
+            is_active=true
+        fi
+        if [ "$id" = "POS" ]; then
+            desc="현재 위치: ${BOLD}${EMERALD}${CURRENT_POS^^}${RESET}${GRAY} (Enter를 누르면 Top ↔ Bottom 즉시 스왑)${RESET}"
+        fi
+
+        if [ "$i" -eq "$SELECTED_IDX" ]; then
+            if [ "$is_active" = true ]; then
+                printf "  ${SELECTED_BG} ▸ [✓] %-26s ${RESET} ${CYAN}─ %s${RESET}\n" "$title" "$desc"
+            else
+                printf "  ${SELECTED_BG} ▸ [ ] %-26s ${RESET} ${GRAY}─ %s${RESET}\n" "$title" "$desc"
+            fi
+        else
+            if [ "$is_active" = true ]; then
+                printf "    ${EMERALD}${BOLD}[✓] %-26s${RESET} ${GRAY}─ %s${RESET}\n" "$title" "$desc"
+            else
+                printf "    ${DIM}[ ] %-26s${RESET} ${GRAY}─ %s${RESET}\n" "$title" "$desc"
+            fi
+        fi
+        i=$((i + 1))
+    done
+
+    printf "\n${GRAY}──────────────────────────────────────────────────────────────────────────${RESET}\n"
+    printf "  ${DIM}이동:${RESET} ${BOLD}${YELLOW}[ ↑ / ↓ ]${RESET} ${DIM}| 선택 & 적용:${RESET} ${BOLD}${EMERALD}[ Enter ]${RESET} ${DIM}| 닫기:${RESET} ${BOLD}${YELLOW}[ Esc / q / ㅂ ]${RESET}\n"
+}
+
+draw_picker
+
+while IFS= read -rsn1 key; do
+    case "$key" in
+        $'\e')
+            read -rsn2 -t 0.05 extra 2>/dev/null || true
+            if [ -z "$extra" ]; then
+                exit 0
+            elif [ "$extra" = "[A" ] || [ "$extra" = "OA" ]; then
+                # Up
+                SELECTED_IDX=$(( (SELECTED_IDX - 1 + ${#OPTIONS[@]}) % ${#OPTIONS[@]} ))
+                draw_picker
+            elif [ "$extra" = "[B" ] || [ "$extra" = "OB" ]; then
+                # Down
+                SELECTED_IDX=$(( (SELECTED_IDX + 1) % ${#OPTIONS[@]} ))
+                draw_picker
+            fi
+            ;;
+        k|K|ㅏ)
+            SELECTED_IDX=$(( (SELECTED_IDX - 1 + ${#OPTIONS[@]}) % ${#OPTIONS[@]} ))
+            draw_picker
+            ;;
+        j|J|ㅓ)
+            SELECTED_IDX=$(( (SELECTED_IDX + 1) % ${#OPTIONS[@]} ))
+            draw_picker
+            ;;
+        ""|$'\n'|$'\r')
+            # Enter - Apply Selection
+            chosen="${OPTIONS[$SELECTED_IDX]}"
+            chosen_id="$(echo "$chosen" | cut -d'|' -f1)"
+            if [ "$chosen_id" = "POS" ]; then
+                if [ "$CURRENT_POS" = "bottom" ]; then
+                    set_subpane_config "$CURRENT_COUNT" "top"
+                else
+                    set_subpane_config "$CURRENT_COUNT" "bottom"
+                fi
+            else
+                set_subpane_config "$chosen_id" "$CURRENT_POS"
+            fi
+            draw_picker
+            ;;
+        q|Q|ㅂ|ᄇ)
+            exit 0
+            ;;
+    esac
+done
