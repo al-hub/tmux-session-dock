@@ -23,7 +23,7 @@ if ! echo "$output" | grep -q "주요 단축키 가이드"; then
     echo "FAIL: Help viewer output missing title header!"
     exit 1
 fi
-if ! echo "$output" | grep -q "v0.1.6"; then
+if ! echo "$output" | grep -q "v0.1.7"; then
     echo "FAIL: Help viewer output missing version string!"
     exit 1
 fi

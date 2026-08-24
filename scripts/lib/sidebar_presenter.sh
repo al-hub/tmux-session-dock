@@ -10,9 +10,9 @@ sidebar_presenter_map_key() {
         j|J|ㅓ|ᅥ|$'\x0e') echo "DOWN" ;;
         k|K|ㅏ|ᅡ|$'\x10') echo "UP" ;;
         o|O|ㅐ|ᅢ|ㅒ|ᅤ|$'\t') echo "HISTORY" ;;
-        c|C|ㅊ|ᄎ) echo "CREATE" ;;
-        r|R|ㄱ|ᄀ) echo "RENAME" ;;
-        d|D|ㅇ|ᄋ) echo "DELETE" ;;
+        c|C|ㅊ|ᄎ|'+') echo "CREATE" ;;
+        r|R|ㄱ|ᄀ|$'\x12') echo "RENAME" ;;
+        d|D|ㅇ|ᄋ|$'\x04'|$'\x7f'|$'\x08') echo "DELETE" ;;
         p|P|ㅔ|ᅦ|ㅖ|ᅨ) echo "SWAP_POSITION" ;;
         a|A|ㅁ|ᄆ) echo "MARK_ALL" ;;
         h|H|ㅗ|ᅩ|\?) echo "HELP" ;;

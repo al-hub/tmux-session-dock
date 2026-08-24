@@ -1625,9 +1625,9 @@ sidebar_presenter_map_key() {
         j|J|ㅓ|ᅥ|$'\x0e') echo "DOWN" ;;
         k|K|ㅏ|ᅡ|$'\x10') echo "UP" ;;
         o|O|ㅐ|ᅢ|ㅒ|ᅤ|$'\t') echo "HISTORY" ;;
-        c|C|ㅊ|ᄎ) echo "CREATE" ;;
-        r|R|ㄱ|ᄀ) echo "RENAME" ;;
-        d|D|ㅇ|ᄋ) echo "DELETE" ;;
+        c|C|ㅊ|ᄎ|'+') echo "CREATE" ;;
+        r|R|ㄱ|ᄀ|$'\x12') echo "RENAME" ;;
+        d|D|ㅇ|ᄋ|$'\x04'|$'\x7f'|$'\x08') echo "DELETE" ;;
         p|P|ㅔ|ᅦ|ㅖ|ᅨ) echo "SWAP_POSITION" ;;
         a|A|ㅁ|ᄆ) echo "MARK_ALL" ;;
         h|H|ㅗ|ᅩ|\?) echo "HELP" ;;
@@ -8984,6 +8984,25 @@ read_key()
         case "$rest" in
             '[A') key_result=up ;;
             '[B') key_result=down ;;
+            '[3')
+                local rest3=""
+                IFS= read -rsn1 -t 0.05 rest3 || true
+                key_raw+="$rest3"
+                key_result=delete
+                ;;
+            '[2')
+                local rest3=""
+                IFS= read -rsn1 -t 0.05 rest3 || true
+                key_raw+="$rest3"
+                key_result=create
+                ;;
+            'OQ'|'[1'|'[2')
+                # F2 key or other function keys
+                local rest3=""
+                IFS= read -rsn1 -t 0.05 rest3 || true
+                key_raw+="$rest3"
+                key_result=rename
+                ;;
             '') key_result=esc ;;
             *) key_result=other ;;
         esac
@@ -8993,9 +9012,9 @@ read_key()
     case "$key" in
         j|J|ㅓ|ᅥ|$'\x0e') key_result=down ;;
         k|K|ㅏ|ᅡ|$'\x10') key_result=up ;;
-        c|C|ㅊ|ᄎ) key_result=create ;;
-        r|R|ㄱ|ᄀ) key_result=rename ;;
-        d|D|ㅇ|ᄋ) key_result=delete ;;
+        c|C|ㅊ|ᄎ|'+') key_result=create ;;
+        r|R|ㄱ|ᄀ|$'\x12') key_result=rename ;;
+        d|D|ㅇ|ᄋ|$'\x04'|$'\x7f'|$'\x08') key_result=delete ;;
         /) key_result=filter ;;
         o|O|ㅐ|ᅢ|ㅒ|ᅤ|$'\t') key_result=history ;;
         h|H|ㅗ|ᅩ|\?) key_result=help ;;
