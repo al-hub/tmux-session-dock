@@ -7417,29 +7417,15 @@ run_tui()
                 break
             fi
         done
-        # A passive sidebar does not need to wake at the animation cadence.
-        # Input still interrupts read immediately, while the slower timeout
-        # avoids repeatedly executing the Bash loop when no animation is due.
-        if [ "$SIDEBAR_ADAPTIVE_IDLE_READ" = "true" ] && [ "$has_animation" = "false" ]; then
-            read_timeout="$SIDEBAR_ADAPTIVE_IDLE_TIMEOUT"
-        fi
-        # Deep Sleep for Inactive / Background Sessions:
-        # If this sidebar is in a background window/session, sleep deeply (2.0s) to keep CPU at 0.0%.
-        local active_win
-        active_win="$(sidebar_tmux_cmd display-message -p '#{window_id}' 2>/dev/null || true)"
-        if [ -n "$active_win" ] && [ -n "${SIDEBAR_WINDOW_ID:-}" ] && [ "$active_win" != "$SIDEBAR_WINDOW_ID" ]; then
-            read_timeout=2.0
-        elif native_selection_sync_pending || [ "$refresh_signal_pending" = true ] || sidebar_target_marker_pending; then
-            read_timeout="$SIDEBAR_POLL_TIMEOUT"
-        fi
-        if [ "$post_operation_fast_read" = "true" ] || IFS= read -rsn1 -t 0 key_pending 2>/dev/null; then
+        # Zero-Fork Event-Driven Timeout Calculation (No subshell forks in loop)
+        if [ "$has_animation" = "true" ]; then
+            read_timeout="$SIDEBAR_ANIMATION_INTERVAL"
+        elif [ "$post_operation_fast_read" = "true" ]; then
             read_timeout=0.001
-        fi
-        if [ "$SIDEBAR_EVENT_LOOP_ENABLED" = "true" ] &&
-            [ "$SIDEBAR_SIGNAL_TIMER_ENABLED" = "true" ] &&
-            [ "$has_animation" = "false" ] &&
-            [ "$post_operation_fast_read" != "true" ]; then
-            read_timeout=block
+        elif [ "$refresh_signal_pending" = true ] || [ "$geometry_signal_pending" = true ]; then
+            read_timeout=0.01
+        else
+            read_timeout=1.0
         fi
 
         trace_event "read.begin timeout=$read_timeout"
