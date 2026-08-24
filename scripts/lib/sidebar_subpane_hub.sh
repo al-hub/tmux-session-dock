@@ -125,69 +125,83 @@ subpane_hub_get_pane() {
     return 1
 }
 
-subpane_hub_relocate_pane_atomic() {
-    local sub_pane="${1:-}" target_launcher="${2:-}" height="${3:-}"
-    [ -n "$sub_pane" ] && [ -n "$target_launcher" ] || return 1
-    local sub_title="${SIDEBAR_SUBPANE_TITLE:-dotfiles-sidebar-subpane}"
+subpane_hub_get_window_subpanes() {
+    local target_win="${1:-}"
+    [ -n "$target_win" ] || target_win="$(sidebar_tmux_cmd display-message -p '#{window_id}' 2>/dev/null || true)"
+    [ -n "$target_win" ] || return 0
 
-    if [ -z "$height" ] || ! [ "$height" -ge 4 ] 2>/dev/null; then
-        local saved_h
-        if declare -f sidebar_subpane_get_height >/dev/null 2>&1; then
-            saved_h="$(sidebar_subpane_get_height || true)"
-        else
-            local opt="${SIDEBAR_SUBPANE_HEIGHT_OPTION:-@dotfiles_sidebar_subpane_height}"
-            saved_h="$(sidebar_tmux_cmd show-option -gqv "$opt" 2>/dev/null || true)"
-        fi
-        if [ -n "$saved_h" ] && [ "$saved_h" -ge 4 ] 2>/dev/null; then
-            height="$saved_h"
-        else
-            height=12
-        fi
-    fi
-    local target_win
-    target_win="$(sidebar_tmux_cmd display-message -p -t "$target_launcher" '#{window_id}' 2>/dev/null || true)"
-    [ -n "$target_win" ] && subpane_hub_acquire_lease "$target_win"
+    sidebar_tmux_cmd list-panes -t "$target_win" -F '#{pane_id}|#{@dotfiles_sidebar_subpane}|#{@dotfiles_subpane_slot}' 2>/dev/null |
+        awk -F '|' '$2 == "1" { print ($3 ? $3 : 1) "|" $1 }' |
+        sort -n -t '|' -k 1 |
+        cut -d '|' -f 2
+}
 
-    if [ -z "$height" ]; then
-        local saved_h
-        if declare -f sidebar_subpane_get_height >/dev/null 2>&1; then
-            saved_h="$(sidebar_subpane_get_height 2>/dev/null || true)"
-        fi
-        if [ -n "$saved_h" ] && [ "$saved_h" -ge 4 ] 2>/dev/null; then
-            height="$saved_h"
-        else
-            height=12
-        fi
-    fi
+subpane_hub_swap_stack_position() {
+    local target_win="${1:-}"
+    [ -n "$target_win" ] || target_win="$(sidebar_tmux_cmd display-message -p '#{window_id}' 2>/dev/null || true)"
+    [ -n "$target_win" ] || return 1
 
-    local sub_pos="bottom" pos_flag=""
-    if declare -f sidebar_subpane_get_position >/dev/null 2>&1; then
-        sub_pos="$(sidebar_subpane_get_position 2>/dev/null || echo bottom)"
+    local launcher_pane
+    launcher_pane="$(sidebar_window_pane "$target_win" 2>/dev/null || true)"
+    [ -n "$launcher_pane" ] || return 1
+
+    local panes=()
+    local heights=()
+    local p_id
+    while IFS= read -r p_id; do
+        [ -n "$p_id" ] || continue
+        panes+=("$p_id")
+        local p_h
+        p_h="$(sidebar_tmux_cmd display-message -p -t "$p_id" '#{pane_height}' 2>/dev/null || echo 6)"
+        [ "$p_h" -ge 4 ] 2>/dev/null || p_h=6
+        heights+=("$p_h")
+    done < <(subpane_hub_get_window_subpanes "$target_win")
+
+    [ "${#panes[@]}" -gt 0 ] || return 0
+
+    local cur_pos
+    cur_pos="$(sidebar_subpane_get_position)"
+    local new_pos="top"
+    if [ "$cur_pos" = "top" ]; then
+        new_pos="bottom"
     fi
-    if declare -f sidebar_subpane_calc_pos_flag >/dev/null 2>&1; then
-        pos_flag="$(sidebar_subpane_calc_pos_flag "$sub_pos")"
-    elif [ "$sub_pos" = "top" ]; then
+    sidebar_subpane_set_position "$new_pos"
+
+    local pos_flag=""
+    if [ "$new_pos" = "top" ]; then
         pos_flag="-b"
     fi
 
-    local join_l="$height"
-    if declare -f sidebar_subpane_calc_join_length >/dev/null 2>&1; then
-        join_l="$(sidebar_subpane_calc_join_length "$sub_pos" "$height")"
-    elif [ "$pos_flag" = "-b" ]; then
-        join_l="$((height + 1))"
+    local hub_sess
+    hub_sess="$(subpane_hub_session_name)"
+    if ! subpane_hub_is_alive; then
+        subpane_hub_ensure_session
     fi
 
-    if ! sidebar_tmux_cmd join-pane -d $pos_flag -s "$sub_pane" -t "$target_launcher" -v -l "$join_l" 2>/dev/null; then
-        sidebar_tmux_cmd join-pane -d $pos_flag -s "$sub_pane" -t "$target_launcher" -v 2>/dev/null || return 1
-    fi
+    # 1. Temporarily park all subpanes to hub session (clean detach)
+    for p_id in "${panes[@]}"; do
+        sidebar_tmux_cmd join-pane -d -s "$p_id" -t "=$hub_sess:" 2>/dev/null || true
+    done
 
-    if [ -n "$height" ] && [ "$height" -ge 4 ] 2>/dev/null; then
-        sidebar_tmux_cmd resize-pane -t "$sub_pane" -y "$join_l" 2>/dev/null || true
-    fi
+    # 2. Sequentially re-join all subpanes as an atomic stack in the new direction
+    local last_attached="$launcher_pane"
+    local idx=0
+    for p_id in "${panes[@]}"; do
+        local slot_h="${heights[$idx]:-6}"
+        if ! sidebar_tmux_cmd join-pane -d $pos_flag -s "$p_id" -t "$last_attached" -v -l "$slot_h" 2>/dev/null; then
+            sidebar_tmux_cmd join-pane -d $pos_flag -s "$p_id" -t "$last_attached" -v 2>/dev/null || true
+        fi
+        sidebar_tmux_cmd resize-pane -t "$p_id" -y "$slot_h" 2>/dev/null || true
+        sidebar_tmux_cmd set-option -p -q -t "$p_id" @dotfiles_subpane_hub_pane 1 2>/dev/null || true
+        sidebar_tmux_cmd set-option -p -q -t "$p_id" @dotfiles_sidebar_subpane 1 2>/dev/null || true
+        sidebar_tmux_cmd set-option -p -q -t "$p_id" @dotfiles_subpane_slot "$((idx + 1))" 2>/dev/null || true
 
-    # Keep role tags immutable
-    sidebar_tmux_cmd set-option -p -q -t "$sub_pane" @dotfiles_subpane_hub_pane 1 2>/dev/null || true
-    sidebar_tmux_cmd set-option -p -q -t "$sub_pane" @dotfiles_sidebar_subpane 1 2>/dev/null || true
+        last_attached="$p_id"
+        idx=$((idx + 1))
+    done
+
+    # Maintain focus on launcher pane
+    sidebar_tmux_cmd select-pane -t "$launcher_pane" 2>/dev/null || true
     return 0
 }
 

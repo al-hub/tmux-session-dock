@@ -306,6 +306,14 @@ sidebar_subpane_swap_position() {
 
     remember_sidebar_subpane_height_for_window "$window_id"
 
+    if declare -f subpane_hub_swap_stack_position >/dev/null 2>&1; then
+        subpane_hub_swap_stack_position "$window_id"
+        if declare -f save_sidebar_layout >/dev/null 2>&1; then
+            save_sidebar_layout "$window_id" 2>/dev/null || true
+        fi
+        return 0
+    fi
+
     local cur_pos
     cur_pos="$(sidebar_subpane_get_position)"
     local new_pos="top"
@@ -334,19 +342,7 @@ sidebar_subpane_swap_position() {
             resize_h="$target_h"
         fi
 
-        local orig_focus
-        orig_focus="$(sidebar_tmux_cmd display-message -p '#{pane_id}' 2>/dev/null || true)"
-
-        if [ "$orig_focus" = "$sub_pane" ]; then
-            sidebar_tmux_cmd swap-pane -d -s "$launcher_pane" -t "$sub_pane" \; resize-pane -t "$sub_pane" -y "$resize_h" \; select-pane -t "$sub_pane" 2>/dev/null || true
-        elif [ "$orig_focus" = "$launcher_pane" ]; then
-            sidebar_tmux_cmd swap-pane -d -s "$launcher_pane" -t "$sub_pane" \; resize-pane -t "$sub_pane" -y "$resize_h" \; select-pane -t "$launcher_pane" 2>/dev/null || true
-        elif [ -n "$orig_focus" ]; then
-            sidebar_tmux_cmd swap-pane -d -s "$launcher_pane" -t "$sub_pane" \; resize-pane -t "$sub_pane" -y "$resize_h" \; select-pane -t "$orig_focus" 2>/dev/null || true
-        else
-            sidebar_tmux_cmd swap-pane -d -s "$launcher_pane" -t "$sub_pane" \; resize-pane -t "$sub_pane" -y "$resize_h" 2>/dev/null || true
-        fi
-
+        sidebar_tmux_cmd swap-pane -d -s "$launcher_pane" -t "$sub_pane" \; resize-pane -t "$sub_pane" -y "$resize_h" 2>/dev/null || true
         sidebar_tmux_cmd set-option -gq "$opt" "$target_h" 2>/dev/null || true
         persist_sidebar_subpane_height "$target_h" 2>/dev/null || true
 
