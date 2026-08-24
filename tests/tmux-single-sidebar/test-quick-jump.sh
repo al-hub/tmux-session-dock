@@ -29,12 +29,12 @@ work_pane="$(tmux -L "$SOCKET" list-panes -t "$win" -F '#{pane_id}|#{pane_title}
 
 echo "=== [2/4] Verifying focus jump from Work Pane to Sidebar ==="
 tmux -L "$SOCKET" select-pane -t "$work_pane"
-active_before="$(tmux -L "$SOCKET" display-message -p '#{pane_id}')"
+active_before="$(tmux -L "$SOCKET" display-message -p -t "$win" '#{pane_id}')"
 [ "$active_before" = "$work_pane" ] || { echo "FAIL: Initial focus not in work pane"; exit 1; }
 
 # Execute quick-jump
 tmux -L "$SOCKET" run-shell "$BIN --focus-sidebar"
-active_after="$(tmux -L "$SOCKET" display-message -p '#{pane_id}')"
+active_after="$(tmux -L "$SOCKET" display-message -p -t "$win" '#{pane_id}')"
 if [ "$active_after" = "$sidebar_pane" ]; then
     echo "PASS: Quick jump moved focus from Work Pane to Sidebar."
 else
@@ -45,7 +45,7 @@ fi
 echo "=== [3/4] Verifying smart return toggle from Sidebar back to Work Pane ==="
 # Trigger quick-jump again while inside sidebar
 tmux -L "$SOCKET" run-shell "$BIN --focus-sidebar"
-active_return="$(tmux -L "$SOCKET" display-message -p '#{pane_id}')"
+active_return="$(tmux -L "$SOCKET" display-message -p -t "$win" '#{pane_id}')"
 if [ "$active_return" = "$work_pane" ]; then
     echo "PASS: Smart return moved focus back to Work Pane."
 else
@@ -61,11 +61,11 @@ subpane_pane="$(tmux -L "$SOCKET" list-panes -t "$win" -F '#{pane_id}|#{pane_tit
 
 if [ -n "$subpane_pane" ]; then
     tmux -L "$SOCKET" select-pane -t "$subpane_pane"
-    active_sub="$(tmux -L "$SOCKET" display-message -p '#{pane_id}')"
+    active_sub="$(tmux -L "$SOCKET" display-message -p -t "$win" '#{pane_id}')"
     [ "$active_sub" = "$subpane_pane" ] || { echo "FAIL: Focus not in subpane"; exit 1; }
 
     tmux -L "$SOCKET" run-shell "$BIN --focus-sidebar"
-    active_from_sub="$(tmux -L "$SOCKET" display-message -p '#{pane_id}')"
+    active_from_sub="$(tmux -L "$SOCKET" display-message -p -t "$win" '#{pane_id}')"
     if [ "$active_from_sub" = "$sidebar_pane" ]; then
         echo "PASS: Quick jump moved focus from Subpane to Sidebar."
     else

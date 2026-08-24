@@ -260,7 +260,7 @@ run_subpane_reproduction()
     }
 
     test_log "step=subpane.toggle_on"
-    send_keys 'm'
+    send_keys 's'
     wait_until 'subpane opened' 1 count_subpanes
 
     # Test Subpane Hub process persistence across toggles
@@ -276,7 +276,7 @@ run_subpane_reproduction()
     test_log "step=subpane.toggle_off_for_persistence_test"
     focus_sidebar_via_prefix
     wait_for_sidebar_input_ready
-    send_keys 'm'
+    send_keys 's'
     if ! wait_until 'subpane closed' 0 count_subpanes; then
         printf 'DEBUG: Pane list on failure:\n' >&2
         tmuxc list-panes -a -F '#{session_name}:#{window_id}:#{pane_id}|#{@dotfiles_sidebar_subpane}|#{pane_title}' >&2
@@ -286,7 +286,7 @@ run_subpane_reproduction()
     test_log "step=subpane.toggle_on_reopen"
     focus_sidebar_via_prefix
     wait_for_sidebar_input_ready
-    send_keys 'm'
+    send_keys 's'
     wait_until 'subpane reopened' 1 count_subpanes
 
     sub_p="$(tmuxc list-panes -t "$win_id" -F '#{pane_id}|#{@dotfiles_sidebar_subpane}' 2>/dev/null | awk -F '|' '$2 == "1" { print $1; exit }')"
@@ -301,7 +301,7 @@ run_subpane_reproduction()
     test_log "step=subpane.toggle_off_final"
     focus_sidebar_via_prefix
     wait_for_sidebar_input_ready
-    send_keys 'm'
+    send_keys 's'
     wait_until 'subpane closed finally' 0 count_subpanes
 
     printf 'PASS: subpane toggled on/off, preserved process across toggles, and unified clean prompt\n'

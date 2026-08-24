@@ -2313,7 +2313,13 @@ focus_or_toggle_sidebar()
         target_win="$target_arg"
     else
         target_win="$(active_client_window 2>/dev/null || true)"
-        [ -n "$target_win" ] || target_win="$(sidebar_tmux_cmd display-message -p '#{window_id}' 2>/dev/null || true)"
+        if [ -z "$target_win" ] || is_infrastructure_session "$(sidebar_tmux_cmd display-message -p -t "$target_win" '#{session_name}' 2>/dev/null || true)"; then
+            target_win="$(subpane_hub_get_lease_holder 2>/dev/null || true)"
+        fi
+        if [ -z "$target_win" ] || is_infrastructure_session "$(sidebar_tmux_cmd display-message -p -t "$target_win" '#{session_name}' 2>/dev/null || true)"; then
+            target_win="$(sidebar_tmux_cmd list-windows -a -F '#{window_id}|#{session_name}' 2>/dev/null |
+                awk -F '|' '$2 != "dotfiles-subpane-hub" { print $1; exit }')"
+        fi
     fi
     [ -n "$target_win" ] || return 0
 

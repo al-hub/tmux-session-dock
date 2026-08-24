@@ -488,10 +488,10 @@ ensure_sidebar_subpane_window() {
         fi
         [ -n "$expected_count" ] || expected_count=1
 
-        # Always run through atomic_migrate (Egress-first) so that any stale/ghost
-        # panes left from a previous window are swept out before ingress.
-        # The old count-based short-circuit is intentionally removed here.
-        provision_sidebar_subpane "$window_id" "$launcher_pane" "" "" >/dev/null 2>&1 || true
+        # Always run through canonical lease movement. Identity reconciliation
+        # makes a correct target a no-op and removes duplicates before transfer.
+        provision_sidebar_subpane "$window_id" "$launcher_pane" "" "" >/dev/null 2>&1
+        return $?
 
     else
         local sub_pane
@@ -612,4 +612,3 @@ destroy_sidebar_window() {
         sidebar_tmux_cmd kill-pane -t "$sb_pane" 2>/dev/null || true
     fi
 }
-

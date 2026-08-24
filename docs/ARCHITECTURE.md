@@ -8,7 +8,8 @@
 graph TD
     subgraph "tmux Server"
         COORDINATOR["Singleton Coordinator Hub"]
-        SUBPANE_HUB["Singleton Subpane Hub Session"]
+        SUBPANE_HUB["Singleton Subpane Pool"]
+        HUB_KEEPER["Idle Hub Keeper"]
         EPOCH["Global Topology Epoch Tracker"]
     end
 
@@ -24,7 +25,8 @@ graph TD
 
     COORDINATOR --> PRESENTER_1
     COORDINATOR --> PRESENTER_2
-    SUBPANE_HUB -.-> PRESENTER_1
+    HUB_KEEPER --> SUBPANE_HUB
+    SUBPANE_HUB -. "exclusive lease" .-> PRESENTER_1
     EPOCH --> COORDINATOR
 ```
 
@@ -35,3 +37,12 @@ graph TD
 3. **0.75ms Fast-Path & In-Flight Handover**: In-place switching returns within 0.75ms with zero screen flicker.
 4. **Clean Shared History**: Session archive and restoration (`o`) preserves shell history with Zero Time-Travel Pollution.
 5. **24-Frame LUT Waveform Engine**: Real-time asynchronous background AI activity telemetry rendered at 30 FPS.
+
+## 3. Subpane Pool Invariants
+
+1. **Stable Slot Identity**: Each configured Subpane Slot has exactly one canonical tmux pane identity for the lifetime of the tmux server.
+2. **Exclusive Lease**: The complete Subpane Pool is attached to at most one Presenter Window; source windows retain no duplicate slot roles.
+3. **Idle Hub Keeper**: One unmarked idle pane keeps the infrastructure session alive while all Subpane Slots are leased out. It never runs a shell, renders content, or participates in a slot.
+4. **Direct Lease Movement**: Canonical slots move directly from the current Presenter Window to the next. The Hub is used for parking while disabled, not as an intermediate migration stage.
+5. **Mutation-Only Reconciliation**: Global identity reconciliation runs only during topology mutation. There is no background polling, forced client refresh, or redraw loop.
+6. **Caller-Owned Focus**: Subpane Pool movement preserves the active pane. Session-switch and user-entry callers own focus decisions.
