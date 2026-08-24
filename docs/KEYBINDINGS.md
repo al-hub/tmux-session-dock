@@ -16,19 +16,19 @@ Supports both standard English keys and Korean (2-Set IME) keys seamlessly witho
 
 ## 2. Inside the Session Dock TUI
 
-| Key (EN) | Key (KR) | Action |
+| Primary / Zero-Lag Key | Vim / Korean Key | Action Description |
 | :--- | :--- | :--- |
-| **`↓` / `j`** | **`↓` / `ㅓ`** | Navigate session rows downward |
-| **`↑` / `k`** | **`↑` / `ㅏ`** | Navigate session rows upward |
+| **`↓` / `Ctrl + n`** | **`j` / `ㅓ`** | Navigate session rows downward |
+| **`↑` / `Ctrl + p`** | **`k` / `ㅏ`** | Navigate session rows upward |
 | **`Enter`** | **`Enter`** | Switch immediately to selected session |
-| **`c`** | **`ㅊ`** | Create new named session |
-| **`r`** | **`ㄱ`** | Rename selected session |
-| **`d`** | **`ㅇ`** | Delete / Archive current session |
-| **`o` / `O`** | **`ㅐ` / `ㅒ`** | Open / Toggle session archive & restoration view |
-| **`s` / `S`** | **`ㄴ`** | Toggle subpane (terminal) open / close |
-| **`p` / `P`** | **`ㅔ` / `ㅖ`** | Swap subpane position (Top ↔ Bottom) |
-| **`Space`** | **`Space`** | Mark / unmark selected row (history mode) |
-| **`a`** | **`ㅁ`** | Mark / unmark all rows (history mode) |
+| **`Delete` / `Backspace` / `Ctrl + d`** | **`d` / `ㅇ`** | Delete / Archive current session |
+| **`F2` / `Ctrl + r`** | **`r` / `ㄱ`** | Rename selected session |
+| **`+` / `Insert`** | **`c` / `ㅊ`** | Create new named session |
+| **`Tab`** | **`o` / `ㅐ`** | Toggle session archive & restoration view |
+| **`s` / `ㄴ`** | **`s` / `ㄴ`** | Toggle subpane (terminal) open / close |
+| **`p` / `ㅔ`** | **`p` / `ㅔ`** | Swap subpane position (Top ↔ Bottom) |
+| **`Space`** | **`Space`** | Mark / unmark selected row |
+| **`a` / `ㅁ`** | **`a` / `ㅁ`** | Mark / unmark all rows |
 | **`/`** | **`/`** | Search / filter session list |
-| **`h` / `?`** | **`ㅗ` / `?`** | View keybinding help popup |
-| **`q` / `Esc`** | **`ㅂ` / `Esc`** | Close dock sidebar and return to work pane |
+| **`h` / `?` / `ㅗ`** | **`h` / `?` / `ㅗ`** | View keybinding help popup |
+| **`Esc` / `Ctrl + c`** | **`q` / `ㅂ`** | Close dock sidebar and return to work pane |

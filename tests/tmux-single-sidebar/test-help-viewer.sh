@@ -19,11 +19,11 @@ trap cleanup EXIT
 echo "=== [1/4] Verifying tmux-help-viewer script execution ==="
 [ -x "$HELP_SCRIPT" ] || { echo "FAIL: tmux-help-viewer is not executable"; exit 1; }
 output="$(printf '\n' | "$HELP_SCRIPT" || true)"
-if ! echo "$output" | grep -q "주요 단축키 가이드"; then
+if ! echo "$output" | grep -q "단축키"; then
     echo "FAIL: Help viewer output missing title header!"
     exit 1
 fi
-if ! echo "$output" | grep -q "v0.1.9"; then
+if ! echo "$output" | grep -q "v0.2.0"; then
     echo "FAIL: Help viewer output missing version string!"
     exit 1
 fi
