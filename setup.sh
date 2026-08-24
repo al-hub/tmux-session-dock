@@ -37,11 +37,7 @@ resolve_repo_root() {
             return 0
         fi
     fi
-    if [ -f "./scripts/build-dist.sh" ]; then
-        pwd
-        return 0
-    fi
-    # If running remotely via curl, use INSTALL_DIR
+    # If running remotely via curl/stdin pipe, always target INSTALL_DIR
     echo "$INSTALL_DIR"
 }
 
@@ -55,7 +51,7 @@ ensure_repo_present() {
             git clone "$REPO_URL" "$INSTALL_DIR"
         else
             log_info "Syncing latest changes in $INSTALL_DIR..."
-            (cd "$INSTALL_DIR" && git pull --ff-only origin main 2>/dev/null || git pull origin master 2>/dev/null || true)
+            (cd "$INSTALL_DIR" && git fetch origin main 2>/dev/null && git checkout -B main origin/main 2>/dev/null || git pull --ff-only origin main 2>/dev/null || true)
         fi
         SCRIPT_DIR="$INSTALL_DIR"
     fi
@@ -208,9 +204,18 @@ do_update() {
     ensure_repo_present
     cd "$SCRIPT_DIR"
     if [ -d ".git" ]; then
-        git pull --ff-only origin main || git pull origin master || true
+        git fetch origin main 2>/dev/null && git checkout -B main origin/main 2>/dev/null || git pull --ff-only origin main 2>/dev/null || true
     fi
     do_build
+
+    # Update symlinks
+    mkdir -p "$BIN_DIR"
+    ln -sf "$SCRIPT_DIR/dist/tmux-session-dock" "$BIN_DIR/tmux-session-dock"
+    ln -sf "$SCRIPT_DIR/dist/tmux-sidebar-tmux-adapter" "$BIN_DIR/tmux-sidebar-tmux-adapter"
+    ln -sf "$SCRIPT_DIR/scripts/tmux-theme-picker" "$BIN_DIR/tmux-theme-picker"
+    ln -sf "$SCRIPT_DIR/scripts/tmux-command-palette" "$BIN_DIR/tmux-command-palette"
+    ln -sf "$SCRIPT_DIR/scripts/tmux-help-viewer" "$BIN_DIR/tmux-help-viewer"
+    log_ok "Symlinks updated in $BIN_DIR"
 
     local user_theme_dir="${XDG_CONFIG_HOME:-$HOME/.config}/tmux/themes"
     if [ -d "$user_theme_dir" ]; then
