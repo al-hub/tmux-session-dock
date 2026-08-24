@@ -33,6 +33,7 @@ LIBS=(
     "sidebar_topology.sh"
     "sidebar_switch.sh"
     "sidebar_presenter.sh"
+    "sidebar_ime.sh"
     "sidebar_coordinator.sh"
     "sidebar_archive.sh"
 )

@@ -5,7 +5,7 @@
 # ==============================================================================
 set -euo pipefail
 
-VERSION="v0.1.7"
+VERSION="v0.1.8"
 REPO_URL="https://github.com/al-hub/tmux-session-dock.git"
 INSTALL_DIR="${TMUX_DOCK_INSTALL_DIR:-$HOME/.local/share/tmux-session-dock}"
 BIN_DIR="${TMUX_DOCK_BIN_DIR:-$HOME/.local/bin}"
@@ -91,6 +91,22 @@ do_test() {
     bash "$SCRIPT_DIR/tests/run-tests.sh" "$@"
 }
 
+ensure_ime_support() {
+    # Check if WSL2 environment without im-select.exe
+    if grep -qi "microsoft" /proc/version 2>/dev/null || [ -n "${WSL_DISTRO_NAME:-}" ]; then
+        if ! command -v im-select.exe >/dev/null 2>&1 && [ ! -x "$BIN_DIR/im-select.exe" ]; then
+            log_info "WSL2 environment detected: downloading lightweight im-select.exe helper..."
+            mkdir -p "$BIN_DIR"
+            if curl -fsSL "https://raw.githubusercontent.com/daipeihost/im-select/master/win/im-select.exe" -o "$BIN_DIR/im-select.exe" 2>/dev/null; then
+                chmod +x "$BIN_DIR/im-select.exe" 2>/dev/null || true
+                log_ok "im-select.exe installed in $BIN_DIR (enables 0ms auto-IME switching)"
+            else
+                log_info "Skipping im-select.exe download (pure fallback mode active)"
+            fi
+        fi
+    fi
+}
+
 do_status() {
     echo -e "${CYAN}${BOLD}======================================================================${NC}"
     echo -e "  ${BOLD}tmux-session-dock - Status & Diagnostics (${VERSION})${NC}"
@@ -126,6 +142,20 @@ do_status() {
         echo -e "  tmux Server:  ${RED}NOT DETECTED${NC}"
     fi
 
+    # Check IME Auto-Switch Backend
+    local ime_backend="none"
+    if [ -r "$SCRIPT_DIR/scripts/lib/sidebar_ime.sh" ]; then
+        # shellcheck disable=SC1091
+        source "$SCRIPT_DIR/scripts/lib/sidebar_ime.sh"
+        ime_backend="$(sidebar_ime_detect_backend)"
+    fi
+    case "$ime_backend" in
+        wsl*)   echo -e "  IME Switcher: ${GREEN}ACTIVE (WSL2 im-select.exe)${NC}" ;;
+        mac*)   echo -e "  IME Switcher: ${GREEN}ACTIVE (macOS im-select)${NC}" ;;
+        linux*) echo -e "  IME Switcher: ${GREEN}ACTIVE (Linux $ime_backend)${NC}" ;;
+        *)      echo -e "  IME Switcher: ${CYAN}PASSIVE (Pure Fallback Ready)${NC}" ;;
+    esac
+
     # Check ~/.tmux.conf configuration
     if [ -f "$CONFIG_FILE" ] && grep -q "tmux-session-dock" "$CONFIG_FILE" 2>/dev/null; then
         echo -e "  ~/.tmux.conf: ${GREEN}CONFIGURED${NC} ($CONFIG_FILE)"
@@ -158,6 +188,7 @@ do_install() {
 
     # 2. Setup symlinks in BIN_DIR
     mkdir -p "$BIN_DIR"
+    ensure_ime_support
     ln -sf "$SCRIPT_DIR/dist/tmux-session-dock" "$BIN_DIR/tmux-session-dock"
     ln -sf "$SCRIPT_DIR/dist/tmux-sidebar-tmux-adapter" "$BIN_DIR/tmux-sidebar-tmux-adapter"
     ln -sf "$SCRIPT_DIR/scripts/tmux-theme-picker" "$BIN_DIR/tmux-theme-picker"
@@ -207,6 +238,7 @@ do_update() {
 
     # Update symlinks
     mkdir -p "$BIN_DIR"
+    ensure_ime_support
     ln -sf "$SCRIPT_DIR/dist/tmux-session-dock" "$BIN_DIR/tmux-session-dock"
     ln -sf "$SCRIPT_DIR/dist/tmux-sidebar-tmux-adapter" "$BIN_DIR/tmux-sidebar-tmux-adapter"
     ln -sf "$SCRIPT_DIR/scripts/tmux-theme-picker" "$BIN_DIR/tmux-theme-picker"

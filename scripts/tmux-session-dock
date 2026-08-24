@@ -60,6 +60,7 @@ SIDEBAR_ADAPTER_PATH="$LAUNCHER_DIR/tmux-sidebar-tmux-adapter"
 [ -r "$LAUNCHER_DIR/lib/sidebar_topology.sh" ] && source "$LAUNCHER_DIR/lib/sidebar_topology.sh"
 [ -r "$LAUNCHER_DIR/lib/sidebar_switch.sh" ] && source "$LAUNCHER_DIR/lib/sidebar_switch.sh"
 [ -r "$LAUNCHER_DIR/lib/sidebar_presenter.sh" ] && source "$LAUNCHER_DIR/lib/sidebar_presenter.sh"
+[ -r "$LAUNCHER_DIR/lib/sidebar_ime.sh" ] && source "$LAUNCHER_DIR/lib/sidebar_ime.sh"
 [ -r "$LAUNCHER_DIR/lib/sidebar_coordinator.sh" ] && source "$LAUNCHER_DIR/lib/sidebar_coordinator.sh"
 [ -r "$LAUNCHER_DIR/lib/sidebar_archive.sh" ] && source "$LAUNCHER_DIR/lib/sidebar_archive.sh"
 source "$SIDEBAR_ADAPTER_PATH"
@@ -2268,6 +2269,7 @@ open_sidebar()
 
 focus_or_toggle_sidebar()
 {
+    declare -f sidebar_ime_switch_to_english >/dev/null 2>&1 && sidebar_ime_switch_to_english "sidebar" || true
     local target_arg="${1:-}"
     local target_win=""
     if [ -n "$target_arg" ]; then
@@ -2297,6 +2299,7 @@ focus_or_toggle_sidebar()
 
 toggle_current_sidebar()
 {
+    declare -f sidebar_ime_switch_to_english >/dev/null 2>&1 && sidebar_ime_switch_to_english "sidebar" || true
     local target_arg="${1:-}"
     local existing_count owner_client current_client
     owner_client="$(sidebar_owner_client)"
@@ -7259,6 +7262,7 @@ handle_mouse_select()
 run_tui()
 {
     local action_generation=0
+    declare -f sidebar_ime_switch_to_english >/dev/null 2>&1 && sidebar_ime_switch_to_english "sidebar" || true
     trace_event "sidebar.process.begin pane=${TMUX_PANE:-none}"
     setup_terminal
     if [ -n "${TMUX_PANE:-}" ]; then
