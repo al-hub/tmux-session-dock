@@ -1620,17 +1620,17 @@ sidebar_switch_reconcile_cold() {
 sidebar_presenter_map_key() {
     local key="$1"
     case "$key" in
-        q|Q|ㅂ) echo "QUIT" ;;
-        s|S|ㄴ) echo "TOGGLE" ;;
-        j|J|ㅓ) echo "DOWN" ;;
-        k|K|ㅏ) echo "UP" ;;
-        o|O|ㅐ|ㅒ) echo "HISTORY" ;;
-        c|C|ㅊ) echo "CREATE" ;;
-        r|R|ㄱ) echo "RENAME" ;;
-        d|D|ㅇ) echo "DELETE" ;;
-        p|P|ㅔ|ㅖ) echo "SWAP_POSITION" ;;
-        a|A|ㅁ) echo "MARK_ALL" ;;
-        h|H|ㅗ|\?) echo "HELP" ;;
+        q|Q|ㅂ|ᄇ) echo "QUIT" ;;
+        s|S|ㄴ|ᄂ) echo "TOGGLE" ;;
+        j|J|ㅓ|ᅥ) echo "DOWN" ;;
+        k|K|ㅏ|ᅡ) echo "UP" ;;
+        o|O|ㅐ|ᅢ|ㅒ|ᅤ) echo "HISTORY" ;;
+        c|C|ㅊ|ᄎ) echo "CREATE" ;;
+        r|R|ㄱ|ᄀ) echo "RENAME" ;;
+        d|D|ㅇ|ᄋ) echo "DELETE" ;;
+        p|P|ㅔ|ᅦ|ㅖ|ᅨ) echo "SWAP_POSITION" ;;
+        a|A|ㅁ|ᄆ) echo "MARK_ALL" ;;
+        h|H|ㅗ|ᅩ|\?) echo "HELP" ;;
         *) echo "UNKNOWN" ;;
     esac
 }
@@ -1910,6 +1910,10 @@ sidebar_archive_validate_file()
 # <<< MODULE: sidebar_archive.sh <<<
 
 # >>> CORE ENTRYPOINT >>>
+
+# Ensure UTF-8 locale for accurate multi-byte input reading
+export LC_ALL="${LC_ALL:-C.UTF-8}"
+export LANG="${LANG:-C.UTF-8}"
 
 resolve_launcher_dir() {
     local target="${BASH_SOURCE[0]}"
@@ -8939,6 +8943,24 @@ read_key()
     fi
     key_raw="$key"
 
+    # Multi-byte UTF-8 robust assembly fallback (for environments without full UTF-8 locale)
+    if [ -n "$key" ]; then
+        local dec
+        dec=$(printf '%d' "'$key" 2>/dev/null || echo "0")
+        if [ "$dec" -ge 224 ] && [ "$dec" -le 239 ]; then
+            local b2 b3
+            IFS= read -rsn1 -t 0.05 b2 || true
+            IFS= read -rsn1 -t 0.05 b3 || true
+            key="$key$b2$b3"
+            key_raw="$key"
+        elif [ "$dec" -ge 192 ] && [ "$dec" -le 223 ]; then
+            local b2
+            IFS= read -rsn1 -t 0.05 b2 || true
+            key="$key$b2"
+            key_raw="$key"
+        fi
+    fi
+
     if [ "$key" = $'\033' ]; then
         IFS= read -rsn2 -t 0.05 rest || true
         key_raw+="$rest"
@@ -8952,19 +8974,19 @@ read_key()
     fi
 
     case "$key" in
-        j|J|ㅓ) key_result=down ;;
-        k|K|ㅏ) key_result=up ;;
-        c|C|ㅊ) key_result=create ;;
-        r|R|ㄱ) key_result=rename ;;
-        d|D|ㅇ) key_result=delete ;;
+        j|J|ㅓ|ᅥ) key_result=down ;;
+        k|K|ㅏ|ᅡ) key_result=up ;;
+        c|C|ㅊ|ᄎ) key_result=create ;;
+        r|R|ㄱ|ᄀ) key_result=rename ;;
+        d|D|ㅇ|ᄋ) key_result=delete ;;
         /) key_result=filter ;;
-        o|O|ㅐ|ㅒ) key_result=history ;;
-        h|H|ㅗ|\?) key_result=help ;;
+        o|O|ㅐ|ᅢ|ㅒ|ᅤ) key_result=history ;;
+        h|H|ㅗ|ᅩ|\?) key_result=help ;;
         ' ') key_result=mark ;;
-        a|A|ㅁ) key_result=mark-all ;;
-        s|S|ㄴ) key_result=toggle-subpane ;;
-        p|P|ㅔ|ㅖ) key_result=swap-subpane-position ;;
-        q|Q|ㅂ) key_result=quit ;;
+        a|A|ㅁ|ᄆ) key_result=mark-all ;;
+        s|S|ㄴ|ᄂ) key_result=toggle-subpane ;;
+        p|P|ㅔ|ᅦ|ㅖ|ᅨ) key_result=swap-subpane-position ;;
+        q|Q|ㅂ|ᄇ) key_result=quit ;;
         ''|$'\n'|$'\r')
             key_result=enter
             [ -n "$key_raw" ] || key_raw=$'\r'
@@ -9347,12 +9369,12 @@ run_tui()
                     toggle_history_mark_all
                 fi
                 ;;
-            s|S|ㄴ|toggle-subpane)
+            s|S|ㄴ|ᄂ|toggle-subpane)
                 trace_event "action.begin type=toggle-subpane"
                 toggle_sidebar_subpane_global "${SIDEBAR_WINDOW_ID:-}"
                 request_full_render subpane-toggle
                 ;;
-            p|P|ㅔ|ㅖ|swap-subpane-position)
+            p|P|ㅔ|ᅦ|ㅖ|ᅨ|swap-subpane-position)
                 trace_event "action.begin type=swap-subpane-position"
                 sidebar_subpane_swap_position "${SIDEBAR_WINDOW_ID:-}"
                 request_full_render subpane-swap
