@@ -225,21 +225,38 @@ remember_sidebar_subpane_height_for_window() {
     if declare -f is_infrastructure_session >/dev/null 2>&1 && is_infrastructure_session "$win_sess"; then
         return 0
     fi
-    local sub_pane
-    sub_pane="$(sidebar_window_subpane "$window_id" || true)"
-    [ -n "$sub_pane" ] || return 0
-    local height
-    height="$(sidebar_tmux_cmd display-message -p -t "$sub_pane" '#{pane_height}' 2>/dev/null || true)"
-    case "$height" in
-        ''|*[!0-9]*) return 0 ;;
-        *)
-            if [ "$height" -ge 4 ] 2>/dev/null; then
-                local opt="${SIDEBAR_SUBPANE_HEIGHT_OPTION:-@dotfiles_sidebar_subpane_height}"
-                sidebar_tmux_cmd set-option -gq "$opt" "$height" 2>/dev/null || true
-                persist_sidebar_subpane_height "$height" 2>/dev/null || true
-            fi
-            ;;
-    esac
+
+    local sub_panes=()
+    if declare -f subpane_hub_get_window_subpanes >/dev/null 2>&1; then
+        while IFS= read -r p_id; do
+            [ -n "$p_id" ] || continue
+            sub_panes+=("$p_id")
+        done < <(subpane_hub_get_window_subpanes "$window_id")
+    fi
+
+    if [ "${#sub_panes[@]}" -eq 0 ]; then
+        local sub_pane
+        sub_pane="$(sidebar_window_subpane "$window_id" || true)"
+        [ -n "$sub_pane" ] || return 0
+        sub_panes=("$sub_pane")
+    fi
+
+    local total_h=0 idx=0
+    for p in "${sub_panes[@]}"; do
+        local h
+        h="$(sidebar_tmux_cmd display-message -p -t "$p" '#{pane_height}' 2>/dev/null || true)"
+        if [ -n "$h" ] && [ "$h" -ge 2 ] 2>/dev/null; then
+            sidebar_tmux_cmd set-option -gq "@dotfiles_subpane_slot_$((idx + 1))_height" "$h" 2>/dev/null || true
+            total_h=$((total_h + h))
+        fi
+        idx=$((idx + 1))
+    done
+
+    if [ "$total_h" -ge 4 ] 2>/dev/null; then
+        local opt="${SIDEBAR_SUBPANE_HEIGHT_OPTION:-@dotfiles_sidebar_subpane_height}"
+        sidebar_tmux_cmd set-option -gq "$opt" "$total_h" 2>/dev/null || true
+        persist_sidebar_subpane_height "$total_h" 2>/dev/null || true
+    fi
 }
 
 sync_attached_subpane_user_intent() {
