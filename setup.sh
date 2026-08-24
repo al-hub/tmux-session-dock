@@ -203,9 +203,6 @@ do_update() {
     log_info "Updating tmux-session-dock..."
     ensure_repo_present
     cd "$SCRIPT_DIR"
-    if [ -d ".git" ]; then
-        git fetch origin main 2>/dev/null && git checkout -B main origin/main 2>/dev/null || git pull --ff-only origin main 2>/dev/null || true
-    fi
     do_build
 
     # Update symlinks
