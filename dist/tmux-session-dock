@@ -1293,14 +1293,16 @@ subpane_hub_swap_stack_position() {
 
     local panes=()
     local heights=()
-    local p_id
+    local p_id idx_read=0
     while IFS= read -r p_id; do
         [ -n "$p_id" ] || continue
         panes+=("$p_id")
         local p_h
         p_h="$(sidebar_tmux_cmd display-message -p -t "$p_id" '#{pane_height}' 2>/dev/null || echo 6)"
-        [ "$p_h" -ge 4 ] 2>/dev/null || p_h=6
+        [ "$p_h" -ge 2 ] 2>/dev/null || p_h=6
         heights+=("$p_h")
+        sidebar_tmux_cmd set-option -gq "@dotfiles_subpane_slot_$((idx_read + 1))_height" "$p_h" 2>/dev/null || true
+        idx_read=$((idx_read + 1))
     done < <(subpane_hub_get_window_subpanes "$target_win")
 
     [ "${#panes[@]}" -gt 0 ] || return 0
@@ -1312,11 +1314,6 @@ subpane_hub_swap_stack_position() {
         new_pos="bottom"
     fi
     sidebar_subpane_set_position "$new_pos"
-
-    local pos_flag=""
-    if [ "$new_pos" = "top" ]; then
-        pos_flag="-b"
-    fi
 
     local hub_sess
     hub_sess="$(subpane_hub_session_name)"
@@ -1330,18 +1327,28 @@ subpane_hub_swap_stack_position() {
     done
 
     # 2. Sequentially re-join all subpanes as an atomic stack in the new direction
+    local total_panes="${#panes[@]}"
     local last_attached="$launcher_pane"
     local idx=0
     for p_id in "${panes[@]}"; do
         local slot_h="${heights[$idx]:-6}"
         local slot_pos_flag=""
+        local join_l="$slot_h"
+
+        local cum_h=0
+        for ((j=idx; j<total_panes; j++)); do
+            cum_h=$((cum_h + ${heights[$j]:-6}))
+        done
+        local remaining_borders=$((total_panes - 1 - idx))
+        join_l=$((cum_h + remaining_borders))
+
         if [ "$idx" -eq 0 ] && [ "$new_pos" = "top" ]; then
             slot_pos_flag="-b"
         fi
-        if ! sidebar_tmux_cmd join-pane -d $slot_pos_flag -s "$p_id" -t "$last_attached" -v -l "$slot_h" 2>/dev/null; then
+
+        if ! sidebar_tmux_cmd join-pane -d $slot_pos_flag -s "$p_id" -t "$last_attached" -v -l "$join_l" 2>/dev/null; then
             sidebar_tmux_cmd join-pane -d $slot_pos_flag -s "$p_id" -t "$last_attached" -v 2>/dev/null || true
         fi
-        sidebar_tmux_cmd resize-pane -t "$p_id" -y "$slot_h" 2>/dev/null || true
         sidebar_tmux_cmd set-option -p -q -t "$p_id" @dotfiles_subpane_hub_pane 1 2>/dev/null || true
         sidebar_tmux_cmd set-option -p -q -t "$p_id" @dotfiles_sidebar_subpane 1 2>/dev/null || true
         sidebar_tmux_cmd set-option -p -q -t "$p_id" @dotfiles_subpane_slot "$((idx + 1))" 2>/dev/null || true
@@ -1386,12 +1393,8 @@ subpane_hub_acquire_pane() {
         sub_pos="$(sidebar_subpane_get_position 2>/dev/null || echo bottom)"
     fi
 
-    # Calculate proportional height per slot
-    local slot_h
-    slot_h="$((height / max_count))"
-    [ "$slot_h" -ge 4 ] || slot_h=4
-
-    local slot last_attached_pane="$target_launcher" first_pane=""
+    # Pre-resolve all slot heights
+    local resolved_panes=() resolved_heights=()
     for ((slot=1; slot<=max_count; slot++)); do
         local slot_pane
         slot_pane="$(subpane_hub_get_pane "$slot" || true)"
@@ -1401,25 +1404,59 @@ subpane_hub_acquire_pane() {
         fi
         [ -n "$slot_pane" ] || continue
 
+        local slot_h=""
+        local live_h
+        slot_h="$(sidebar_tmux_cmd show-option -gqv "@dotfiles_subpane_slot_${slot}_height" 2>/dev/null || true)"
+        if [ -z "$slot_h" ] || [ "$slot_h" -lt 2 ] 2>/dev/null; then
+            local live_h
+            live_h="$(sidebar_tmux_cmd display-message -p -t "$slot_pane" '#{pane_height}' 2>/dev/null || true)"
+            if [ -n "$live_h" ] && [ "$live_h" -ge 2 ] 2>/dev/null; then
+                slot_h="$live_h"
+            else
+                slot_h="$((height / max_count))"
+                [ "$slot_h" -ge 4 ] || slot_h=4
+            fi
+        fi
+
+        resolved_panes+=("$slot_pane")
+        resolved_heights+=("$slot_h")
+    done
+
+    local total_slots="${#resolved_panes[@]}"
+    [ "$total_slots" -gt 0 ] || return 1
+
+    local last_attached_pane="$target_launcher" first_pane=""
+    for ((idx=0; idx<total_slots; idx++)); do
+        local slot_pane="${resolved_panes[$idx]}"
+        local slot_h="${resolved_heights[$idx]}"
         local current_win
         current_win="$(sidebar_tmux_cmd display-message -p -t "$slot_pane" '#{window_id}' 2>/dev/null || true)"
         local slot_pos_flag=""
-        if [ "$slot" -eq 1 ] && [ "$sub_pos" = "top" ]; then
+        local join_l="$slot_h"
+
+        local cum_h=0
+        for ((j=idx; j<total_slots; j++)); do
+            cum_h=$((cum_h + ${resolved_heights[$j]}))
+        done
+        local remaining_borders=$((total_slots - 1 - idx))
+        join_l=$((cum_h + remaining_borders))
+
+        if [ "$idx" -eq 0 ] && [ "$sub_pos" = "top" ]; then
             slot_pos_flag="-b"
         fi
 
         if [ "$current_win" != "$target_win" ]; then
-            if ! sidebar_tmux_cmd join-pane -d $slot_pos_flag -s "$slot_pane" -t "$last_attached_pane" -v -l "$slot_h" 2>/dev/null; then
+            if ! sidebar_tmux_cmd join-pane -d $slot_pos_flag -s "$slot_pane" -t "$last_attached_pane" -v -l "$join_l" 2>/dev/null; then
                 sidebar_tmux_cmd join-pane -d $slot_pos_flag -s "$slot_pane" -t "$last_attached_pane" -v 2>/dev/null || true
             fi
         fi
 
-        sidebar_tmux_cmd resize-pane -t "$slot_pane" -y "$slot_h" 2>/dev/null || true
         sidebar_tmux_cmd set-option -p -q -t "$slot_pane" allow-rename off 2>/dev/null || true
-        sidebar_tmux_cmd select-pane -t "$slot_pane" -T "${sub_title}-$slot" 2>/dev/null || true
+        sidebar_tmux_cmd select-pane -t "$slot_pane" -T "${sub_title}-$((idx + 1))" 2>/dev/null || true
         sidebar_tmux_cmd set-option -p -q -t "$slot_pane" @dotfiles_subpane_hub_pane 1 2>/dev/null || true
         sidebar_tmux_cmd set-option -p -q -t "$slot_pane" @dotfiles_sidebar_subpane 1 2>/dev/null || true
-        sidebar_tmux_cmd set-option -p -q -t "$slot_pane" @dotfiles_subpane_slot "$slot" 2>/dev/null || true
+        sidebar_tmux_cmd set-option -p -q -t "$slot_pane" @dotfiles_subpane_slot "$((idx + 1))" 2>/dev/null || true
+        sidebar_tmux_cmd set-option -gq "@dotfiles_subpane_slot_$((idx + 1))_height" "$slot_h" 2>/dev/null || true
 
         [ -z "$first_pane" ] && first_pane="$slot_pane"
         last_attached_pane="$slot_pane"
