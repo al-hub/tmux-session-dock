@@ -51,7 +51,7 @@ ensure_repo_present() {
             git clone "$REPO_URL" "$INSTALL_DIR"
         else
             log_info "Syncing latest changes in $INSTALL_DIR..."
-            (cd "$INSTALL_DIR" && git fetch origin main 2>/dev/null && git checkout -B main origin/main 2>/dev/null || git pull --ff-only origin main 2>/dev/null || true)
+            (cd "$INSTALL_DIR" && git fetch origin main 2>/dev/null && git reset --hard origin/main 2>/dev/null || true)
         fi
         SCRIPT_DIR="$INSTALL_DIR"
     fi
