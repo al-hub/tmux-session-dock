@@ -1225,31 +1225,16 @@ EOF
         sidebar_tmux_cmd set-hook -t "$hub_sess" -u window-unlinked 2>/dev/null || true
         sidebar_tmux_cmd set-hook -t "$hub_sess" -u session-created 2>/dev/null || true
         sidebar_tmux_cmd set-hook -t "$hub_sess" -u client-session-changed 2>/dev/null || true
-        sleep 0.2
-    fi
-
-    # Ensure slot panes (1..3) exist in hub session or server
-    local slot
-    for slot in 1 2 3; do
-        local slot_pane
-        slot_pane="$( (sidebar_tmux_cmd list-panes -a -F '#{pane_id}|#{@dotfiles_subpane_slot}' 2>/dev/null || true) | awk -F '|' -v s="$slot" '$2 == s { print $1; exit }')"
-        if [ -z "$slot_pane" ]; then
-            if [ "$slot" -eq 1 ]; then
-                slot_pane="$(sidebar_tmux_cmd list-panes -t "=$hub_sess:" -F '#{pane_id}' 2>/dev/null | head -n 1 || true)"
-            else
-                local cmd
-                cmd="$(subpane_hub_default_command)"
-                slot_pane="$(sidebar_tmux_cmd new-window -d -t "=$hub_sess:" -P -F '#{pane_id}' "$cmd" 2>/dev/null || true)"
-            fi
-            if [ -n "$slot_pane" ]; then
-                sidebar_tmux_cmd set-option -p -q -t "$slot_pane" @dotfiles_subpane_hub_pane 1 2>/dev/null || true
-                sidebar_tmux_cmd set-option -p -q -t "$slot_pane" @dotfiles_sidebar_subpane 1 2>/dev/null || true
-                sidebar_tmux_cmd set-option -p -q -t "$slot_pane" @dotfiles_subpane_slot "$slot" 2>/dev/null || true
-                sidebar_tmux_cmd set-option -p -q -t "$slot_pane" allow-rename off 2>/dev/null || true
-                sidebar_tmux_cmd select-pane -t "$slot_pane" -T "${SIDEBAR_SUBPANE_TITLE:-dotfiles-sidebar-subpane}-$slot" 2>/dev/null || true
-            fi
+        local init_pane
+        init_pane="$(sidebar_tmux_cmd list-panes -t "=$hub_sess:" -F '#{pane_id}' 2>/dev/null | head -n 1 || true)"
+        if [ -n "$init_pane" ]; then
+            sidebar_tmux_cmd set-option -p -q -t "$init_pane" @dotfiles_subpane_hub_pane 1 2>/dev/null || true
+            sidebar_tmux_cmd set-option -p -q -t "$init_pane" @dotfiles_sidebar_subpane 1 2>/dev/null || true
+            sidebar_tmux_cmd set-option -p -q -t "$init_pane" @dotfiles_subpane_slot 1 2>/dev/null || true
+            sidebar_tmux_cmd set-option -p -q -t "$init_pane" allow-rename off 2>/dev/null || true
+            sidebar_tmux_cmd select-pane -t "$init_pane" -T "${SIDEBAR_SUBPANE_TITLE:-dotfiles-sidebar-subpane}-1" 2>/dev/null || true
         fi
-    done
+    fi
 }
 
 subpane_hub_get_pane() {
@@ -1261,11 +1246,21 @@ subpane_hub_get_pane() {
         printf '%s\n' "$pane_id"
         return 0
     fi
-    # Fallback to general hub pane
-    pane_id="$( (sidebar_tmux_cmd list-panes -a -F '#{pane_id}|#{@dotfiles_subpane_hub_pane}' 2>/dev/null || true) | awk -F '|' '$2 == "1" { print $1; exit }')"
-    if [ -n "$pane_id" ]; then
-        printf '%s\n' "$pane_id"
-        return 0
+    # If slot > 1 not found, lazily create it in hub session on-demand
+    if subpane_hub_is_alive; then
+        local hub_sess cmd
+        hub_sess="$(subpane_hub_session_name)"
+        cmd="$(subpane_hub_default_command)"
+        pane_id="$(sidebar_tmux_cmd new-window -d -t "=$hub_sess:" -P -F '#{pane_id}' "$cmd" 2>/dev/null || true)"
+        if [ -n "$pane_id" ]; then
+            sidebar_tmux_cmd set-option -p -q -t "$pane_id" @dotfiles_subpane_hub_pane 1 2>/dev/null || true
+            sidebar_tmux_cmd set-option -p -q -t "$pane_id" @dotfiles_sidebar_subpane 1 2>/dev/null || true
+            sidebar_tmux_cmd set-option -p -q -t "$pane_id" @dotfiles_subpane_slot "$slot" 2>/dev/null || true
+            sidebar_tmux_cmd set-option -p -q -t "$pane_id" allow-rename off 2>/dev/null || true
+            sidebar_tmux_cmd select-pane -t "$pane_id" -T "${SIDEBAR_SUBPANE_TITLE:-dotfiles-sidebar-subpane}-$slot" 2>/dev/null || true
+            printf '%s\n' "$pane_id"
+            return 0
+        fi
     fi
     return 1
 }
