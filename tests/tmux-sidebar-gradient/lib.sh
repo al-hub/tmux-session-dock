@@ -196,6 +196,15 @@ load_launcher_functions()
     # shellcheck disable=SC1090
     source <(sed '/^main "\$@"$/d' "$LAUNCHER")
 
+    # These tests exercise the state/cache transition logic, not the
+    # interactive input fast path.  The production predicate polls stdin;
+    # depending on the runner, that can report input and skip every
+    # fingerprint probe, making this fixture environment-dependent.
+    collect_sessions_fast_path_active()
+    {
+        return 1
+    }
+
     # Declarations made by source inside this helper are local to the helper in Bash.
     # Recreate the launcher's arrays globally so its functions retain their real types.
     declare -ga session_names=()

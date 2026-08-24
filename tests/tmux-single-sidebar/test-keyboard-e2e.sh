@@ -196,9 +196,9 @@ case "$SYSCALL_TRACE" in
         ;;
 esac
 case "$SCENARIO" in
-    subpane|full|minimal|split-cycle|direct-layout|rapid-operations|session-create-latency|arbitrary-topology|multi-window-topology|window-local-switch|window-local-lifecycle|window-local-toggle|delete-zero-stale-row|history-select-all) ;;
+    subpane|subpane-focus-priority|subpane-entry-priority|full|minimal|split-cycle|direct-layout|rapid-operations|session-create-latency|arbitrary-topology|multi-window-topology|window-local-switch|window-local-lifecycle|window-local-toggle|delete-zero-stale-row|history-select-all) ;;
     *)
-        printf 'TMUX_KEYBOARD_E2E_SCENARIO must be subpane, full, minimal, split-cycle, direct-layout, rapid-operations, session-create-latency, arbitrary-topology, multi-window-topology, window-local-switch, window-local-lifecycle, window-local-toggle, delete-zero-stale-row, or history-select-all\n' >&2
+        printf 'TMUX_KEYBOARD_E2E_SCENARIO must be subpane, subpane-focus-priority, subpane-entry-priority, full, minimal, split-cycle, direct-layout, rapid-operations, session-create-latency, arbitrary-topology, multi-window-topology, window-local-switch, window-local-lifecycle, window-local-toggle, delete-zero-stale-row, or history-select-all\n' >&2
         exit 2
         ;;
 esac
@@ -221,7 +221,11 @@ fi
 
 count_sessions()
 {
-    tmuxc list-sessions -F '#{session_name}' 2>/dev/null | wc -l | tr -d ' '
+    # The launcher creates a server-wide subpane hub.  It is infrastructure,
+    # not a session a user created through the sidebar, so exclude it from
+    # user-visible session-count assertions.
+    tmuxc list-sessions -F '#{session_name}' 2>/dev/null |
+        awk '$0 != "dotfiles-subpane-hub" { count++ } END { print count + 0 }'
 }
 
 count_subpanes()
@@ -246,6 +250,46 @@ active_pane_title()
     else
         tmuxc display-message -p '#{pane_title}' 2>/dev/null || true
     fi
+}
+
+client_pane_id()
+{
+    local client_tty pane
+    client_tty="$(client_tty || true)"
+    if [ -n "$client_tty" ]; then
+        pane="$(tmuxc list-clients -F '#{client_tty}|#{pane_id}' 2>/dev/null |
+            awk -F '|' -v tty="$client_tty" '$1 == tty { print $2; exit }')"
+        [ -n "$pane" ] || pane="$(tmuxc display-message -c "$client_tty" -p '#{pane_id}' 2>/dev/null || true)"
+        [ -n "$pane" ] && {
+            printf '%s\n' "$pane"
+            return 0
+        }
+    fi
+    tmuxc display-message -p '#{pane_id}' 2>/dev/null || true
+}
+
+subpane_enabled()
+{
+    tmuxc show-option -gqv @dotfiles_sidebar_subpane_enabled 2>/dev/null || printf '0\n'
+}
+
+subpane_pane_id()
+{
+    local win_id
+    win_id="$(client_window_id 2>/dev/null || true)"
+    tmuxc list-panes -t "$win_id" -F '#{pane_id}|#{@dotfiles_sidebar_subpane}' 2>/dev/null |
+        awk -F '|' '$2 == "1" { print $1; exit }'
+}
+
+focus_client_pane()
+{
+    local pane_id="$1"
+    [ "$(client_pane_id)" = "$pane_id" ] && return 0
+    # The harness has one interactive client; a target-pane selection updates
+    # that client.  Do not use -c with its tty here: tmux accepts the pane
+    # selection but rejects a PTY path as a client target on some versions.
+    tmuxc select-pane -t "$pane_id" 2>/dev/null || return 1
+    wait_until "client focus $pane_id" "$pane_id" client_pane_id
 }
 
 run_subpane_reproduction()
@@ -305,6 +349,130 @@ run_subpane_reproduction()
     wait_until 'subpane closed finally' 0 count_subpanes
 
     printf 'PASS: subpane toggled on/off, preserved process across toggles, and unified clean prompt\n'
+}
+
+run_subpane_focus_priority_contract()
+{
+    local sidebar_pane work_pane subpane_pane
+
+    sidebar_pane="$(sidebar_pane_id)"
+    work_pane="$(tmuxc list-panes -t "$(client_window_id)" -F '#{pane_id}|#{pane_title}|#{@dotfiles_sidebar_subpane}' 2>/dev/null |
+        awk -F '|' '$2 != "dotfiles-session-sidebar" && $3 != "1" { print $1; exit }')"
+    [ -n "$sidebar_pane" ] && [ -n "$work_pane" ] || {
+        printf 'ERROR: subpane focus contract could not identify sidebar and work panes\n' >&2
+        return 1
+    }
+
+    # A bare `s` is delivered through the attached PTY. With work focus it
+    # must stay with the work pane rather than invoke the Sidebar TUI toggle.
+    focus_client_pane "$work_pane" || {
+        printf 'ERROR: could not focus work pane for subpane priority contract\n' >&2
+        return 1
+    }
+    [ "$(count_subpanes)" -eq 0 ] && [ "$(subpane_enabled)" != 1 ] || {
+        printf 'ERROR: subpane priority contract did not start disabled\n' >&2
+        return 1
+    }
+    test_log "step=subpane-focus.work.no-toggle pane=$work_pane"
+    send_keys 's'
+    sleep 0.2
+    [ "$(count_subpanes)" -eq 0 ] && [ "$(subpane_enabled)" != 1 ] && [ "$(client_pane_id)" = "$work_pane" ] || {
+        printf 'ERROR: work-pane s changed Subpane state or focus\n' >&2
+        return 1
+    }
+
+    # Sidebar focus is the only entry point. Opening retains Sidebar focus,
+    # leaving it as the priority pane for subsequent input.
+    focus_sidebar_via_prefix
+    wait_for_sidebar_input_ready
+    [ "$(client_pane_id)" = "$sidebar_pane" ] || {
+        printf 'ERROR: sidebar was not active before Subpane toggle\n' >&2
+        return 1
+    }
+    test_log "step=subpane-focus.sidebar.toggle-on pane=$sidebar_pane"
+    send_keys 's'
+    wait_until 'sidebar-focused subpane opened' 1 count_subpanes
+    [ "$(subpane_enabled)" = 1 ] && [ "$(client_pane_id)" = "$sidebar_pane" ] || {
+        printf 'ERROR: sidebar toggle did not retain Sidebar focus\n' >&2
+        return 1
+    }
+
+    subpane_pane="$(subpane_pane_id)"
+    [ -n "$subpane_pane" ] || {
+        printf 'ERROR: opened Subpane could not be identified\n' >&2
+        return 1
+    }
+
+    # With Subpane focus, `s` belongs to that terminal and must not be
+    # reinterpreted as a Sidebar command or move focus away.
+    focus_client_pane "$subpane_pane" || {
+        printf 'ERROR: could not focus Subpane for priority contract\n' >&2
+        return 1
+    }
+    test_log "step=subpane-focus.subpane.no-toggle pane=$subpane_pane"
+    send_keys 's'
+    sleep 0.2
+    [ "$(count_subpanes)" -eq 1 ] && [ "$(subpane_enabled)" = 1 ] && [ "$(client_pane_id)" = "$subpane_pane" ] || {
+        printf 'ERROR: Subpane-focused s changed Subpane state or focus\n' >&2
+        return 1
+    }
+
+    # Sidebar focus regains toggle ownership and retains that focus on close.
+    focus_sidebar_via_prefix
+    wait_for_sidebar_input_ready
+    test_log "step=subpane-focus.sidebar.toggle-off pane=$sidebar_pane"
+    send_keys 's'
+    wait_until 'sidebar-focused subpane closed' 0 count_subpanes
+    [ "$(subpane_enabled)" != 1 ] && [ "$(client_pane_id)" = "$sidebar_pane" ] || {
+        printf 'ERROR: sidebar close did not retain Sidebar focus\n' >&2
+        return 1
+    }
+
+    printf 'PASS: Subpane toggle accepts s only while Sidebar is focused\n'
+    printf 'PASS: Sidebar retains focus after Subpane open and close\n'
+    printf 'PASS: work and Subpane focus keep s out of Sidebar toggle handling\n'
+}
+
+run_subpane_entry_priority_contract()
+{
+    local sidebar_pane work_pane subpane_pane
+
+    sidebar_pane="$(sidebar_pane_id)"
+    work_pane="$(tmuxc list-panes -t "$(client_window_id)" -F '#{pane_id}|#{pane_title}|#{@dotfiles_sidebar_subpane}' 2>/dev/null |
+        awk -F '|' '$2 != "dotfiles-session-sidebar" && $3 != "1" { print $1; exit }')"
+    [ -n "$sidebar_pane" ] && [ -n "$work_pane" ] || {
+        printf 'ERROR: subpane entry contract could not identify sidebar and work panes\n' >&2
+        return 1
+    }
+
+    # --focus-sidebar is the public quick-focus entry request. From work it
+    # must select the Sidebar before any Subpane-specific interaction occurs.
+    focus_client_pane "$work_pane"
+    test_log "step=subpane-entry.work.request-sidebar pane=$work_pane"
+    tmuxc run-shell -b "$LAUNCHER --focus-sidebar"
+    wait_until 'work entry request focuses Sidebar' "$sidebar_pane" client_pane_id
+
+    # Open one Subpane from its valid Sidebar entry point, then issue the same
+    # public request while the client focus is inside the Subpane.
+    wait_for_sidebar_input_ready
+    send_keys 's'
+    wait_until 'entry-priority subpane opened' 1 count_subpanes
+    subpane_pane="$(subpane_pane_id)"
+    [ -n "$subpane_pane" ] || {
+        printf 'ERROR: entry-priority Subpane could not be identified\n' >&2
+        return 1
+    }
+    focus_client_pane "$subpane_pane"
+    test_log "step=subpane-entry.subpane.request-sidebar pane=$subpane_pane"
+    tmuxc run-shell -b "$LAUNCHER --focus-sidebar"
+    wait_until 'Subpane entry request focuses Sidebar' "$sidebar_pane" client_pane_id
+
+    # Leave the isolated scenario in its initial Subpane-disabled state.
+    wait_for_sidebar_input_ready
+    send_keys 's'
+    wait_until 'entry-priority subpane closed' 0 count_subpanes
+
+    printf 'PASS: Work/Subpane quick-focus requests prioritize Sidebar focus\n'
 }
 
 run_delete_zero_stale_row_reproduction()
@@ -2088,12 +2256,13 @@ for attempt in $(seq 1 100); do
 done
 
 # A control-mode client observes tmux notifications without being treated as
-# the user's input client. All client selectors above explicitly exclude it.
-coproc TMUX_OBSERVER {
+# the user's input client.  It is output-only, so a process-substitution pipe
+# is sufficient and avoids Bash's warning about a second live coprocess while
+# the attached PTY is intentionally still running.
+exec {OBSERVER_FD}< <(
     TERM=xterm HOME="$HOME_DIR" tmux -C -L "$SOCKET" -f "$REPO_ROOT/dotfiles/tmux.conf" attach-session -t "$ANCHOR_SESSION"
-}
-OBSERVER_PID="$TMUX_OBSERVER_PID"
-exec {OBSERVER_FD}<&"${TMUX_OBSERVER[0]}"
+)
+OBSERVER_PID="$!"
 observer_read_loop &
 OBSERVER_LOG_PID=$!
 sleep 0.1
@@ -2101,6 +2270,16 @@ test_log "observer.started pid=$OBSERVER_PID"
 
 if [ "$SCENARIO" = subpane ]; then
     run_subpane_reproduction
+    exit 0
+fi
+
+if [ "$SCENARIO" = subpane-focus-priority ]; then
+    run_subpane_focus_priority_contract
+    exit 0
+fi
+
+if [ "$SCENARIO" = subpane-entry-priority ]; then
+    run_subpane_entry_priority_contract
     exit 0
 fi
 
