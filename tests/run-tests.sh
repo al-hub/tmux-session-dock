@@ -207,6 +207,8 @@ case "${TARGET_SUITE}" in
             "${GRADIENT_DIR}/test-session-isolation.sh"
             "${GRADIENT_DIR}/test-six-session-visual-e2e.sh"
             "${GRADIENT_DIR}/test-enter-switch-gradient-e2e.sh"
+            "${GRADIENT_DIR}/test-empty-activity-enter-gradient-e2e.sh"
+            "${GRADIENT_DIR}/test-six-session-empty-activity-enter-gradient-e2e.sh"
             "${GRADIENT_DIR}/test-working-heartbeat-gradient-e2e.sh"
             "${GRADIENT_DIR}/test-multi-session-working-idle-gradient-e2e.sh"
             "${GRADIENT_DIR}/test-multi-session-enter-working-idle-gradient-e2e.sh"

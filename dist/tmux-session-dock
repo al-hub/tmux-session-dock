@@ -5736,8 +5736,10 @@ session_ai_fingerprint_for_pane()
                 sed -e 's/[[:space:]]*$//' |
                 sed '/^[[:space:]]*$/d'
         )"
-        capture_fingerprint="$(printf '%s' "$capture_text" | cksum | awk '{ print $1 ":" $2 }')"
-        fingerprint="act:$activity:cap:$capture_fingerprint"
+        if [ -n "$capture_text" ]; then
+            capture_fingerprint="$(printf '%s' "$capture_text" | cksum | awk '{ print $1 ":" $2 }')"
+            fingerprint="act:$activity:cap:$capture_fingerprint"
+        fi
     fi
 
     if [ "$timing_enabled" = "1" ]; then
@@ -6490,7 +6492,7 @@ EOF
                 [ -z "${cached_session_cli_state[$name]:-}" ]; then
                 probe_processes=true
             fi
-            direct_probe_pane="${session_ai_direct_pane_id[$name]:-}"
+            direct_probe_pane="${session_ai_direct_pane_id[$name]:-${session_ai_probe_pane_ids[$name]:-}}"
             if [ -n "$direct_probe_pane" ] &&
                 [ -n "${cached_pane_activity[$direct_probe_pane]:-}" ] &&
                 [ "${cached_pane_activity[$direct_probe_pane]}" = "${previous_pane_activity[$direct_probe_pane]:-}" ] &&
@@ -6520,23 +6522,13 @@ EOF
             # Non-selected session: lightweight activity delta check for tracked AI panes.
             # If the session has a known AI pane whose activity signature changed,
             # refresh its fingerprint and keep it active without an expensive probe.
-            direct_probe_pane="${session_ai_direct_pane_id[$name]:-}"
+            direct_probe_pane="${session_ai_direct_pane_id[$name]:-${session_ai_probe_pane_ids[$name]:-}}"
             if [ -n "$direct_probe_pane" ] &&
-                [ "${cached_session_cli_state[$name]:-}" = "active" -o "${cached_session_cli_state[$name]:-}" = "waiting" ] &&
-                [ -n "${cached_pane_activity[$direct_probe_pane]:-}" ]; then
+                [ "${cached_session_cli_state[$name]:-}" = "active" -o "${cached_session_cli_state[$name]:-}" = "waiting" ]; then
                 local tracked_pid="${cached_pane_pid[$direct_probe_pane]:-}"
                 local prev_activity="${previous_pane_activity[$direct_probe_pane]:-}"
                 local curr_activity="${cached_pane_activity[$direct_probe_pane]:-}"
-                if [ "$curr_activity" != "$prev_activity" ] &&
-                    [ -n "$tracked_pid" ] &&
-                    kill -0 "$tracked_pid" 2>/dev/null; then
-                    # Activity changed and PID alive: refresh fingerprint, keep active
-                    cached_session_cli_state["$name"]="active"
-                    cached_session_ai_fingerprint["$name"]="act:$curr_activity"
-                    session_ai_fingerprint["$name"]="act:$curr_activity"
-                    session_ai_stable_count["$name"]=0
-                    trace_event "collect.ai-delta.hit session=$name pane=$direct_probe_pane"
-                elif [ -n "$tracked_pid" ] && ! kill -0 "$tracked_pid" 2>/dev/null; then
+                if [ -n "$tracked_pid" ] && ! kill -0 "$tracked_pid" 2>/dev/null; then
                     # PID died: transition to idle immediately
                     cached_session_cli_state["$name"]="idle"
                     cached_session_ai_fingerprint["$name"]=""
@@ -6544,6 +6536,24 @@ EOF
                     session_ai_fingerprint["$name"]=""
                     session_ai_stable_count["$name"]=0
                     trace_event "collect.ai-delta.evict session=$name pane=$direct_probe_pane pid=$tracked_pid"
+                elif [ "$curr_activity" != "$prev_activity" ] && [ -n "$curr_activity" ]; then
+                    # Activity changed and PID alive: retain the cheap activity path.
+                    cached_session_cli_state["$name"]="active"
+                    cached_session_ai_fingerprint["$name"]="act:$curr_activity"
+                    session_ai_fingerprint["$name"]="act:$curr_activity"
+                    session_ai_stable_count["$name"]=0
+                    trace_event "collect.ai-delta.hit session=$name pane=$direct_probe_pane"
+                elif [ -z "$curr_activity" ] || [ "$curr_activity" = "0" ]; then
+                    # Full-screen AI CLIs can redraw in place without a pane_activity
+                    # delta. Observe only this already-tracked live pane so the hot
+                    # path stays bounded while opencode-style redraws remain active.
+                    fingerprint="$(session_ai_fingerprint_for_pane "$direct_probe_pane")"
+                    if [ -n "$fingerprint" ]; then
+                        cached_session_cli_state["$name"]="active"
+                        cached_session_ai_fingerprint["$name"]="$fingerprint"
+                        session_ai_fingerprint["$name"]="$fingerprint"
+                        trace_event "collect.ai-screen.hit session=$name pane=$direct_probe_pane"
+                    fi
                 fi
             fi
             if [ -n "$metrics_start" ]; then
