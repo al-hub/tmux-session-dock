@@ -109,8 +109,11 @@ tmux bind-key -N "✂️ Safe Vertical Split" "_" run-shell "$BIN_PATH --split-v
 tmux bind-key -N "✂️ Safe Horizontal Split (Default)" "%" run-shell "$BIN_PATH --split-horizontal" 2>/dev/null || tmux bind-key "%" run-shell "$BIN_PATH --split-horizontal" 2>/dev/null || true
 tmux bind-key -N "✂️ Safe Vertical Split (Default)" '"' run-shell "$BIN_PATH --split-vertical" 2>/dev/null || tmux bind-key '"' run-shell "$BIN_PATH --split-vertical" 2>/dev/null || true
 
-# 4. Instant 0ms Native Pane Navigation (Zero Process Spawning)
-tmux bind-key -n -N "🧭 Instant Focus Left" 'M-Left' select-pane -L 2>/dev/null || true
-tmux bind-key -n -N "🧭 Instant Focus Right" 'M-Right' select-pane -R 2>/dev/null || true
-tmux bind-key -n -N "🧭 Instant Focus Up" 'M-Up' select-pane -U 2>/dev/null || true
-tmux bind-key -n -N "🧭 Instant Focus Down" 'M-Down' select-pane -D 2>/dev/null || true
+# 4. Smart Pane Navigation
+# Route every Alt+arrow through the Dock-aware navigator.  In particular,
+# Left from a work pane must select the Sidebar before a geometrically-adjacent
+# Subpane, while Sidebar→Subpane entry remains directional.
+tmux bind-key -n -N "🧭 Smart Focus Left" 'M-Left' run-shell "$BIN_PATH --smart-pane L" 2>/dev/null || true
+tmux bind-key -n -N "🧭 Smart Focus Right" 'M-Right' run-shell "$BIN_PATH --smart-pane R" 2>/dev/null || true
+tmux bind-key -n -N "🧭 Smart Focus Up" 'M-Up' run-shell "$BIN_PATH --smart-pane U" 2>/dev/null || true
+tmux bind-key -n -N "🧭 Smart Focus Down" 'M-Down' run-shell "$BIN_PATH --smart-pane D" 2>/dev/null || true

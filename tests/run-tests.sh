@@ -146,6 +146,7 @@ case "${TARGET_SUITE}" in
             "${SINGLE_DIR}/test-subpane-hub-unit.sh"
             "${SINGLE_DIR}/test-subpane-contract.sh"
             "${SINGLE_DIR}/test-subpane-smart-navigate-priority.sh"
+            "${SINGLE_DIR}/test-subpane-alt-navigation-binding.sh"
             "${SINGLE_DIR}/test-subpane-hub-contract.sh"
             "${SINGLE_DIR}/test-subpane-global-identity-contract.sh"
             "${SINGLE_DIR}/test-subpane-real-world-repro.sh"
