@@ -30,6 +30,75 @@ sidebar_switch_execute_hot() {
         local sub_win
         sub_win="$(sidebar_tmux_cmd display-message -p -t "$sub_pane" '#{window_id}' 2>/dev/null || true)"
         if [ -n "$sub_win" ] && [ "$sub_win" != "$target_win" ]; then
+            # The Enter/session-switch path historically moved only the first
+            # Subpane Slot and treated the aggregate height as that slot's
+            # height. Collect the leased pool before the first join so every
+            # slot keeps its own User Height Intent.
+            local source_subpanes=()
+            if declare -f subpane_hub_get_window_subpanes >/dev/null 2>&1; then
+                mapfile -t source_subpanes < <(subpane_hub_get_window_subpanes "$sub_win")
+            fi
+            if [ "${#source_subpanes[@]}" -gt 1 ]; then
+                local source_pane source_height saved_source_height target_h join_l
+                local multi_pos="bottom" multi_pos_flag="" multi_index=0
+                local desired_heights=()
+                if declare -f sidebar_subpane_get_position >/dev/null 2>&1; then
+                    multi_pos="$(sidebar_subpane_get_position 2>/dev/null || echo bottom)"
+                fi
+                if declare -f sidebar_subpane_calc_pos_flag >/dev/null 2>&1; then
+                    multi_pos_flag="$(sidebar_subpane_calc_pos_flag "$multi_pos")"
+                elif [ "$multi_pos" = "top" ]; then
+                    multi_pos_flag="-b"
+                fi
+
+                sidebar_tmux_cmd set-option -gq "$lease_opt" "$target_win"
+                for source_pane in "${source_subpanes[@]}"; do
+                    saved_source_height="$(sidebar_tmux_cmd show-option -gqv \
+                        "@dotfiles_subpane_slot_$((multi_index + 1))_height" 2>/dev/null || true)"
+                    if [ "$saved_source_height" -ge 4 ] 2>/dev/null; then
+                        source_height="$saved_source_height"
+                    else
+                        source_height="$(sidebar_tmux_cmd display-message -p -t "$source_pane" '#{pane_height}' 2>/dev/null || true)"
+                    fi
+                    target_h="$source_height"
+                    [ "$target_h" -ge 4 ] 2>/dev/null || target_h=4
+
+                    local target_window_height
+                    target_window_height="$(sidebar_tmux_cmd display-message -p -t "$target_win" '#{window_height}' 2>/dev/null || echo 40)"
+                    if [ "$((target_window_height - target_h))" -lt 6 ]; then
+                        target_h="$((target_window_height - 6))"
+                        [ "$target_h" -ge 4 ] || target_h=4
+                    fi
+                    desired_heights[$multi_index]="$target_h"
+
+                    join_l="$target_h"
+                    if declare -f sidebar_subpane_calc_join_length >/dev/null 2>&1; then
+                        join_l="$(sidebar_subpane_calc_join_length "$multi_pos" "$target_h")"
+                    elif [ "$multi_pos_flag" = "-b" ]; then
+                        join_l="$((target_h + 1))"
+                    fi
+
+                    if [ "$multi_index" -eq 0 ] && [ -n "$client_tty" ]; then
+                        sidebar_tmux_cmd switch-client -c "$client_tty" -t "$target_spec" \; \
+                            join-pane -d $multi_pos_flag -s "$source_pane" -t "$sidebar_pane" -v -l "$join_l" \; \
+                            select-pane -t "$sidebar_pane" 2>/dev/null || return 1
+                    else
+                        sidebar_tmux_cmd join-pane -d $multi_pos_flag -s "$source_pane" -t "$sidebar_pane" -v -l "$join_l" \; \
+                            select-pane -t "$sidebar_pane" 2>/dev/null || return 1
+                    fi
+                    sidebar_tmux_cmd set-option -p -q -t "$source_pane" allow-rename off 2>/dev/null || true
+                    sidebar_tmux_cmd select-pane -t "$source_pane" -T "${SIDEBAR_SUBPANE_TITLE:-dotfiles-sidebar-subpane}" 2>/dev/null || true
+                    sidebar_tmux_cmd set-option -p -q -t "$source_pane" @dotfiles_subpane_hub_pane 1 2>/dev/null || true
+                    sidebar_tmux_cmd set-option -p -q -t "$source_pane" @dotfiles_sidebar_subpane 1 2>/dev/null || true
+                    multi_index=$((multi_index + 1))
+                done
+                for multi_index in "${!source_subpanes[@]}"; do
+                    sidebar_tmux_cmd resize-pane -t "${source_subpanes[$multi_index]}" \
+                        -y "${desired_heights[$multi_index]}" 2>/dev/null || return 1
+                done
+                return 0
+            fi
+
             local sub_pos="bottom" pos_flag=""
             if declare -f sidebar_subpane_get_position >/dev/null 2>&1; then
                 sub_pos="$(sidebar_subpane_get_position 2>/dev/null || echo bottom)"

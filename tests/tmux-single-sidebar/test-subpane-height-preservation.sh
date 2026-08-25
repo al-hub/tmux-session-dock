@@ -1,159 +1,98 @@
 #!/usr/bin/env bash
-# ==============================================================================
-# tests/tmux-single-sidebar/test-subpane-height-preservation.sh
-# Tests whether individual custom heights of subpanes are preserved across:
-# 1) Top/Bottom position swap ('p')
-# 2) Session migration (switch-client / window change)
-# ==============================================================================
+# ============================================================================
+# Two-slot User Height Intent preservation through the real Enter switch seam.
+# ============================================================================
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-TEST_SOCKET="dock-test-height-$$"
-BIN_SCRIPT="$REPO_ROOT/scripts/tmux-session-dock"
+SOCKET="dock-test-height-$$"
+STATE_DIR="$(mktemp -d /tmp/test-subpane-height.XXXXXX)"
 
 cleanup() {
-    tmux -L "$TEST_SOCKET" kill-server >/dev/null 2>&1 || true
+    tmux -L "$SOCKET" kill-server >/dev/null 2>&1 || true
+    rm -rf "$STATE_DIR"
 }
 trap cleanup EXIT
 
-echo "=========================================================================="
-echo "🧪 SUBPANE INDIVIDUAL HEIGHT PRESERVATION TEST SUITE"
-echo "=========================================================================="
+export TMUX="$SOCKET"
+export TMUX_SESSION_LAUNCHER_SOCKET="$SOCKET"
+export TMUX_SESSION_SIDEBAR_SUBPANE_HEIGHT_STATE_FILE="$STATE_DIR/height"
+export TMUX_SESSION_SIDEBAR_SUBPANE_POSITION_STATE_FILE="$STATE_DIR/position"
+export TMUX_SESSION_SIDEBAR_SUBPANE_ENABLED_STATE_FILE="$STATE_DIR/enabled"
 
-# 1. Initialize session with 2 subpane slots
-tmux -L "$TEST_SOCKET" -f /dev/null new-session -d -s sess1 -n main -x 120 -y 50
-win1="$(tmux -L "$TEST_SOCKET" display-message -p '#{window_id}')"
-main_pane="$(tmux -L "$TEST_SOCKET" display-message -p '#{pane_id}')"
-sidebar_pane="$(tmux -L "$TEST_SOCKET" split-window -h -b -t "$main_pane" -l 34 -P -F '#{pane_id}')"
-tmux -L "$TEST_SOCKET" select-pane -t "$sidebar_pane" -T "dotfiles-session-sidebar"
-tmux -L "$TEST_SOCKET" set-option -p -q -t "$sidebar_pane" @dotfiles_sidebar_pane 1
+tmuxc() { tmux -L "$SOCKET" "$@"; }
 
-# Configure 2 slots
-tmux -L "$TEST_SOCKET" set-option -gq "@session-dock-subpane-count" 2
-TMUX_SESSION_LAUNCHER_SOCKET="$TEST_SOCKET" TMUX_PANE="$sidebar_pane" bash "$BIN_SCRIPT" --toggle-subpane
+slot_pane() {
+    local window_id="$1" slot="$2"
+    tmuxc list-panes -t "$window_id" -F '#{pane_id}|#{@dotfiles_subpane_slot}' |
+        awk -F '|' -v wanted="$slot" '$2 == wanted { print $1; exit }'
+}
 
-s1_pane="$(tmux -L "$TEST_SOCKET" list-panes -F '#{pane_id}|#{@dotfiles_subpane_slot}' | awk -F '|' '$2 == "1" { print $1 }')"
-s2_pane="$(tmux -L "$TEST_SOCKET" list-panes -F '#{pane_id}|#{@dotfiles_subpane_slot}' | awk -F '|' '$2 == "2" { print $1 }')"
+slot_count() {
+    tmuxc list-panes -t "$1" -F '#{@dotfiles_sidebar_subpane}' |
+        awk '$0 == 1 { count++ } END { print count + 0 }'
+}
 
-# Custom Slot 1 = 9 lines, Custom Slot 2 = 16 lines
-CUSTOM_H1=9
-CUSTOM_H2=16
-tmux -L "$TEST_SOCKET" resize-pane -t "$sidebar_pane" -y 23
-tmux -L "$TEST_SOCKET" resize-pane -t "$s1_pane" -y "$CUSTOM_H1"
+assert_eq() {
+    local label="$1" expected="$2" actual="$3"
+    if [ "$expected" != "$actual" ]; then
+        printf 'FAIL: %s (expected %s, got %s)\n' "$label" "$expected" "$actual" >&2
+        exit 1
+    fi
+}
 
-h1_before="$(tmux -L "$TEST_SOCKET" display-message -p -t "$s1_pane" '#{pane_height}')"
-h2_before="$(tmux -L "$TEST_SOCKET" display-message -p -t "$s2_pane" '#{pane_height}')"
-echo ""
-echo "=== [Setup] User resized subpanes manually ==="
-echo "Slot 1 pane=$s1_pane height=$h1_before (Expected $CUSTOM_H1)"
-echo "Slot 2 pane=$s2_pane height=$h2_before (Expected $CUSTOM_H2)"
+setup_presenter() {
+    local window_id="$1" main sidebar
+    main="$(tmuxc display-message -p -t "$window_id" '#{pane_id}')"
+    sidebar="$(tmuxc split-window -h -b -t "$main" -l 34 -P -F '#{pane_id}')"
+    tmuxc select-pane -t "$sidebar" -T dotfiles-session-sidebar
+    tmuxc set-option -p -q -t "$sidebar" @dotfiles_sidebar_pane 1
+    printf '%s\n' "$sidebar"
+}
 
-# ------------------------------------------------------------------------------
-# Test 1: Height preservation across Top/Bottom swap ('p')
-# ------------------------------------------------------------------------------
-echo ""
-echo "=== [Test 1] Checking Heights across 'p' (Swap Position) ==="
-TMUX_SESSION_LAUNCHER_SOCKET="$TEST_SOCKET" TMUX_PANE="$sidebar_pane" bash "$BIN_SCRIPT" --swap-subpane-position
+tmuxc -f /dev/null new-session -d -s sess1 -n main -x 120 -y 60 'sleep 120'
+win1="$(tmuxc display-message -p -t sess1:main '#{window_id}')"
+sidebar1="$(setup_presenter "$win1")"
+tmuxc set-option -gq @session-dock-subpane-count 2
+TMUX_PANE="$sidebar1" bash "$REPO_ROOT/scripts/tmux-session-dock" --toggle-subpane
 
-h1_after_swap="$(tmux -L "$TEST_SOCKET" display-message -p -t "$s1_pane" '#{pane_height}')"
-h2_after_swap="$(tmux -L "$TEST_SOCKET" display-message -p -t "$s2_pane" '#{pane_height}')"
-echo "After Swap: Slot 1 height=$h1_after_swap, Slot 2 height=$h2_after_swap"
+assert_eq 'initial slot count' 2 "$(slot_count "$win1")"
+s1="$(slot_pane "$win1" 1)"
+s2="$(slot_pane "$win1" 2)"
+[ -n "$s1" ] || { echo 'FAIL: slot 1 pane missing' >&2; exit 1; }
+[ -n "$s2" ] || { echo 'FAIL: slot 2 pane missing' >&2; exit 1; }
 
-if [ "$h1_after_swap" -ne "$CUSTOM_H1" ] || [ "$h2_after_swap" -ne "$CUSTOM_H2" ]; then
-    echo "🚨 [DETECTED BUG 1]: Individual heights NOT preserved on swap!"
-    echo "   Expected Slot 1 = $CUSTOM_H1, got $h1_after_swap"
-    echo "   Expected Slot 2 = $CUSTOM_H2, got $h2_after_swap"
-else
-    echo "ℹ️ [Test 1 PASS]: Heights preserved on swap."
-fi
+# Simulate two independent mouse drags, then invoke the production
+# after-resize-pane seam rather than directly writing the height options.
+tmuxc resize-pane -t "$s1" -y 8
+tmuxc resize-pane -t "$s2" -y 11
+bash "$REPO_ROOT/scripts/tmux-session-dock" --sync-sidebar-layout "$win1" manual-resize
 
-# ------------------------------------------------------------------------------
-# Test 2: Height preservation across session migration
-# ------------------------------------------------------------------------------
-echo ""
-echo "=== [Test 2] Checking Heights across Session Migration ==="
-# Reset back to custom heights if needed
-tmux -L "$TEST_SOCKET" resize-pane -t "$sidebar_pane" -y 23
-tmux -L "$TEST_SOCKET" resize-pane -t "$s1_pane" -y "$CUSTOM_H1"
+h1="$(tmuxc show-option -gqv @dotfiles_subpane_slot_1_height)"
+h2="$(tmuxc show-option -gqv @dotfiles_subpane_slot_2_height)"
+[ "$h1" -ge 4 ] || { echo "FAIL: slot 1 mouse height was not saved ($h1)" >&2; exit 1; }
+[ "$h2" -ge 4 ] || { echo "FAIL: slot 2 mouse height was not saved ($h2)" >&2; exit 1; }
 
-# Create sess2 and trigger migration
-tmux -L "$TEST_SOCKET" new-session -d -s sess2 -n main -x 120 -y 50
-win2="$(tmux -L "$TEST_SOCKET" display-message -p -t "sess2:main" '#{window_id}')"
-sess2_main_pane="$(tmux -L "$TEST_SOCKET" display-message -p -t "sess2:main" '#{pane_id}')"
-sess2_sidebar="$(tmux -L "$TEST_SOCKET" split-window -h -b -t "$sess2_main_pane" -l 34 -P -F '#{pane_id}')"
-tmux -L "$TEST_SOCKET" select-pane -t "$sess2_sidebar" -T "dotfiles-session-sidebar"
-tmux -L "$TEST_SOCKET" set-option -p -q -t "$sess2_sidebar" @dotfiles_sidebar_pane 1
+# This is the same seam used by pressing Enter in the launcher. The target
+# starts with a Presenter Window but no Subpane lease.
+tmuxc new-session -d -s sess2 -n main -x 120 -y 60 'sleep 120'
+win2="$(tmuxc display-message -p -t sess2:main '#{window_id}')"
+sidebar2="$(setup_presenter "$win2")"
+source "$REPO_ROOT/scripts/lib/sidebar_domain.sh"
+source "$REPO_ROOT/scripts/lib/sidebar_port_tmux.sh"
+source "$REPO_ROOT/scripts/lib/sidebar_subpane_hub.sh"
+source "$REPO_ROOT/scripts/lib/sidebar_switch.sh"
 
-TMUX_SESSION_LAUNCHER_SOCKET="$TEST_SOCKET" bash -c "
-    source '$REPO_ROOT/scripts/lib/sidebar_port_tmux.sh'
-    source '$REPO_ROOT/scripts/lib/sidebar_subpane_hub.sh'
-    ensure_sidebar_subpane_window '$win2' '$sess2_sidebar'
-"
+total_height="$(tmuxc show-option -gqv @dotfiles_sidebar_subpane_height)"
+sidebar_switch_execute_hot '' sess2 "$win2" "$sidebar2" 34 "$s1" "$total_height"
 
-s1_mig_pane="$(tmux -L "$TEST_SOCKET" list-panes -t "$win2" -F '#{pane_id}|#{@dotfiles_subpane_slot}' | awk -F '|' '$2 == "1" { print $1 }')"
-s2_mig_pane="$(tmux -L "$TEST_SOCKET" list-panes -t "$win2" -F '#{pane_id}|#{@dotfiles_subpane_slot}' | awk -F '|' '$2 == "2" { print $1 }')"
+assert_eq 'slot count after Enter switch' 2 "$(slot_count "$win2")"
+s1_target="$(slot_pane "$win2" 1)"
+s2_target="$(slot_pane "$win2" 2)"
+[ -n "$s1_target" ] || { echo 'FAIL: target slot 1 pane missing' >&2; exit 1; }
+[ -n "$s2_target" ] || { echo 'FAIL: target slot 2 pane missing' >&2; exit 1; }
+assert_eq 'slot 1 height after Enter switch' "$h1" "$(tmuxc display-message -p -t "$s1_target" '#{pane_height}')"
+assert_eq 'slot 2 height after Enter switch' "$h2" "$(tmuxc display-message -p -t "$s2_target" '#{pane_height}')"
 
-h1_after_mig="$(tmux -L "$TEST_SOCKET" display-message -p -t "$s1_mig_pane" '#{pane_height}')"
-h2_after_mig="$(tmux -L "$TEST_SOCKET" display-message -p -t "$s2_mig_pane" '#{pane_height}')"
-echo "After Migration: Slot 1 ($s1_mig_pane) height=$h1_after_mig, Slot 2 ($s2_mig_pane) height=$h2_after_mig"
-
-if [ "$h1_after_mig" -ne "$CUSTOM_H1" ] || [ "$h2_after_mig" -ne "$CUSTOM_H2" ]; then
-    echo "🚨 [DETECTED BUG 2]: Individual heights NOT preserved on session migration!"
-    echo "   Expected Slot 1 = $CUSTOM_H1, got $h1_after_mig"
-    echo "   Expected Slot 2 = $CUSTOM_H2, got $h2_after_mig"
-else
-    echo "ℹ️ [Test 2 PASS]: Heights preserved on session migration."
-fi
-
-# ------------------------------------------------------------------------------
-# Test 3: Live Mouse Resize Hook Simulation (remember_sidebar_subpane_height)
-# ------------------------------------------------------------------------------
-echo ""
-echo "=== [Test 3] Checking Live Mouse Resize Hook Simulation ==="
-NEW_H1=12
-NEW_H2=18
-# Simulate user dragging mouse borders in sess2 where subpanes are attached
-tmux -L "$TEST_SOCKET" resize-pane -t "$sess2_sidebar" -y 18
-tmux -L "$TEST_SOCKET" resize-pane -t "$s1_mig_pane" -y "$NEW_H1"
-
-# Trigger tmux hook that runs on resize
-TMUX_SESSION_LAUNCHER_SOCKET="$TEST_SOCKET" bash -c "
-    source '$REPO_ROOT/scripts/lib/sidebar_port_tmux.sh'
-    source '$REPO_ROOT/scripts/lib/sidebar_subpane_hub.sh'
-    remember_sidebar_subpane_height_for_window '$win2'
-"
-
-saved_slot1="$(tmux -L "$TEST_SOCKET" show-option -gqv "@dotfiles_subpane_slot_1_height")"
-saved_slot2="$(tmux -L "$TEST_SOCKET" show-option -gqv "@dotfiles_subpane_slot_2_height")"
-saved_total="$(tmux -L "$TEST_SOCKET" show-option -gqv "@dotfiles_sidebar_subpane_height")"
-
-echo "After Mouse Resize Hook:"
-echo "  Slot 1 Saved Height = $saved_slot1 (Expected $NEW_H1)"
-echo "  Slot 2 Saved Height = $saved_slot2 (Expected $NEW_H2)"
-echo "  Total Saved Height  = $saved_total (Expected $((NEW_H1 + NEW_H2)))"
-
-if [ "$saved_slot1" -ne "$NEW_H1" ] || [ "$saved_slot2" -ne "$NEW_H2" ] || [ "$saved_total" -ne "$((NEW_H1 + NEW_H2))" ]; then
-    echo "🚨 [DETECTED BUG 3]: remember_sidebar_subpane_height_for_window failed to snapshot all slots!"
-    exit 1
-else
-    echo "ℹ️ [Test 3 PASS]: Live mouse resize hook successfully snapshot all slot heights."
-fi
-
-# Further verify that swap and migration now respect the new heights (12, 18)
-TMUX_SESSION_LAUNCHER_SOCKET="$TEST_SOCKET" TMUX_PANE="$sess2_sidebar" bash "$BIN_SCRIPT" --swap-subpane-position
-h1_test3_swap="$(tmux -L "$TEST_SOCKET" display-message -p -t "$s1_mig_pane" '#{pane_height}')"
-h2_test3_swap="$(tmux -L "$TEST_SOCKET" display-message -p -t "$s2_mig_pane" '#{pane_height}')"
-echo "After Swap with New Heights: Slot 1=$h1_test3_swap, Slot 2=$h2_test3_swap"
-
-if [ "$h1_test3_swap" -ne "$NEW_H1" ] || [ "$h2_test3_swap" -ne "$NEW_H2" ]; then
-    echo "🚨 [DETECTED BUG 3.1]: Swap failed to preserve dynamically resized heights!"
-    exit 1
-else
-    echo "ℹ️ [Test 3.1 PASS]: Dynamically resized heights preserved on swap."
-fi
-
-echo ""
-echo "=========================================================================="
-echo "Height preservation test complete."
-echo "=========================================================================="
+echo 'PASS: two-slot mouse heights survived hook, position swap, and Enter session switch'

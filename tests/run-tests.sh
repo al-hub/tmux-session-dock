@@ -154,6 +154,8 @@ case "${TARGET_SUITE}" in
             "${SINGLE_DIR}/test-layout-subpane-isolation.sh"
             "${SINGLE_DIR}/test-subpane-work-isolation.sh"
             "${SINGLE_DIR}/test-subpane-height-persistence.sh"
+            "${SINGLE_DIR}/test-subpane-height-preservation.sh"
+            "${SINGLE_DIR}/test-subpane-multi-slot-resize-fidelity.sh"
             "${SINGLE_DIR}/test-subpane-mouse-resize-fidelity.sh"
             "${SINGLE_DIR}/test-subpane-swap-manual-resize-fidelity.sh"
             "${SINGLE_DIR}/test-subpane-switch-position-contract.sh"
