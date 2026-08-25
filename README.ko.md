@@ -11,7 +11,7 @@
 - 🌊 **24프레임 LUT 파형 엔진**: 백그라운드 AI 에이전트의 활동을 실시간으로 감지하여 30 FPS 주사율로 시각화합니다.
 - 🗂️ **싱글톤 서브페인 허브 (`s` / `p`)**: TUI 내부에서 열기/닫기(`s`) 및 상단/하단 위치 즉시 스왑(`p`)과 높이 영속화를 지원하는 전용 터미널 서브페인을 제공합니다.
 - 📦 **Zero Time-Travel 오염 방지 아카이브**: 셸 히스토리(`$HISTFILE`)를 오염시키지 않고 세션을 안전하게 스냅샷 보관 및 일괄 복원(`o`)합니다.
-- 🎨 **38종 프리미엄 테마 & 실시간 리치 프리뷰 (`Prefix + T` / `ㅆ`)**: 3단계 표준 계층 구조(`open-tokyonight`, `code-windows-terminal`, `eye-astigmatism-safe` 등)와 실시간 컬러 칩 인스펙터를 제공합니다.
+- 🎨 **38종 프리미엄 테마 & 실시간 리치 프리뷰 (`Prefix + T`)**: 3단계 표준 계층 구조(`open-tokyonight`, `code-windows-terminal`, `eye-astigmatism-safe` 등)와 실시간 컬러 칩 인스펙터를 제공합니다.
 - 🔄 **통합 생명주기 제어기 (`./setup.sh`)**: `install`, `update`, `uninstall`, `status`, `build`, `test`, `purge`를 단일 CLI로 총괄 관리합니다.
 
 ---
@@ -26,7 +26,7 @@ set -g @plugin 'tmux-plugins/tpm'
 set -g @plugin 'al-hub/tmux-session-dock'
 
 # 선택적 커스텀 옵션
-set -g @session-dock-key 's'              # 사이드바 토글 키 (기본: Prefix + s / ㄴ)
+set -g @session-dock-key 's'              # 사이드바 토글 키 (기본: Prefix + s)
 set -g @session-dock-width '34'           # 사이드바 너비
 set -g @session-dock-theme 'open-tokyonight' # 기본 테마
 set -g @session-dock-dotfiles-mode 'on'   # [옵션] Ctrl+a, 상단 경로 보더, Alt+화살표 인체공학 프리셋 활성화
@@ -65,17 +65,17 @@ cd ~/.local/share/tmux-session-dock
 
 ---
 
-## ⌨️ 주요 단축키 가이드 (한/영 2벌식 완벽 지원)
+## ⌨️ 주요 단축키 가이드
 
-| 영문 단축키 | 한글 단축키 (2벌식) | 기능 설명 |
+| 단축키 | 기능 설명 |
 | :--- | :--- | :--- |
-| **`Prefix + s`** | **`Prefix + ㄴ`** | 세션 도크 사이드바 열기 / 닫기 (토글) |
-| **`Prefix + T`** | **`Prefix + ㅆ`** / **`ㅅ`** | 🎨 38종 프리미엄 테마 피커 팝업 열기 (실시간 프리뷰) |
-| **`Prefix + /`** | **`Prefix + /`** | ⌨️ 전체 단축키 검색 (커맨드 팔레트) |
-| **`Prefix + h`** / **`?`** | **`Prefix + ㅗ`** / **`?`** | 📖 인터랙티브 도움말 가이드 팝업 열기 |
-| **`Prefix + \|`** / **`%`** | **`Prefix + \|`** / **`%`** | 작업 영역 가로 분할 (사이드바 보호) |
-| **`Prefix + _`** / **`"`** | **`Prefix + _`** / **`"`** | 작업 영역 세로 분할 (사이드바 보호) |
-| **`Alt + s`** (`M-s`) | **`Alt + ㄴ`** (`M-ㄴ`) | ⚡ 세션 도크 0ms 즉시 포커스 점프 / 복귀 |
+| **`Prefix + s`** | 세션 도크 사이드바 열기 / 닫기 (토글) |
+| **`Prefix + T`** | 🎨 38종 프리미엄 테마 피커 팝업 열기 (실시간 프리뷰) |
+| **`Prefix + /`** | ⌨️ 전체 단축키 검색 (커맨드 팔레트) |
+| **`Prefix + h`** / **`?`** | 📖 인터랙티브 도움말 가이드 팝업 열기 |
+| **`Prefix + \|`** / **`%`** | 작업 영역 가로 분할 (사이드바 보호) |
+| **`Prefix + _`** / **`"`** | 작업 영역 세로 분할 (사이드바 보호) |
+| **`Alt + s`** (`M-s`) | ⚡ 세션 도크 0ms 즉시 포커스 점프 / 복귀 |
 
 ---
 

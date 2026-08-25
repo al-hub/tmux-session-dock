@@ -5,18 +5,18 @@ set -euo pipefail
 sidebar_presenter_map_key() {
     local key="$1"
     case "$key" in
-        q|Q|ㅂ|ᄇ|$'\x03') echo "QUIT" ;;
-        s|ㄴ|ᄂ) echo "TOGGLE" ;;
+        q|Q|$'\x03') echo "QUIT" ;;
+        s) echo "TOGGLE" ;;
         S) echo "CONFIG_SUBPANE" ;;
-        j|J|ㅓ|ᅥ|$'\x0e') echo "DOWN" ;;
-        k|K|ㅏ|ᅡ|$'\x10') echo "UP" ;;
-        o|O|ㅐ|ᅢ|ㅒ|ᅤ|$'\t') echo "HISTORY" ;;
-        c|C|ㅊ|ᄎ|'+') echo "CREATE" ;;
-        r|R|ㄱ|ᄀ|$'\x12') echo "RENAME" ;;
-        d|D|ㅇ|ᄋ|$'\x04'|$'\x7f'|$'\x08') echo "DELETE" ;;
-        p|P|ㅔ|ᅦ|ㅖ|ᅨ) echo "SWAP_POSITION" ;;
-        a|A|ㅁ|ᄆ) echo "MARK_ALL" ;;
-        h|H|ㅗ|ᅩ|\?) echo "HELP" ;;
+        j|J|$'\x0e') echo "DOWN" ;;
+        k|K|$'\x10') echo "UP" ;;
+        o|O|$'\t') echo "HISTORY" ;;
+        c|C|'+') echo "CREATE" ;;
+        r|R|$'\x12') echo "RENAME" ;;
+        d|D|$'\x04'|$'\x7f'|$'\x08') echo "DELETE" ;;
+        p|P) echo "SWAP_POSITION" ;;
+        a|A) echo "MARK_ALL" ;;
+        h|H|\?) echo "HELP" ;;
         *) echo "UNKNOWN" ;;
     esac
 }

@@ -5241,14 +5241,14 @@ prompt_text()
         fi
 
         case "$char" in
-            $'\033'|[Qq]|[Nn]|ㅂ|ᄇ|ㅜ|ᅮ)
+            $'\033'|[Qq]|[Nn])
                 prompt_cancelled=true
                 prompt_result=""
                 ;;
-            [Yy]|ㅛ|ᅭ)
+            [Yy])
                 prompt_result="y"
                 ;;
-            'a'|'A'|ㅁ|ᄆ)
+            'a'|'A')
                 prompt_result="All"
                 ;;
             $'\n'|$'\r'|"")
@@ -6887,7 +6887,7 @@ delete_selected_archives()
     fi
     answer="$prompt_result"
     case "$answer" in
-        [Yy]|[Yy][Ee][Ss]|ㅛ|ᅭ)
+        [Yy]|[Yy][Ee][Ss])
             while IFS= read -r index; do
                 rm -f "${history_files[$index]}" "${history_files[$index]}${ARCHIVE_HISTORY_MARKER_SUFFIX}" 2>/dev/null || true
             done <<EOF
@@ -7018,7 +7018,7 @@ tui_delete_session()
             return 0
         fi
         case "$prompt_result" in
-            [Yy]|[Yy][Ee][Ss]|ㅛ|ᅭ) run_all_sessions_delete true ;;
+            [Yy]|[Yy][Ee][Ss]) run_all_sessions_delete true ;;
             *) run_all_sessions_delete false ;;
         esac
         exit 0
@@ -7030,7 +7030,7 @@ tui_delete_session()
     fi
 
     case "$answer" in
-        [Yy]|[Yy][Ee][Ss]|ㅛ|ᅭ)
+        [Yy]|[Yy][Ee][Ss])
             execute_tui_session_delete_action true
             ;;
         '')
@@ -7205,19 +7205,19 @@ read_key()
     fi
 
     case "$key" in
-        j|J|ㅓ|ᅥ|$'\x0e') key_result=down ;;
-        k|K|ㅏ|ᅡ|$'\x10') key_result=up ;;
-        c|C|ㅊ|ᄎ|'+') key_result=create ;;
-        r|R|ㄱ|ᄀ|$'\x12') key_result=rename ;;
-        d|D|ㅇ|ᄋ|$'\x04'|$'\x7f'|$'\x08') key_result=delete ;;
+        j|J|$'\x0e') key_result=down ;;
+        k|K|$'\x10') key_result=up ;;
+        c|C|'+') key_result=create ;;
+        r|R|$'\x12') key_result=rename ;;
+        d|D|$'\x04'|$'\x7f'|$'\x08') key_result=delete ;;
         /) key_result=filter ;;
-        o|O|ㅐ|ᅢ|ㅒ|ᅤ|$'\t') key_result=history ;;
-        h|H|ㅗ|ᅩ|\?) key_result=help ;;
+        o|O|$'\t') key_result=history ;;
+        h|H|\?) key_result=help ;;
         ' ') key_result=mark ;;
-        a|A|ㅁ|ᄆ) key_result=mark-all ;;
-        s|S|ㄴ|ᄂ) key_result=toggle-subpane ;;
-        p|P|ㅔ|ᅦ|ㅖ|ᅨ) key_result=swap-subpane-position ;;
-        q|Q|ㅂ|ᄇ|$'\x03') key_result=quit ;;
+        a|A) key_result=mark-all ;;
+        s|S) key_result=toggle-subpane ;;
+        p|P) key_result=swap-subpane-position ;;
+        q|Q|$'\x03') key_result=quit ;;
         ''|$'\n'|$'\r')
             key_result=enter
             [ -n "$key_raw" ] || key_raw=$'\r'
@@ -7589,7 +7589,7 @@ run_tui()
                     toggle_history_mark_all
                 fi
                 ;;
-            s|ㄴ|ᄂ|toggle-subpane)
+            s|toggle-subpane)
                 trace_event "action.begin type=toggle-subpane"
                 toggle_sidebar_subpane_global "${SIDEBAR_WINDOW_ID:-}"
                 request_full_render subpane-toggle
@@ -7599,7 +7599,7 @@ run_tui()
                 tmux display-popup -E -w 70% -h 60% "$HOME/.local/bin/tmux-subpane-picker" 2>/dev/null || tmux display-popup -E -w 70% -h 60% "$LAUNCHER_DIR/tmux-subpane-picker" 2>/dev/null || true
                 request_full_render subpane-config-return
                 ;;
-            p|P|ㅔ|ᅦ|ㅖ|ᅨ|swap-subpane-position)
+            p|P|swap-subpane-position)
                 trace_event "action.begin type=swap-subpane-position"
                 sidebar_subpane_swap_position "${SIDEBAR_WINDOW_ID:-}"
                 request_full_render subpane-swap

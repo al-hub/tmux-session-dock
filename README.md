@@ -74,17 +74,17 @@ cd ~/.local/share/tmux-session-dock
 
 ---
 
-## ⌨️ Keybindings Cheat Sheet (English & 2-Set Korean IME Supported)
+## ⌨️ Keybindings Cheat Sheet
 
-| Keybinding (EN) | Keybinding (KR) | Action Description |
-| :--- | :--- | :--- |
-| **`Prefix + s`** | **`Prefix + ㄴ`** | Toggle session dock sidebar open / close |
-| **`Prefix + T`** | **`Prefix + ㅆ`** / **`ㅅ`** | 🎨 Open 38-theme interactive picker with live ANSI preview |
-| **`Prefix + /`** | **`Prefix + /`** | ⌨️ Open searchable command palette |
-| **`Prefix + h`** / **`?`** | **`Prefix + ㅗ`** / **`?`** | 📖 Open interactive help viewer popup |
-| **`Prefix + \|`** / **`%`** | **`Prefix + \|`** / **`%`** | Safe horizontal split (preserves dock layout) |
-| **`Prefix + _`** / **`"`** | **`Prefix + _`** / **`"`** | Safe vertical split (preserves dock layout) |
-| **`Alt + s`** (`M-s`) | **`Alt + ㄴ`** (`M-ㄴ`) | ⚡ Instant focus jump to session dock / return |
+| Keybinding | Action Description |
+| :--- | :--- |
+| **`Prefix + s`** | Toggle session dock sidebar open / close |
+| **`Prefix + T`** | 🎨 Open 38-theme interactive picker with live ANSI preview |
+| **`Prefix + /`** | ⌨️ Open searchable command palette |
+| **`Prefix + h`** / **`?`** | 📖 Open interactive help viewer popup |
+| **`Prefix + \|`** / **`%`** | Safe horizontal split (preserves dock layout) |
+| **`Prefix + _`** / **`"`** | Safe vertical split (preserves dock layout) |
+| **`Alt + s`** (`M-s`) | ⚡ Instant focus jump to session dock / return |
 
 ---
 

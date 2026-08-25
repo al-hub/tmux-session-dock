@@ -105,7 +105,7 @@ draw_picker() {
     done
 
     printf "\n${GRAY}──────────────────────────────────────────────────────────────────────────${RESET}\n"
-    printf "  ${DIM}이동:${RESET} ${BOLD}${YELLOW}[ ↑ / ↓ ]${RESET} ${DIM}| 선택 & 적용:${RESET} ${BOLD}${EMERALD}[ Enter ]${RESET} ${DIM}| 닫기:${RESET} ${BOLD}${YELLOW}[ Esc / q / ㅂ ]${RESET}\n"
+    printf "  ${DIM}이동:${RESET} ${BOLD}${YELLOW}[ ↑ / ↓ ]${RESET} ${DIM}| 선택 & 적용:${RESET} ${BOLD}${EMERALD}[ Enter ]${RESET} ${DIM}| 닫기:${RESET} ${BOLD}${YELLOW}[ Esc / q ]${RESET}\n"
 }
 
 draw_picker
@@ -126,11 +126,11 @@ while IFS= read -rsn1 key; do
                 draw_picker
             fi
             ;;
-        k|K|ㅏ)
+        k|K)
             SELECTED_IDX=$(( (SELECTED_IDX - 1 + ${#OPTIONS[@]}) % ${#OPTIONS[@]} ))
             draw_picker
             ;;
-        j|J|ㅓ)
+        j|J)
             SELECTED_IDX=$(( (SELECTED_IDX + 1) % ${#OPTIONS[@]} ))
             draw_picker
             ;;
@@ -149,7 +149,7 @@ while IFS= read -rsn1 key; do
             fi
             draw_picker
             ;;
-        q|Q|ㅂ|ᄇ)
+        q|Q)
             exit 0
             ;;
     esac
