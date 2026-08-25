@@ -10,6 +10,12 @@ test_files=(
     test-hot-path.sh
     test-state.sh
     test-session-isolation.sh
+    test-six-session-visual-e2e.sh
+    test-enter-switch-gradient-e2e.sh
+    test-working-heartbeat-gradient-e2e.sh
+    test-multi-session-working-idle-gradient-e2e.sh
+    test-multi-session-enter-working-idle-gradient-e2e.sh
+    test-six-session-enter-working-gradient-e2e.sh
     test-regressions.sh
     test-lifecycle-e2e.sh
     test-launcher-lifecycle.sh
