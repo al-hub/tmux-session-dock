@@ -4980,7 +4980,16 @@ sidebar_consume_pending_target_marker()
     # 6. Re-render
     if [ "$view_mode" = "sessions" ]; then
         if [ "$topology_dirty" = true ] || [ "$geometry_dirty" = true ]; then
-            render_full "marker-handover-reconcile"
+            # The transition coordinator owns the target frame while a
+            # session switch is active.  Rendering here as well duplicates
+            # the transition frame and can produce a second clear/redraw on
+            # the warm-session path.  Leave the handover marker consumed; the
+            # coordinator will render the settled frame once.
+            if transition_is_active || transition_commit_pending; then
+                trace_event "render.full.skip reason=marker-handover-transition target=$target_session"
+            else
+                render_full "marker-handover-reconcile"
+            fi
         else
             render_marker_delta "$old_current" "$old_selected_index" "$old_selected_session"
             # Self-healing footer boundary: always self-heal footer row so transient messages never persist
