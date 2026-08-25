@@ -64,13 +64,12 @@ summarize_transition() {
     "$(count_range "$TRACE_FILE" "$trace_before" "$trace_after" 'sidebar.layout.restore.begin')"
     "$(count_range "$TRACE_FILE" "$trace_before" "$trace_after" 'switch.force-refresh.final.begin')"
     "$render_count"
-    "$(count_range "$TRACE_FILE" "$trace_before" "$trace_after" 'transition.phase.*phase=PREPARE')"
-    "$(count_range "$TRACE_FILE" "$trace_before" "$trace_after" 'transition.phase.*phase=SNAPSHOT')"
-    "$(count_range "$TRACE_FILE" "$trace_before" "$trace_after" 'transition.phase.*phase=MOVE_SIDEBAR')"
+    "$(count_range "$TRACE_FILE" "$trace_before" "$trace_after" 'transition.phase.*phase=VALIDATE_TARGET')"
+    "$(count_range "$TRACE_FILE" "$trace_before" "$trace_after" 'transition.phase.*phase=ENSURE_TARGET_SIDEBAR')"
+    "$(count_range "$TRACE_FILE" "$trace_before" "$trace_after" 'transition.phase.*phase=VERIFY_TARGET_SIDEBAR')"
     "$(count_range "$TRACE_FILE" "$trace_before" "$trace_after" 'transition.phase.*phase=SWITCH_CLIENT')"
-    "$(count_range "$TRACE_FILE" "$trace_before" "$trace_after" 'transition.phase.*phase=RESTORE_LAYOUT')"
-    "$(count_range "$TRACE_FILE" "$trace_before" "$trace_after" 'transition.phase.*phase=RESTORE_FOCUS')"
-    "$render_phase_count"
+    "$(count_range "$TRACE_FILE" "$trace_before" "$trace_after" 'transition.phase.*phase=VERIFY_CLIENT')"
+    "$(count_range "$TRACE_FILE" "$trace_before" "$trace_after" 'render.delta.begin')"
     "$(count_range "$TRACE_FILE" "$trace_before" "$trace_after" 'transition.phase.*phase=READY')"
     "$output_count"
   )
@@ -135,7 +134,7 @@ for iteration in $(seq 1 "$EXPECTED"); do
 done
 
 {
-  echo "iteration target trace_before trace_after debug_before debug_after output_before output_after switch_begin layout_restore force_refresh render_full prepare snapshot move_sidebar switch_client restore_layout restore_focus render_once ready output_bytes"
+  echo "iteration target trace_before trace_after debug_before debug_after output_before output_after switch_begin layout_restore force_refresh render_full validate_target ensure_target_sidebar verify_target_sidebar switch_client verify_client render_delta ready output_bytes"
   cat "$SUMMARY_FILE"
 } > "$RUN_DIR/phase-summary-with-header.tsv"
 mv "$RUN_DIR/phase-summary-with-header.tsv" "$SUMMARY_FILE"
@@ -144,16 +143,17 @@ render_total="$(awk -F '\t' 'NR > 1 {n += $12} END {print n + 0}' "$SUMMARY_FILE
 layout_total="$(awk -F '\t' 'NR > 1 {n += $10} END {print n + 0}' "$SUMMARY_FILE")"
 refresh_total="$(awk -F '\t' 'NR > 1 {n += $11} END {print n + 0}' "$SUMMARY_FILE")"
 output_total="$(awk -F '\t' 'NR > 1 {n += $21} END {print n + 0}' "$SUMMARY_FILE")"
-unclassified="$(awk -F '\t' 'NR > 1 && $12 == 0 {n++} END {print n + 0}' "$SUMMARY_FILE")"
-phase_incomplete="$(awk -F '\t' 'NR > 1 {for (i=13; i<=20; i++) if ($i == 0) n++} END {print n + 0}' "$SUMMARY_FILE")"
+switch_total="$(awk -F '\t' 'NR > 1 {n += $9} END {print n + 0}' "$SUMMARY_FILE")"
+phase_incomplete="$(awk -F '\t' 'NR > 1 {for (i=13; i<=17; i++) if ($i == 0) n++; if ($19 == 0) n++} END {print n + 0}' "$SUMMARY_FILE")"
 
 echo "summary=$SUMMARY_FILE"
 echo "completed=$completed requested=$EXPECTED"
 echo "render_full=$render_total layout_restore=$layout_total force_refresh=$refresh_total"
-echo "raw_output_bytes=$output_total unclassified_render_iterations=$unclassified"
+echo "switches=$switch_total raw_output_bytes=$output_total optional_delta_render_iterations=$(awk -F '\t' 'NR > 1 && $18 > 0 {n++} END {print n + 0}' "$SUMMARY_FILE")"
 echo "phase_incomplete_fields=$phase_incomplete"
 
-if [ "$completed" -ne "$EXPECTED" ] || [ "$render_total" -ne "$EXPECTED" ] || [ "$unclassified" -ne 0 ] || [ "$phase_incomplete" -ne 0 ]; then
+if [ "$completed" -ne "$EXPECTED" ] || [ "$switch_total" -ne "$EXPECTED" ] ||
+   [ "$render_total" -gt "$EXPECTED" ] || [ "$phase_incomplete" -ne 0 ]; then
   KEEP_RUN_DIR=true
   echo "RED: render/layout/raw-output correlation or one-render-per-transition invariant failed" >&2
   echo "artifacts=$RUN_DIR" >&2

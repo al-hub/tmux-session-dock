@@ -20,6 +20,7 @@ TRACE_FILE="$RUN_DIR/trace.log"
 DEBUG_FILE="$RUN_DIR/debug.log"
 
 file_lines() { [ -f "$1" ] && wc -l < "$1" | tr -d ' ' || echo 0; }
+selected_name_key() { sidebar_selected_name 2>/dev/null | awk '{print $1}'; }
 
 transition_settled() {
   local state
@@ -33,13 +34,15 @@ transition_settled() {
 setup_interactive_test
 create_session cause-a
 create_session cause-b
-# This test measures render causality, not the setup transition. Establish
-# the starting client/window directly and wait for the visible marker so the
-# first measured Down+Enter cannot consume a stale setup event.
-tmuxc switch-client -c "$CLIENT_TTY" -t '=cause-a:'
+# This test measures render causality, not the setup transition. Use the
+# normal selection/switch helper so the attached client, sidebar focus, and
+# marker are established through the same readiness barriers as production.
+# The trace is reset immediately afterwards, so this setup transition is not
+# part of the measured sample.
+select_session_by_name cause-a
 wait_until "initial render-cause session" "wait_session 'cause-a'"
-focus_sidebar
-wait_until "initial render-cause selection" "[ \"\$(sidebar_selected_name 2>/dev/null || true)\" = cause-a ]"
+wait_until "initial render-cause sidebar" sidebar_ready
+wait_until "initial render-cause selection" "[ \"\$(selected_name_key)\" = cause-a ]"
 
 : > "$TRACE_FILE"
 : > "$DEBUG_FILE"
@@ -169,7 +172,7 @@ for iteration in $(seq 1 "$EXPECTED"); do
   # Establish the visible selection boundary before starting the observer.
   # A fixed sleep allowed the previous session's marker to be submitted when
   # the TUI was still processing a geometry/refresh signal.
-  wait_until "selection target $target" "[ \"\$(sidebar_selected_name 2>/dev/null || true)\" = \"$target\" ]"
+  wait_until "selection target $target" "[ \"\$(selected_name_key)\" = \"$target\" ]"
 
   trace_before="$(file_lines "$TRACE_FILE")"
   debug_before="$(file_lines "$DEBUG_FILE")"
@@ -205,13 +208,14 @@ enter_total="$(awk -F '\t' 'NR > 1 && ($6 == "enter-dispatch" || $7 == "enter-di
 force_total="$(awk -F '\t' 'NR > 1 && ($6 == "force-refresh" || $7 == "force-refresh") {n++} END {print n + 0}' "$CAUSE_FILE")"
 layout_total="$(awk -F '\t' 'NR > 1 && ($6 == "layout-restore" || $7 == "layout-restore") {n++} END {print n + 0}' "$CAUSE_FILE")"
 full_total="$(awk -F '\t' 'NR > 1 && ($6 == "full-render-required" || $7 == "full-render-required") {n++} END {print n + 0}' "$CAUSE_FILE")"
+switch_total="$(grep -c 'switch.begin' "$TRACE_FILE" 2>/dev/null || true)"
 
 echo "cause_file=$CAUSE_FILE"
 echo "timeline_file=$TIMELINE_FILE"
 echo "completed=$completed requested=$EXPECTED"
-echo "render_calls=$render_total enter_dispatch=$enter_total force_refresh=$force_total layout_restore=$layout_total full_render_required=$full_total ambiguous=$ambiguous_total unclassified=$unclassified_total"
+echo "switches=$switch_total render_calls=$render_total enter_dispatch=$enter_total force_refresh=$force_total layout_restore=$layout_total full_render_required=$full_total ambiguous=$ambiguous_total unclassified=$unclassified_total"
 
-if [ "$completed" -ne "$EXPECTED" ] || [ "$render_total" -lt "$EXPECTED" ] ||
+if [ "$completed" -ne "$EXPECTED" ] || [ "$switch_total" -lt "$EXPECTED" ] ||
    [ "$unclassified_total" -ne 0 ] || [ "$ambiguous_total" -ne 0 ]; then
   KEEP_RUN_DIR=true
   echo "RED: one or more render calls have no unique causal classification" >&2
@@ -219,4 +223,4 @@ if [ "$completed" -ne "$EXPECTED" ] || [ "$render_total" -lt "$EXPECTED" ] ||
   exit 1
 fi
 
-echo "PASS: every observed render call has a correlated trace-cause candidate"
+echo "PASS: every measured transition has a stable cause boundary (including zero-render delta transitions)"
