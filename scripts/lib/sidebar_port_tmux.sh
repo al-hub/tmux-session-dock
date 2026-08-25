@@ -226,6 +226,11 @@ remember_sidebar_subpane_height_for_window() {
         return 0
     fi
 
+    if declare -f subpane_hub_snapshot_user_intent >/dev/null 2>&1; then
+        subpane_hub_snapshot_user_intent "$window_id" >/dev/null
+        return $?
+    fi
+
     local sub_panes=()
     if declare -f subpane_hub_get_window_subpanes >/dev/null 2>&1; then
         while IFS= read -r p_id; do
@@ -273,6 +278,15 @@ sync_attached_subpane_user_intent() {
     # Precondition: Window height must be adequate for interactive attached display (>= 30 rows)
     # to avoid promoting unattached / headless 24-row default clipping as user intent.
     [ "$win_h" -ge 30 ] || return 0
+
+    if declare -f subpane_hub_snapshot_user_intent >/dev/null 2>&1; then
+        local snapshot_total
+        snapshot_total="$(subpane_hub_snapshot_user_intent "$source_win" 2>/dev/null || true)"
+        if [ -n "$snapshot_total" ] && [ "$snapshot_total" -ge 4 ] 2>/dev/null; then
+            printf '%s\n' "$snapshot_total"
+            return 0
+        fi
+    fi
 
     local sub_pane
     sub_pane="$(sidebar_window_subpane "$source_win" || true)"
@@ -494,6 +508,13 @@ ensure_sidebar_subpane_window() {
         return $?
 
     else
+        local lease_holder=""
+        if declare -f subpane_hub_get_lease_holder >/dev/null 2>&1; then
+            lease_holder="$(subpane_hub_get_lease_holder 2>/dev/null || true)"
+            if [ -n "$lease_holder" ] && declare -f subpane_hub_snapshot_user_intent >/dev/null 2>&1; then
+                subpane_hub_snapshot_user_intent "$lease_holder" >/dev/null 2>&1 || true
+            fi
+        fi
         local sub_pane
         sub_pane="$(sidebar_window_subpane "$window_id" || true)"
         if [ -n "$sub_pane" ]; then

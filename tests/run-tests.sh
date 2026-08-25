@@ -162,6 +162,7 @@ case "${TARGET_SUITE}" in
             "${SINGLE_DIR}/test-subpane-ctrl-alt-swap.sh"
             "${SINGLE_DIR}/test-subpane-swap-switch-immediate.sh"
             "${SINGLE_DIR}/test-keyboard-e2e-subpane.sh"
+            "${SINGLE_DIR}/test-keyboard-e2e-subpane-multi-slot-enter.sh"
             "${SINGLE_DIR}/test-keyboard-e2e-subpane-focus-priority.sh"
             "${SINGLE_DIR}/test-keyboard-e2e-subpane-entry-priority.sh"
             "${SINGLE_DIR}/test-subpane-default-bottom-off-height-persist.sh"

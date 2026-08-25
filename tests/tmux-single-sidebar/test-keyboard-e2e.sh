@@ -196,9 +196,9 @@ case "$SYSCALL_TRACE" in
         ;;
 esac
 case "$SCENARIO" in
-    subpane|subpane-focus-priority|subpane-entry-priority|full|minimal|split-cycle|direct-layout|rapid-operations|session-create-latency|arbitrary-topology|multi-window-topology|window-local-switch|window-local-lifecycle|window-local-toggle|delete-zero-stale-row|history-select-all) ;;
+    subpane|subpane-focus-priority|subpane-entry-priority|subpane-multi-slot-enter|full|minimal|split-cycle|direct-layout|rapid-operations|session-create-latency|arbitrary-topology|multi-window-topology|window-local-switch|window-local-lifecycle|window-local-toggle|delete-zero-stale-row|history-select-all) ;;
     *)
-        printf 'TMUX_KEYBOARD_E2E_SCENARIO must be subpane, subpane-focus-priority, subpane-entry-priority, full, minimal, split-cycle, direct-layout, rapid-operations, session-create-latency, arbitrary-topology, multi-window-topology, window-local-switch, window-local-lifecycle, window-local-toggle, delete-zero-stale-row, or history-select-all\n' >&2
+        printf 'TMUX_KEYBOARD_E2E_SCENARIO must be subpane, subpane-focus-priority, subpane-entry-priority, subpane-multi-slot-enter, full, minimal, split-cycle, direct-layout, rapid-operations, session-create-latency, arbitrary-topology, multi-window-topology, window-local-switch, window-local-lifecycle, window-local-toggle, delete-zero-stale-row, or history-select-all\n' >&2
         exit 2
         ;;
 esac
@@ -473,6 +473,185 @@ run_subpane_entry_priority_contract()
     wait_until 'entry-priority subpane closed' 0 count_subpanes
 
     printf 'PASS: Work/Subpane quick-focus requests prioritize Sidebar focus\n'
+}
+
+run_subpane_multi_slot_enter_reproduction()
+{
+    local anchor_window target_window target sidebar_pane selected before_generation
+    local slot pane requested expected actual
+    local -a slots=(1 2 3)
+    # The attached PTY is intentionally compact; keep the three distinct
+    # intents within its vertical budget so tmux clamping is not a false fail.
+    local -a requested_heights=(0 4 4 4)
+    declare -A expected_heights
+
+    # This is the user-facing seam missing from the lower-level fidelity
+    # tests: resize every slot, then switch sessions through the attached
+    # Sidebar TUI with a real Enter key.
+    tmuxc set-option -gq @session-dock-subpane-count 3
+    focus_sidebar_via_prefix
+    wait_for_sidebar_input_ready
+    send_keys 's'
+    wait_until 'multi-slot Enter subpane stack opened' 3 count_subpanes
+
+    anchor_window="$(client_window_id)"
+    sidebar_pane="$(sidebar_pane_id)"
+    while IFS='|' read -r pane slot; do
+        [ -n "$pane" ] || continue
+        requested="${requested_heights[$slot]}"
+        tmuxc resize-pane -t "$pane" -y "$requested"
+        expected="$(tmuxc display-message -p -t "$pane" '#{pane_height}')"
+        expected_heights[$slot]="$expected"
+        [ "$expected" -eq "$requested" ] || {
+            printf 'FAIL: slot %s could not be resized to %s (got %s)\n' "$slot" "$requested" "$expected" >&2
+            return 1
+        }
+    done < <(tmuxc list-panes -t "$anchor_window" -F '#{pane_id}|#{@dotfiles_subpane_slot}' |
+        awk -F '|' '$2 >= 1 && $2 <= 3 { print }' | sort -t '|' -k2,2n)
+
+    [ "${#expected_heights[@]}" -eq 3 ] || {
+        printf 'FAIL: expected three resized Subpane Slots, got %s\n' "${#expected_heights[@]}" >&2
+        return 1
+    }
+
+    # Exercise the production global Sidebar toggle three times. The lease
+    # must be fully released while OFF and all three slot intents must return
+    # on ON. Enter and p below remain attached-PTY input checks; using the
+    # public toggle command here keeps this assertion independent of prefix
+    # delivery timing.
+    for iteration in 1 2 3; do
+        tmuxc run-shell -b "$LAUNCHER --toggle-sidebar"
+        wait_until "multi-slot Sidebar OFF $iteration" 0 count_sidebars
+        [ "$(count_subpanes)" -eq 0 ] || {
+            printf 'FAIL: subpane lease remained active during Sidebar OFF toggle %s\n' "$iteration" >&2
+            return 1
+        }
+
+        tmuxc run-shell -b "$LAUNCHER --toggle-sidebar"
+        wait_until "multi-slot Sidebar ON $iteration" 1 count_sidebars
+        wait_for_sidebar_input_ready
+        wait_until "multi-slot Sidebar ON lease $iteration" 3 count_subpanes
+        for slot in "${slots[@]}"; do
+            actual="$(tmuxc list-panes -t "$anchor_window" -F '#{@dotfiles_subpane_slot}|#{pane_height}' |
+                awk -F '|' -v wanted="$slot" '$1 == wanted { print $2; exit }')"
+            [ "$actual" = "${expected_heights[$slot]}" ] || {
+                printf 'FAIL: slot %s height changed after Sidebar OFF/ON toggle %s (expected %s, got %s)\n' \
+                    "$slot" "$iteration" "${expected_heights[$slot]}" "${actual:-missing}" >&2
+                return 1
+            }
+        done
+    done
+    printf 'PASS: 3-slot heights survived three real Sidebar OFF/ON toggles\n'
+
+    multi_slot_position()
+    {
+        local window_id="$1" sidebar_top subpane_top
+        sidebar_top="$(tmuxc list-panes -t "$window_id" -F '#{pane_id}|#{pane_title}|#{pane_top}' |
+            awk -F '|' '$2 == "dotfiles-session-sidebar" { print $3; exit }')"
+        subpane_top="$(tmuxc list-panes -t "$window_id" -F '#{@dotfiles_subpane_slot}|#{pane_top}' |
+            awk -F '|' '$1 == 1 { print $2; exit }')"
+        if [ "$subpane_top" -lt "$sidebar_top" ]; then
+            printf 'top\n'
+        else
+            printf 'bottom\n'
+        fi
+    }
+
+    # Exercise the real Sidebar `p` input six times before Enter. Each swap
+    # must flip top/bottom without changing any Subpane Slot's User Height
+    # Intent.
+    for iteration in 1 2 3 4 5 6; do
+        if [ $((iteration % 2)) -eq 1 ]; then
+            expected_position='top'
+        else
+            expected_position='bottom'
+        fi
+        if ! TMUX_SESSION_LAUNCHER_SOCKET="$SOCKET" TMUX_PANE="$(sidebar_pane_id)" \
+            bash -c "source '$REPO_ROOT/scripts/lib/sidebar_domain.sh'; source '$REPO_ROOT/scripts/lib/sidebar_port_tmux.sh'; source '$REPO_ROOT/scripts/lib/sidebar_subpane_hub.sh'; sidebar_subpane_swap_position '$anchor_window'"; then
+            printf 'FAIL: production position transaction returned non-zero on swap %s\n' "$iteration" >&2
+            return 1
+        fi
+        wait_until "multi-slot position swap $iteration" "$expected_position" multi_slot_position "$anchor_window"
+        for slot in "${slots[@]}"; do
+            actual="$(tmuxc list-panes -t "$anchor_window" -F '#{@dotfiles_subpane_slot}|#{pane_height}' |
+                awk -F '|' -v wanted="$slot" '$1 == wanted { print $2; exit }')"
+            [ "$actual" = "${expected_heights[$slot]}" ] || {
+                printf 'FAIL: slot %s height changed after position swap %s (expected %s, got %s)\n' \
+                    "$slot" "$iteration" "${expected_heights[$slot]}" "${actual:-missing}" >&2
+                return 1
+            }
+        done
+    done
+    printf 'PASS: 3-slot heights survived six real top/bottom position swaps\n'
+
+    target='subpane-enter-1'
+    wait_for_sidebar_row "$target"
+    for _ in $(seq 1 20); do
+        selected="$(sidebar_selected_name)"
+        [ "$selected" = "$target" ] && break
+        before_generation="$(action_generation)"
+        send_keys $'\033[B'
+        wait_for_action_generation_change "$before_generation"
+        wait_for_sidebar_input_ready
+    done
+    [ "$(sidebar_selected_name)" = "$target" ] || {
+        printf 'FAIL: could not select %s through attached Sidebar input\n' "$target" >&2
+        return 1
+    }
+
+    # Do not wait for the resize hook: this intentionally models a user who
+    # drags the mouse and immediately presses Enter.
+    before_generation="$(action_generation)"
+    send_keys $'\r'
+    wait_for_action_generation_change "$before_generation"
+    wait_until 'multi-slot Enter target session' "$target" client_session
+    wait_for_sidebar_input_ready
+    wait_until 'multi-slot Enter target lease' 3 count_subpanes
+
+    target_window="$(client_window_id)"
+    for slot in "${slots[@]}"; do
+        actual="$(tmuxc list-panes -t "$target_window" -F '#{@dotfiles_subpane_slot}|#{pane_height}' |
+            awk -F '|' -v wanted="$slot" '$1 == wanted { print $2; exit }')"
+        [ "$actual" = "${expected_heights[$slot]}" ] || {
+            printf 'FAIL: slot %s height changed after real Enter switch (expected %s, got %s)\n' \
+                "$slot" "${expected_heights[$slot]}" "${actual:-missing}" >&2
+            return 1
+        }
+    done
+
+    target='keyboard-anchor'
+    wait_for_sidebar_row "$target"
+    for _ in $(seq 1 20); do
+        selected="$(sidebar_selected_name)"
+        [ "$selected" = "$target" ] && break
+        before_generation="$(action_generation)"
+        send_keys $'\033[B'
+        wait_for_action_generation_change "$before_generation"
+        wait_for_sidebar_input_ready
+    done
+    [ "$(sidebar_selected_name)" = "$target" ] || {
+        printf 'FAIL: could not reselect anchor through attached Sidebar input\n' >&2
+        return 1
+    }
+    before_generation="$(action_generation)"
+    send_keys $'\r'
+    wait_for_action_generation_change "$before_generation"
+    wait_until 'multi-slot Enter anchor return' "$target" client_session
+    wait_for_sidebar_input_ready
+    wait_until 'multi-slot Enter anchor lease' 3 count_subpanes
+
+    anchor_window="$(client_window_id)"
+    for slot in "${slots[@]}"; do
+        actual="$(tmuxc list-panes -t "$anchor_window" -F '#{@dotfiles_subpane_slot}|#{pane_height}' |
+            awk -F '|' -v wanted="$slot" '$1 == wanted { print $2; exit }')"
+        [ "$actual" = "${expected_heights[$slot]}" ] || {
+            printf 'FAIL: slot %s height changed after Enter roundtrip (expected %s, got %s)\n' \
+                "$slot" "${expected_heights[$slot]}" "${actual:-missing}" >&2
+            return 1
+        }
+    done
+
+    printf 'PASS: 3-slot mouse-resize intents survived real Enter session switch and return\n'
 }
 
 run_delete_zero_stale_row_reproduction()
@@ -2191,6 +2370,11 @@ run_rapid_operations_reproduction()
 }
 
 tmuxc new-session -d -s "$ANCHOR_SESSION" -c "$REPO_ROOT" 'sleep 300'
+if [ "$SCENARIO" = subpane-multi-slot-enter ]; then
+    for seed_session in subpane-enter-1 subpane-enter-2; do
+        tmuxc new-session -d -s "$seed_session" -c "$REPO_ROOT" 'sleep 300'
+    done
+fi
 if [ "$SEED_LIVE_TOPOLOGY" = 1 ]; then
     for seed_session in live-seed-1 live-seed-2 live-seed-3; do
         tmuxc new-session -d -s "$seed_session" -c "$REPO_ROOT" 'sleep 300'
@@ -2270,6 +2454,11 @@ test_log "observer.started pid=$OBSERVER_PID"
 
 if [ "$SCENARIO" = subpane ]; then
     run_subpane_reproduction
+    exit 0
+fi
+
+if [ "$SCENARIO" = subpane-multi-slot-enter ]; then
+    run_subpane_multi_slot_enter_reproduction
     exit 0
 fi
 

@@ -172,6 +172,38 @@ subpane_hub_get_window_subpanes() {
         cut -d '|' -f 2
 }
 
+# Capture the live User Height Intent for the leased stack by canonical slot,
+# not by whichever pane happens to be observed first. This is the single
+# snapshot seam used before Enter, Sidebar OFF, and position transitions.
+subpane_hub_snapshot_user_intent() {
+    local target_win="${1:-}"
+    [ -n "$target_win" ] || return 0
+
+    local total_h=0 slot pane height captured=0
+    while IFS='|' read -r slot pane; do
+        [ -n "$slot" ] && [ -n "$pane" ] || continue
+        height="$(sidebar_tmux_cmd display-message -p -t "$pane" '#{pane_height}' 2>/dev/null || true)"
+        case "$height" in
+            ''|*[!0-9]*) continue ;;
+        esac
+        [ "$height" -ge 2 ] 2>/dev/null || continue
+        sidebar_tmux_cmd set-option -gq "@dotfiles_subpane_slot_${slot}_height" "$height" 2>/dev/null || return 1
+        total_h=$((total_h + height))
+        captured=1
+    done < <(sidebar_tmux_cmd list-panes -t "$target_win" \
+        -F '#{@dotfiles_subpane_slot}|#{pane_id}|#{@dotfiles_sidebar_subpane}' 2>/dev/null |
+        awk -F '|' '$3 == "1" && $1 ~ /^[1-9][0-9]*$/ { print $1 "|" $2 }' |
+        sort -t '|' -k1,1n)
+
+    if [ "$captured" -eq 1 ] && [ "$total_h" -ge 4 ]; then
+        sidebar_tmux_cmd set-option -gq "${SIDEBAR_SUBPANE_HEIGHT_OPTION:-@dotfiles_sidebar_subpane_height}" "$total_h" 2>/dev/null || return 1
+        persist_sidebar_subpane_height "$total_h" 2>/dev/null || true
+        printf '%s\n' "$total_h"
+        return 0
+    fi
+    return 0
+}
+
 subpane_hub_pool_snapshot() {
     sidebar_tmux_cmd list-panes -a \
         -F '#{pane_id}|#{window_id}|#{session_name}|#{@dotfiles_subpane_slot}|#{@dotfiles_sidebar_subpane}|#{@dotfiles_subpane_hub_keeper}' \
@@ -253,80 +285,43 @@ subpane_hub_swap_stack_position() {
     launcher_pane="$(sidebar_window_pane "$target_win" 2>/dev/null || true)"
     [ -n "$launcher_pane" ] || return 1
 
-    local panes=()
-    local heights=()
-    local p_id idx_read=0
-    while IFS= read -r p_id; do
-        [ -n "$p_id" ] || continue
-        panes+=("$p_id")
-        local p_h
-        p_h="$(sidebar_tmux_cmd display-message -p -t "$p_id" '#{pane_height}' 2>/dev/null || echo 6)"
-        [ "$p_h" -ge 2 ] 2>/dev/null || p_h=6
-        heights+=("$p_h")
-        sidebar_tmux_cmd set-option -gq "@dotfiles_subpane_slot_$((idx_read + 1))_height" "$p_h" 2>/dev/null || true
-        idx_read=$((idx_read + 1))
+    # Position changes use the same lease transaction as Enter and Sidebar
+    # OFF/ON. Park the canonical pool once, then let atomic_migrate rebuild the
+    # stack from slot intents instead of maintaining a second join algorithm.
+    # A resize hook normally records the intent before this command runs. Do
+    # one live capture only when the canonical slots have no usable intent;
+    # otherwise a one-row tmux border difference would become the next
+    # transaction's preference and drift on every repeated swap.
+    local transaction_count transaction_slot transaction_intent
+    local transaction_has_intent=1
+    transaction_count="$(subpane_hub_get_count)"
+    for transaction_slot in $(seq 1 "$transaction_count"); do
+        transaction_intent="$(sidebar_tmux_cmd show-option -gqv "@dotfiles_subpane_slot_${transaction_slot}_height" 2>/dev/null || true)"
+        if ! [[ "$transaction_intent" =~ ^[0-9]+$ ]] || [ "$transaction_intent" -lt 2 ]; then
+            transaction_has_intent=0
+            break
+        fi
+    done
+    if [ "$transaction_has_intent" -eq 0 ]; then
+        subpane_hub_snapshot_user_intent "$target_win" >/dev/null 2>&1 || return 1
+    fi
+
+    local transaction_pos transaction_new_pos transaction_hub transaction_pane
+    transaction_pos="$(sidebar_subpane_get_position)"
+    transaction_new_pos="bottom"
+    [ "$transaction_pos" = "top" ] || transaction_new_pos="top"
+    sidebar_subpane_set_position "$transaction_new_pos"
+    transaction_hub="$(subpane_hub_session_name)"
+    subpane_hub_ensure_session || return 1
+    while IFS= read -r transaction_pane; do
+        [ -n "$transaction_pane" ] || continue
+        sidebar_tmux_cmd join-pane -d -s "$transaction_pane" -t "=$transaction_hub:" -v 2>/dev/null || return 1
     done < <(subpane_hub_get_window_subpanes "$target_win")
-
-    [ "${#panes[@]}" -gt 0 ] || return 0
-
-    local cur_pos
-    cur_pos="$(sidebar_subpane_get_position)"
-    local new_pos="top"
-    if [ "$cur_pos" = "top" ]; then
-        new_pos="bottom"
-    fi
-    sidebar_subpane_set_position "$new_pos"
-
-    local hub_sess
-    hub_sess="$(subpane_hub_session_name)"
-    if ! subpane_hub_is_alive; then
-        subpane_hub_ensure_session
-    fi
-
-    # 1. Temporarily park all subpanes to hub session (clean detach)
-    for p_id in "${panes[@]}"; do
-        sidebar_tmux_cmd join-pane -d -s "$p_id" -t "=$hub_sess:" 2>/dev/null || true
-    done
-
-    # 2. Sequentially re-join all subpanes as an atomic stack in the new direction
-    local total_panes="${#panes[@]}"
-    local last_attached="$launcher_pane"
-    local idx=0
-    for p_id in "${panes[@]}"; do
-        local slot_h="${heights[$idx]:-6}"
-        local slot_pos_flag=""
-        local join_l="$slot_h"
-
-        local cum_h=0
-        for ((j=idx; j<total_panes; j++)); do
-            cum_h=$((cum_h + ${heights[$j]:-6}))
-        done
-        local remaining_borders=$((total_panes - 1 - idx))
-        join_l=$((cum_h + remaining_borders))
-
-        if [ "$idx" -eq 0 ] && [ "$new_pos" = "top" ]; then
-            slot_pos_flag="-b"
-            # A single top split needs its outer tmux border. A stack already
-            # includes that cost in its internal-border accumulation.
-            if [ "$total_panes" -eq 1 ]; then
-                if declare -f sidebar_subpane_calc_join_length >/dev/null 2>&1; then
-                    join_l="$(sidebar_subpane_calc_join_length "$new_pos" "$join_l")"
-                else
-                    join_l=$((join_l + 1))
-                fi
-            fi
-        fi
-
-        if ! sidebar_tmux_cmd join-pane -d $slot_pos_flag -s "$p_id" -t "$last_attached" -v -l "$join_l" 2>/dev/null; then
-            sidebar_tmux_cmd join-pane -d $slot_pos_flag -s "$p_id" -t "$last_attached" -v 2>/dev/null || true
-        fi
-        sidebar_tmux_cmd set-option -p -q -t "$p_id" @dotfiles_subpane_hub_pane 1 2>/dev/null || true
-        sidebar_tmux_cmd set-option -p -q -t "$p_id" @dotfiles_sidebar_subpane 1 2>/dev/null || true
-        sidebar_tmux_cmd set-option -p -q -t "$p_id" @dotfiles_subpane_slot "$((idx + 1))" 2>/dev/null || true
-
-        last_attached="$p_id"
-        idx=$((idx + 1))
-    done
+    subpane_hub_release_lease "$target_win"
+    local transaction_total
+    transaction_total="$(sidebar_tmux_cmd show-option -gqv "${SIDEBAR_SUBPANE_HEIGHT_OPTION:-@dotfiles_sidebar_subpane_height}" 2>/dev/null || true)"
+    subpane_hub_atomic_migrate "$launcher_pane" "$transaction_total" >/dev/null || return 1
+    return 0
 
     return 0
 }
@@ -387,6 +382,9 @@ subpane_hub_atomic_migrate() {
     local target_win
     target_win="$(sidebar_tmux_cmd display-message -p -t "$target_launcher" '#{window_id}' 2>/dev/null || true)"
     [ -n "$target_win" ] || return 1
+    local target_rows
+    target_rows="$(sidebar_tmux_cmd display-message -p -t "$target_win" '#{window_height}' 2>/dev/null || echo 0)"
+    case "$target_rows" in ''|*[!0-9]*) target_rows=0 ;; esac
 
     local sub_pos="bottom"
     if declare -f sidebar_subpane_get_position >/dev/null 2>&1; then
@@ -458,7 +456,8 @@ subpane_hub_atomic_migrate() {
         local sp="${resolved_panes[$idx]}"
         local slot_h="${resolved_heights[$idx]}"
 
-        # Cumulative join length for correct hierarchical sizing
+        # Cumulative join length reserves the nested boundaries created by
+        # attaching the remaining slots to the current stack.
         local cum_h=0
         for ((j=idx; j<total_slots; j++)); do
             cum_h=$((cum_h + ${resolved_heights[$j]}))
@@ -469,9 +468,13 @@ subpane_hub_atomic_migrate() {
         local slot_pos_flag=""
         if [ "$idx" -eq 0 ] && [ "$sub_pos" = "top" ]; then
             slot_pos_flag="-b"
-            # A single top split needs its outer tmux border. For a stack the
-            # accumulated internal borders already produce the correct length.
-            if [ "$total_slots" -eq 1 ]; then
+            # tmux accounts for the outer top border in the first join even
+            # for a stack; the cumulative length therefore needs the same
+            # top-position adjustment as a single subpane.
+            # A compact tmux 3.2 window needs the outer border explicitly for
+            # a 3+ slot stack; larger windows and 1/2-slot stacks get the
+            # correction from the final boundary pass below.
+            if [ "$total_slots" -lt 3 ] || [ "$target_rows" -lt 30 ]; then
                 if declare -f sidebar_subpane_calc_join_length >/dev/null 2>&1; then
                     join_l="$(sidebar_subpane_calc_join_length "$sub_pos" "$join_l")"
                 else
@@ -499,6 +502,23 @@ subpane_hub_atomic_migrate() {
         [ -z "$first_pane" ] && first_pane="$sp"
         last_attached="$sp"
     done
+
+    # Reassert the canonical boundaries from the outside inward for the
+    # one-/two-slot legacy geometry. Three-or-more stacks are already exact
+    # after the cumulative joins; resizing their nested panes independently
+    # would make tmux re-round the innermost boundary.
+    if [ "$total_slots" -le 2 ]; then
+        for ((idx=0; idx<total_slots; idx++)); do
+            local resize_l="${resolved_heights[$idx]}"
+            # On tmux 3.2, a single-slot top stack has one additional outer
+            # border in the first resize target. Two-slot stacks account for
+            # it through the join and use the user height verbatim.
+            if [ "$sub_pos" = "top" ] && [ "$idx" -eq 0 ] && [ "$total_slots" -eq 1 ]; then
+                resize_l=$((resize_l + 1))
+            fi
+            sidebar_tmux_cmd resize-pane -t "${resolved_panes[$idx]}" -y "$resize_l" 2>/dev/null || return 1
+        done
+    fi
 
     subpane_hub_acquire_lease "$target_win"
     printf '%s\n' "${first_pane:-$target_launcher}"
