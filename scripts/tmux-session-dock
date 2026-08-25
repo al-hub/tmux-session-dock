@@ -4097,6 +4097,20 @@ EOF
         sidebar_domain_activity_observe cli_state_value observer_state_changed \
             "$name" "$curr_pane_id" "$observer_pid" \
             "$observer_alive" "$observer_observation" "$current_epoch_second" "$SIDEBAR_BUSY_SECONDS"
+        # Presenters have independent observer clocks. Publish the fingerprint
+        # that reached a terminal state and honor it only when the local pane
+        # still has that exact fingerprint. A later AI redraw therefore cannot
+        # be suppressed by an older idle observation from another presenter.
+        activity_terminal_option="@dotfiles_sidebar_ai_terminal_${name}"
+        if [ "$cli_state_value" = idle ] || [ "$cli_state_value" = gone ]; then
+            tmux set-option -gq "$activity_terminal_option" "$cli_state_value:$ai_fingerprint_value" 2>/dev/null || true
+            signal_managed_sidebar_refresh_batch
+            trace_event "ai-observer.terminal-sync session=$name state=$cli_state_value"
+        elif [ "$cli_state_value" = running ] && [ -n "$ai_fingerprint_value" ] &&
+            [ "$(tmux show-option -gqv "$activity_terminal_option" 2>/dev/null || true)" = "idle:$ai_fingerprint_value" ]; then
+            cli_state_value=idle
+            observer_state_changed=true
+        fi
         animate_value=false
         [ "$cli_state_value" = running ] && animate_value=true
         cached_session_cli_state["$name"]="$cli_state_value"

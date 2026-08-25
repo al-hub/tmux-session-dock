@@ -14,6 +14,9 @@ test_files=(
     test-six-session-visual-e2e.sh
     test-enter-switch-gradient-e2e.sh
     test-empty-activity-enter-gradient-e2e.sh
+    test-node-codex-gradient-e2e.sh
+    test-multi-sidebar-node-codex-gradient-e2e.sh
+    test-node-codex-enter-idle-recovery-e2e.sh
     test-opencode-nonselected-stability-e2e.sh
     test-six-session-empty-activity-enter-gradient-e2e.sh
     test-working-heartbeat-gradient-e2e.sh
