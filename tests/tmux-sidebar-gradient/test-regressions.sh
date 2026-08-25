@@ -27,7 +27,7 @@ desired_one_stable_sample_keeps_running()
     collect_sessions
     collect_sessions
 
-    assert_eq active "${session_cli_state[0]}" 'single stable sample state'
+    assert_eq running "${session_cli_state[0]}" 'single stable sample state'
     assert_eq true "${session_animate[0]}" 'single stable sample animation'
 }
 
@@ -51,7 +51,7 @@ desired_new_pane_generation_starts_active()
     set_single_ai_session test %2 codex
     collect_sessions
 
-    assert_eq active "${session_cli_state[0]}" 'new pane generation state'
+    assert_eq running "${session_cli_state[0]}" 'new pane generation state'
     assert_eq true "${session_animate[0]}" 'new pane generation animation'
 }
 
@@ -63,7 +63,7 @@ desired_sidebar_click_does_not_trigger_gradient()
     collect_sessions
     collect_sessions
     collect_sessions
-    assert_eq waiting "${session_cli_state[0]}" 'should be waiting'
+    assert_eq running "${session_cli_state[0]}" 'should be running before focus change'
 
     # Simulate sidebar click/session switch.
     # In tmux, switching the active session/client or clicking redrawing changes the pane focus,
@@ -77,8 +77,8 @@ desired_sidebar_click_does_not_trigger_gradient()
     TEST_FINGERPRINT_BY_PANE['%1']='384729103:1142'
     collect_sessions
 
-    assert_eq waiting "${session_cli_state[0]}" 'should remain waiting on focus change'
-    assert_eq false "${session_animate[0]}" 'should not animate on focus change'
+    assert_eq running "${session_cli_state[0]}" 'should remain running on focus change'
+    assert_eq true "${session_animate[0]}" 'should preserve running state on focus change'
 }
 
 desired_resize_does_not_trigger_gradient()
@@ -89,7 +89,7 @@ desired_resize_does_not_trigger_gradient()
     collect_sessions
     collect_sessions
     collect_sessions
-    assert_eq waiting "${session_cli_state[0]}" 'should be waiting'
+    assert_eq running "${session_cli_state[0]}" 'should be running before resize'
 
     # Simulate terminal/pane resize.
     TEST_PANE_WIDTH=100
@@ -97,13 +97,13 @@ desired_resize_does_not_trigger_gradient()
     TEST_FINGERPRINT_BY_PANE['%1']='384729103:1142'
     collect_sessions
 
-    assert_eq waiting "${session_cli_state[0]}" 'should remain waiting on resize'
-    assert_eq false "${session_animate[0]}" 'should not animate on resize'
+    assert_eq running "${session_cli_state[0]}" 'should remain running on resize'
+    assert_eq true "${session_animate[0]}" 'should preserve running state on resize'
 
     # Subsequent cycle (bypass inactive, actual fingerprint should be matching baseline)
     collect_sessions
-    assert_eq waiting "${session_cli_state[0]}" 'should remain waiting on subsequent cycle'
-    assert_eq false "${session_animate[0]}" 'should not animate on subsequent cycle'
+    assert_eq running "${session_cli_state[0]}" 'should remain running on subsequent cycle'
+    assert_eq true "${session_animate[0]}" 'should preserve running state on subsequent cycle'
 }
 
 desired_client_session_switch_does_not_trigger_gradient()
@@ -114,7 +114,7 @@ desired_client_session_switch_does_not_trigger_gradient()
     collect_sessions
     collect_sessions
     collect_sessions
-    assert_eq waiting "${session_cli_state[0]}" 'should be waiting'
+    assert_eq running "${session_cli_state[0]}" 'should be running before client switch'
 
     # Simulate client switching session.
     TEST_CURRENT_SESSION='other'
@@ -122,14 +122,14 @@ desired_client_session_switch_does_not_trigger_gradient()
     TEST_FINGERPRINT_BY_PANE['%1']='384729103:1142'
     collect_sessions
 
-    assert_eq waiting "${session_cli_state[0]}" 'should remain waiting on client session switch'
-    assert_eq false "${session_animate[0]}" 'should not animate on client session switch'
+    assert_eq running "${session_cli_state[0]}" 'should remain running on client session switch'
+    assert_eq true "${session_animate[0]}" 'should preserve running state on client session switch'
     assert_eq true "$full_render_required" 'client session switch should request full render'
 
     # Subsequent cycle (bypass inactive, actual fingerprint should be matching baseline)
     collect_sessions
-    assert_eq waiting "${session_cli_state[0]}" 'should remain waiting on subsequent cycle'
-    assert_eq false "${session_animate[0]}" 'should not animate on subsequent cycle'
+    assert_eq running "${session_cli_state[0]}" 'should remain running on subsequent cycle'
+    assert_eq true "${session_animate[0]}" 'should preserve running state on subsequent cycle'
 }
 
 desired_client_session_switch_aligns_cursor()
@@ -183,7 +183,7 @@ desired_command_transition_reopens_state_scan()
         printf '  command transition did not reopen full snapshot\n' >&2
         return 1
     }
-    assert_eq active "${session_cli_state[0]}" \
+    assert_eq running "${session_cli_state[0]}" \
         'command transition should detect AI state'
 }
 
@@ -199,7 +199,7 @@ desired_shell_child_ai_reopens_state_scan()
     TEST_FINGERPRINT_BY_PANE['%1']='shell-child-ai-output'
     refresh_sidebar_state_if_due || true
 
-    assert_eq active "${session_cli_state[0]}" \
+    assert_eq running "${session_cli_state[0]}" \
         'shell child AI should be detected despite stable pane command'
 }
 

@@ -31,13 +31,13 @@ test_sessions_animate_independently()
 
     collect_sessions
     assert_eq true "${session_animate[0]}" 'first single stable animation'
-    assert_eq false "${session_animate[1]}" 'second stable animation'
-    assert_eq active "${session_cli_state[0]}" 'first changed state'
-    assert_eq waiting "${session_cli_state[1]}" 'second stable state'
+    assert_eq true "${session_animate[1]}" 'second stable animation remains inside grace'
+    assert_eq running "${session_cli_state[0]}" 'first changed state'
+    assert_eq running "${session_cli_state[1]}" 'second stable state remains running inside grace'
 
     TEST_FINGERPRINT_BY_PANE['%2']='second-b'
     collect_sessions false second
-    assert_eq false "${session_animate[0]}" 'first stable animation'
+    assert_eq true "${session_animate[0]}" 'first stable animation remains inside grace'
     assert_eq true "${session_animate[1]}" 'second changed animation'
 }
 

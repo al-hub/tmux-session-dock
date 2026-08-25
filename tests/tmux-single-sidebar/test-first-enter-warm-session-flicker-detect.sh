@@ -35,12 +35,16 @@ echo "Peer-warmed sidebar ready at: $peer_sb (window=$peer_win)"
 # Wait for peer-warmed sidebar to complete its initial background boot and appear in anchor list
 wait_until "peer-warmed ready" "tmuxc show-options -wqv -t '$peer_win' @dotfiles_sidebar_ready | grep -Fq 1"
 wait_until "peer-warmed visible" "[ -n \"\$(sidebar_row_for 'peer-warmed')\" ]"
-sleep 0.5
+# The eager-warm launcher can finish its first metadata reconciliation just
+# after the ready marker.  Let that startup frame settle before establishing
+# the no-flicker baseline; otherwise the baseline window itself is counted as
+# a switch-time redraw.
+sleep 1.5
 
 # Snapshot trace file before switch
 trace_before="$RUN_DIR/trace-before.log"
 cp "$TRACE_FILE" "$trace_before" 2>/dev/null || touch "$trace_before"
-peer_full_renders_before=$(grep -F "pane=$peer_sb" "$trace_before" | grep -c "render.full.begin" 2>/dev/null || echo 0)
+peer_full_renders_before=$(grep -F "pane=$peer_sb" "$trace_before" | grep -c "render.full.begin" 2>/dev/null || true)
 echo "Baseline peer sidebar ($peer_sb) full_render count before switch: $peer_full_renders_before"
 
 echo "=== [3/4] Navigating to peer-warmed in sidebar and switching ==="
@@ -54,7 +58,7 @@ echo "=== [4/4] Analyzing Trace Events for Full Render / Flicker Detection ==="
 trace_after="$RUN_DIR/trace-after.log"
 cp "$TRACE_FILE" "$trace_after" 2>/dev/null || touch "$trace_after"
 
-peer_full_renders_after=$(grep -F "pane=$peer_sb" "$trace_after" | grep -c "render.full.begin" 2>/dev/null || echo 0)
+peer_full_renders_after=$(grep -F "pane=$peer_sb" "$trace_after" | grep -c "render.full.begin" 2>/dev/null || true)
 new_peer_full_renders=$((peer_full_renders_after - peer_full_renders_before))
 
 echo "Trace analysis for target sidebar ($peer_sb):"
@@ -90,11 +94,11 @@ peer2_sb="$(tmuxc list-panes -t "$peer2_win" -F '#{pane_id}|#{pane_title}' | awk
 [ -n "$peer2_sb" ] || { echo "FAIL: peer-warmed-2 sidebar missing"; exit 1; }
 wait_until "peer-warmed-2 ready" "tmuxc show-options -wqv -t '$peer2_win' @dotfiles_sidebar_ready | grep -Fq 1"
 wait_until "peer-warmed-2 visible" "[ -n \"\$(sidebar_row_for 'peer-warmed-2')\" ]"
-sleep 0.5
+sleep 1.5
 
 # Snapshot before switch to peer-warmed-2
 cp "$TRACE_FILE" "$RUN_DIR/trace-before-peer2.log"
-peer2_full_before=$(grep -F "pane=$peer2_sb" "$RUN_DIR/trace-before-peer2.log" | grep -c "render.full.begin" 2>/dev/null || echo 0)
+peer2_full_before=$(grep -F "pane=$peer2_sb" "$RUN_DIR/trace-before-peer2.log" | grep -c "render.full.begin" 2>/dev/null || true)
 
 select_session_by_name "peer-warmed-2"
 wait_until "client on peer-warmed-2" "[ \"\$(client_session)\" = 'peer-warmed-2' ]"
@@ -102,7 +106,7 @@ wait_until "peer2 sidebar ready after switch" sidebar_ready
 sleep 0.3
 
 cp "$TRACE_FILE" "$RUN_DIR/trace-after-peer2.log"
-peer2_full_after=$(grep -F "pane=$peer2_sb" "$RUN_DIR/trace-after-peer2.log" | grep -c "render.full.begin" 2>/dev/null || echo 0)
+peer2_full_after=$(grep -F "pane=$peer2_sb" "$RUN_DIR/trace-after-peer2.log" | grep -c "render.full.begin" 2>/dev/null || true)
 new_peer2_renders=$((peer2_full_after - peer2_full_before))
 echo "Target sidebar 2 ($peer2_sb) delta full renders: $new_peer2_renders"
 
@@ -119,7 +123,7 @@ anchor_sb="$(tmuxc list-panes -t "$anchor_win" -F '#{pane_id}|#{pane_title}' | a
 focus_sidebar
 sleep 0.3
 cp "$TRACE_FILE" "$RUN_DIR/trace-before-anchor.log"
-anchor_full_before=$(grep -F "pane=$anchor_sb" "$RUN_DIR/trace-before-anchor.log" | grep "render.full.begin" | grep -vc "reason=periodic-refresh" 2>/dev/null || echo 0)
+anchor_full_before=$(grep -F "pane=$anchor_sb" "$RUN_DIR/trace-before-anchor.log" | grep "render.full.begin" | grep -vc "reason=periodic-refresh" 2>/dev/null || true)
 
 select_session_by_name "interactive-anchor"
 wait_until "client back on interactive-anchor" "[ \"\$(client_session)\" = 'interactive-anchor' ]"
@@ -127,7 +131,7 @@ wait_until "anchor sidebar ready after return" sidebar_ready
 sleep 0.3
 
 cp "$TRACE_FILE" "$RUN_DIR/trace-after-anchor.log"
-anchor_full_after=$(grep -F "pane=$anchor_sb" "$RUN_DIR/trace-after-anchor.log" | grep "render.full.begin" | grep -vc "reason=periodic-refresh" 2>/dev/null || echo 0)
+anchor_full_after=$(grep -F "pane=$anchor_sb" "$RUN_DIR/trace-after-anchor.log" | grep "render.full.begin" | grep -vc "reason=periodic-refresh" 2>/dev/null || true)
 new_anchor_renders=$((anchor_full_after - anchor_full_before))
 echo "Anchor sidebar ($anchor_sb) delta transition full renders on return: $new_anchor_renders"
 

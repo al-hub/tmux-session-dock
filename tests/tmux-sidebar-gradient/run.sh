@@ -4,6 +4,7 @@ set -euo pipefail
 TEST_DIR="$(cd "$(dirname "$0")" && pwd)"
 test_files=(
     ../tmux-single-sidebar/test-contract.sh
+    ../tmux-single-sidebar/test-ai-activity-observer-policy.sh
     ../tmux-single-sidebar/test-keyboard-e2e.sh
     test-render.sh
     test-fingerprint.sh
@@ -13,6 +14,7 @@ test_files=(
     test-six-session-visual-e2e.sh
     test-enter-switch-gradient-e2e.sh
     test-empty-activity-enter-gradient-e2e.sh
+    test-opencode-nonselected-stability-e2e.sh
     test-six-session-empty-activity-enter-gradient-e2e.sh
     test-working-heartbeat-gradient-e2e.sh
     test-multi-session-working-idle-gradient-e2e.sh

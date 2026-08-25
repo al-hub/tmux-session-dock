@@ -80,6 +80,7 @@ SIDEBAR_BUSY_SECONDS="${TMUX_SESSION_SIDEBAR_BUSY_SECONDS:-10}"
 SIDEBAR_ANIMATION_ENABLED="${TMUX_SESSION_SIDEBAR_ANIMATION_ENABLED:-true}"
 SIDEBAR_POLL_TIMEOUT="${TMUX_SESSION_SIDEBAR_POLL_TIMEOUT:-0.15}"
 SIDEBAR_STATE_REFRESH_SECONDS="${TMUX_SESSION_SIDEBAR_STATE_REFRESH_SECONDS:-5}"
+SIDEBAR_AI_OBSERVATION_SECONDS="${TMUX_SESSION_SIDEBAR_AI_OBSERVATION_SECONDS:-1}"
 SIDEBAR_FORCE_REFRESH_CHECK_SECONDS="${TMUX_SESSION_SIDEBAR_FORCE_REFRESH_CHECK_SECONDS:-1}"
 SIDEBAR_KEY_MAINTENANCE_COOLDOWN_MS="${TMUX_SESSION_SIDEBAR_KEY_MAINTENANCE_COOLDOWN_MS:-250}"
 SIDEBAR_ANIMATION_INTERVAL="${TMUX_SESSION_SIDEBAR_ANIMATION_INTERVAL:-0.033}"
@@ -3992,11 +3993,13 @@ EOF
         ai_fingerprint_value=""
         previous_ai_fingerprint_value="${session_ai_fingerprint[$name]:-}"
 
-        # Hot path에서는 캐시만 사용한다. 전체 강제 스캔은 명시적 이벤트에서만,
-        # 특정 session 갱신은 입력 직후 해당 session에 대해서만 수행한다.
+        # Every known AI pane follows the same observation path, whether its
+        # session is selected or not.  Selection is presenter state, not AI
+        # activity state.
         if [ "$fast_path_active" != "true" ] && {
             [ "$force_scan" = "true" ] ||
             [ "$name" = "$requested_scan_session" ] ||
+            [ -n "${session_ai_direct_pane_id[$name]:-}" ] ||
             [ "$pane_generation_changed" = "true" ] ||
             [ -z "${cached_session_cli_state[$name]:-}" ]; }; then
             if [ -n "$metrics_start" ]; then
@@ -4005,24 +4008,13 @@ EOF
             probe_processes=false
             capture_fingerprint=true
             if [ "$force_scan" = "true" ] ||
+                [ -n "${session_ai_direct_pane_id[$name]:-}" ] ||
                 [ "$name" = "$requested_scan_session" ] ||
                 [ -z "${cached_session_cli_state[$name]:-}" ]; then
                 probe_processes=true
             fi
             direct_probe_pane="${session_ai_direct_pane_id[$name]:-${session_ai_probe_pane_ids[$name]:-}}"
-            if [ -n "$direct_probe_pane" ] &&
-                [ -n "${cached_pane_activity[$direct_probe_pane]:-}" ] &&
-                [ "${cached_pane_activity[$direct_probe_pane]}" = "${previous_pane_activity[$direct_probe_pane]:-}" ] &&
-                [ "${cached_session_cli_state[$name]:-}" = "active" ] &&
-                [ "${session_ai_stable_count[$name]:-0}" -lt 2 ] &&
-                [ -n "${cached_session_cli_state[$name]:-}" ]; then
-                capture_fingerprint=false
-                probe_processes=false
-            fi
-            allow_shell_child_probe=false
-            if [ "$name" = "$requested_scan_session" ]; then
-                allow_shell_child_probe=true
-            fi
+            allow_shell_child_probe=true
             trace_event "collect.ai-probe.begin session=$name probe=$probe_processes fingerprint=$capture_fingerprint"
             if [ -n "$metrics_start" ]; then
                 metrics_phase_start="$(metrics_now_us)"
@@ -4087,42 +4079,29 @@ EOF
             cached_session_ai_fingerprint["$name"]=""
         fi
 
-        cli_state_value="${cached_session_cli_state[$name]}"
         ai_fingerprint_value="${cached_session_ai_fingerprint[$name]:-}"
-        ai_fingerprint_value="${ai_fingerprint_value%-focused}"
-        ai_fingerprint_value="${ai_fingerprint_value%-focus}"
-
-        local actual_fingerprint="$ai_fingerprint_value"
-        if [ "$session_switch_occurred" = "true" ] || [ "$resize_occurred" = "true" ] || [ "$client_switch_occurred" = "true" ]; then
-            ai_fingerprint_value="$previous_ai_fingerprint_value"
-        fi
-
-        prev_pane_id="${previous_session_ai_direct_pane_id[$name]:-}"
         curr_pane_id="${session_ai_direct_pane_id[$name]:-}"
-        if [ "$prev_pane_id" != "$curr_pane_id" ]; then
-            session_ai_fingerprint["$name"]=""
-            session_ai_stable_count["$name"]=0
-            previous_ai_fingerprint_value=""
+        observer_alive=false
+        observer_pid=""
+        if [ -n "$curr_pane_id" ]; then
+            observer_pid="${cached_pane_pid[$curr_pane_id]:-}"
+            [ -n "$ai_fingerprint_value" ] && observer_alive=true
         fi
-
-        animate_value="false"
-        if [ "$cli_state_value" = "active" ] && [ -n "$ai_fingerprint_value" ]; then
-            if [ "$previous_ai_fingerprint_value" = "$ai_fingerprint_value" ]; then
-                stable_count=$(( ${session_ai_stable_count[$name]:-0} + 1 ))
-                session_ai_stable_count["$name"]="$stable_count"
-                if [ "$stable_count" -ge 2 ]; then
-                    cli_state_value="waiting"
-                else
-                    animate_value="true"
-                fi
-            else
-                session_ai_stable_count["$name"]=0
-                animate_value="true"
-            fi
+        observer_observation="$ai_fingerprint_value"
+        # Focus, resize, and client/session switching can alter terminal
+        # capture presentation without indicating AI work.  Ignore that one
+        # adapter sample; the grace-period policy preserves the prior state.
+        if [ "$session_switch_occurred" = "true" ] || [ "$resize_occurred" = "true" ] || [ "$client_switch_occurred" = "true" ]; then
+            observer_observation="${_SIDEBAR_ACTIVITY_OBSERVATION[$name]:-$observer_observation}"
         fi
+        sidebar_domain_activity_observe cli_state_value observer_state_changed \
+            "$name" "$curr_pane_id" "$observer_pid" \
+            "$observer_alive" "$observer_observation" "$current_epoch_second" "$SIDEBAR_BUSY_SECONDS"
+        animate_value=false
+        [ "$cli_state_value" = running ] && animate_value=true
         cached_session_cli_state["$name"]="$cli_state_value"
         if [ "${TMUX_SESSION_LAUNCHER_DEBUG:-0}" = "1" ]; then
-            debug_log "state session=$name prev_fp=$previous_ai_fingerprint_value fp=$ai_fingerprint_value state=$cli_state_value animate=$animate_value"
+            debug_log "state session=$name fp=$ai_fingerprint_value state=$cli_state_value animate=$animate_value changed=$observer_state_changed"
         fi
         trace_event "collect.session.animation-seed.begin session=$name"
         seed_cache_hit=false
@@ -4165,7 +4144,7 @@ EOF
             session_animate+=("$animate_value")
             cached_session_row_index["$name"]="$index"
         fi
-        session_ai_fingerprint["$name"]="$actual_fingerprint"
+        session_ai_fingerprint["$name"]="$ai_fingerprint_value"
         if [ "${previous_session_animate[$name]:-}" != "$animate_value" ]; then
             session_animation_refresh_indexes+=("$index")
         fi
@@ -4778,9 +4757,19 @@ render_animated_name_cells()
 
 refresh_sidebar_state_if_due()
 {
+    # Session switching owns the layout/frame boundary.  An observer tick
+    # during that transaction can make the normal refresh path see the
+    # half-restored geometry and request a second full render.  Defer the
+    # passive AI observation until the transition renderer has consumed its
+    # pending marker; the next due tick will observe the pane without changing
+    # the transition frame.
+    if transition_is_active || transition_commit_pending || transition_render_pending_for_current_session; then
+        trace_event "ai-observer.defer reason=transition"
+        return 1
+    fi
     now_epoch="${EPOCHSECONDS:-$SECONDS}"
     if [ -z "${last_state_refresh_epoch:-}" ] ||
-        [ $((now_epoch - last_state_refresh_epoch)) -ge "$SIDEBAR_STATE_REFRESH_SECONDS" ]; then
+        [ $((now_epoch - last_state_refresh_epoch)) -ge "$SIDEBAR_AI_OBSERVATION_SECONDS" ]; then
         # Passive sessions do not need a full state scan when their pane
         # topology and command names are unchanged.  A single target-scoped
         # snapshot still detects a shell -> command transition.
@@ -4819,7 +4808,7 @@ state_refresh_due()
 {
     local now_epoch_value="${EPOCHSECONDS:-$SECONDS}"
     [ -z "${last_state_refresh_epoch:-}" ] ||
-        [ $((now_epoch_value - last_state_refresh_epoch)) -ge "$SIDEBAR_STATE_REFRESH_SECONDS" ]
+        [ $((now_epoch_value - last_state_refresh_epoch)) -ge "$SIDEBAR_AI_OBSERVATION_SECONDS" ]
 }
 
 render_visible_rows()
