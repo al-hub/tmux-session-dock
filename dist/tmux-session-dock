@@ -2328,6 +2328,53 @@ sidebar_coordinator_dispatch_event() {
     esac
 }
 
+# A Presenter Window has one marker slot, so a newer settled handover
+# deliberately supersedes an unflushed older frame. The coordinator owns both
+# that Last-Writer-Wins queue and the only render dispatch for its intents.
+transition_coordinator_queue_handover_render() {
+    local intent="$1" target="$2" old_current="$3" old_selected_index="$4" old_selected_session="$5"
+    [ "$intent" != none ] || return 0
+    if [ "${handover_render_intent:-none}" != none ]; then
+        trace_event "handover.render.coalesce previous_target=${handover_render_target:-none} target=$target"
+    fi
+    handover_render_generation=$(( ${handover_render_generation:-0} + 1 ))
+    handover_render_intent="$intent"
+    handover_render_target="$target"
+    handover_render_old_current="$old_current"
+    handover_render_old_selected_index="$old_selected_index"
+    handover_render_old_selected_session="$old_selected_session"
+    trace_event "handover.render.queue generation=$handover_render_generation target=$target intent=$intent"
+}
+
+transition_coordinator_flush_handover_render() {
+    local intent="${handover_render_intent:-none}"
+    [ "$intent" != none ] || return 0
+
+    case "$intent" in
+        delta)
+            render_marker_delta "${handover_render_old_current:-}" \
+                "${handover_render_old_selected_index:--1}" \
+                "${handover_render_old_selected_session:-}"
+            render_footer
+            ;;
+        full)
+            request_full_render marker-handover-reconcile
+            ;;
+        deferred)
+            if transition_commit_pending; then
+                request_full_render enter-session-switch
+            elif transition_is_active; then
+                return 0
+            else
+                request_full_render marker-handover-reconcile
+            fi
+            ;;
+    esac
+    trace_event "handover.render.flush generation=${handover_render_generation:-0} target=${handover_render_target:-none} intent=$intent"
+    handover_render_intent=none
+    handover_render_target=""
+}
+
 selection_coordinator_align_current() {
     local target_curr="${1:-}"
     if [ "${#session_names[@]}" -eq 0 ]; then
@@ -7642,52 +7689,6 @@ sidebar_consume_pending_target_marker()
     last_force_refresh_check_epoch="${EPOCHSECONDS:-$SECONDS}"
     trace_event "marker.handover.consumed target=$target_session window=$SIDEBAR_WINDOW_ID index=$selected_index"
     return 0
-}
-
-transition_coordinator_queue_handover_render()
-{
-    local intent="$1" target="$2" old_current="$3" old_selected_index="$4" old_selected_session="$5"
-    [ "$intent" != none ] || return 0
-    if [ "${handover_render_intent:-none}" != none ]; then
-        trace_event "handover.render.coalesce previous_target=${handover_render_target:-none} target=$target"
-    fi
-    handover_render_generation=$(( ${handover_render_generation:-0} + 1 ))
-    handover_render_intent="$intent"
-    handover_render_target="$target"
-    handover_render_old_current="$old_current"
-    handover_render_old_selected_index="$old_selected_index"
-    handover_render_old_selected_session="$old_selected_session"
-    trace_event "handover.render.queue generation=$handover_render_generation target=$target intent=$intent"
-}
-
-transition_coordinator_flush_handover_render()
-{
-    local intent="${handover_render_intent:-none}"
-    [ "$intent" != none ] || return 0
-
-    case "$intent" in
-        delta)
-            render_marker_delta "${handover_render_old_current:-}" \
-                "${handover_render_old_selected_index:--1}" \
-                "${handover_render_old_selected_session:-}"
-            render_footer
-            ;;
-        full)
-            request_full_render marker-handover-reconcile
-            ;;
-        deferred)
-            if transition_commit_pending; then
-                request_full_render enter-session-switch
-            elif transition_is_active; then
-                return 0
-            else
-                request_full_render marker-handover-reconcile
-            fi
-            ;;
-    esac
-    trace_event "handover.render.flush generation=${handover_render_generation:-0} target=${handover_render_target:-none} intent=$intent"
-    handover_render_intent=none
-    handover_render_target=""
 }
 
 transition_render_pending_for_current_session()
