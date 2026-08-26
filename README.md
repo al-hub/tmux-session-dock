@@ -12,15 +12,30 @@
 
 ---
 
-## ✨ Features
+## ✨ Major Additions over Stock tmux
 
-- ⚡ **0.75ms In-Place Fast-Path & Zero-Flicker**: Eliminates traditional 5-second timeouts and screen flickering using a lightweight Window-Local Presenter architecture.
-- 🌊 **24-Frame LUT Waveform Engine**: Real-time asynchronous background AI activity telemetry rendered at 30 FPS.
-- 🗂️ **Subpane Hub (`Prefix + P`)**: Dedicated singleton terminal subpane with instant Top/Bottom positional swapping and height persistence.
-- 📦 **Zero Time-Travel Pollution Archive**: Clean session snapshots and batch restoration (`o`) without polluting `$HISTFILE`.
-- 🎨 **38 Canonical Themes & Live Rich Preview**: Standardized 3-tier taxonomy (`<category>-<family>[-focus].conf`) with live ANSI TrueColor preview chips (`Prefix + T`).
-- 📖 **Interactive Help & Command Palette**: Searchable command palette (`Prefix + /`) and categorized keybinding popup (`Prefix + h`).
-- 🔄 **Universal Lifecycle Controller (`./setup.sh`)**: Autonomous `install`, `update`, `uninstall`, `purge`, `status`, and `test` CLI.
+### 1. Session-management sidebar
+
+- **Open, save, move, and select**: Toggle the dock with `Prefix + s`, select a row, and press `Enter` to switch sessions immediately. Create, rename, archive/delete, and restore sessions from the dock.
+- **Zero-flicker switching**: Window-Local Presenters use native `switch-client` instead of physically moving panes.
+- **Gradient activity effect**: Detects background AI CLI activity and renders it as a live waveform gradient on session rows, including rows for non-selected sessions.
+- **Subpane**: Open/close the singleton terminal subpane (`s`), swap it Top/Bottom (`p`), and retain its height.
+- **Archive**: Snapshot and batch-restore sessions without polluting `$HISTFILE`.
+
+### 2. Theme management
+
+- **Dozens of bundled themes**: 38 Canonical themes are included.
+- **Select and customize themes**: Choose with live ANSI preview via `Prefix + T`; set the default through `@session-dock-theme` or adjust a theme configuration file.
+
+### 3. Keybindings and status visibility
+
+- **Status and help**: `Prefix + h`/`?` opens the keybinding help, `Prefix + /` opens the searchable command palette, and `./setup.sh status` reports installation status.
+- **No keybinding editor UI**: The dock does not currently provide an in-UI keybinding editor. Change bindings in the tmux configuration instead (such as `@session-dock-key`).
+- **Workspace-safe controls**: Safe split bindings and `Alt + s` provide fast dock focus navigation while preserving the workspace layout.
+
+### 4. Installation and verification lifecycle
+
+- **Unified controller**: `./setup.sh` manages `install`, `update`, `uninstall`, `status`, `build`, `test`, and `purge`.
 
 ---
 
