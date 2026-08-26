@@ -87,6 +87,7 @@ case "${TARGET_SUITE}" in
         TEST_LIST=(
             "${SINGLE_DIR}/test-domain-unit.sh"
             "${SINGLE_DIR}/test-ai-activity-observer-policy.sh"
+            "${SINGLE_DIR}/test-handover-decision-unit.sh"
             "${SINGLE_DIR}/test-presenter-unit.sh"
             "${SINGLE_DIR}/test-coordinator-unit.sh"
             "${SINGLE_DIR}/test-archive-unit.sh"
@@ -223,6 +224,7 @@ case "${TARGET_SUITE}" in
     all)
         TEST_LIST=(
             "${SINGLE_DIR}/test-domain-unit.sh"
+            "${SINGLE_DIR}/test-handover-decision-unit.sh"
             "${SINGLE_DIR}/test-contract.sh"
             "${SINGLE_DIR}/test-window-local-contract.sh"
             "${SINGLE_DIR}/test-failure-injection.sh"

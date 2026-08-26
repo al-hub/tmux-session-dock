@@ -2400,6 +2400,52 @@ selection_coordinator_compute_delta() {
 }
 # <<< MODULE: sidebar_coordinator.sh <<<
 
+# >>> MODULE: sidebar_handover.sh >>>
+# Presenter handover policy. The caller supplies a settled local snapshot and
+# applies the result through the transition coordinator.
+
+sidebar_handover_reset_result() {
+    sidebar_handover_result="none"
+    sidebar_handover_marker_action="preserve"
+    sidebar_handover_render_intent="none"
+}
+
+# Decide the externally observable outcome of one Presenter Window handover.
+# Arguments: target, target_exists, target_in_snapshot, transition_active,
+# transition_committed, full_reconcile_required, view_mode.
+sidebar_handover_decide() {
+    local target="${1:-}" target_exists="${2:-false}" target_in_snapshot="${3:-false}"
+    local transition_active="${4:-false}" transition_committed="${5:-false}"
+    local full_reconcile_required="${6:-false}" view_mode="${7:-sessions}"
+
+    sidebar_handover_reset_result
+    [ -n "$target" ] || return 0
+
+    if [ "$target_exists" != true ]; then
+        sidebar_handover_result="discarded"
+        sidebar_handover_marker_action="discard"
+        sidebar_handover_render_intent="full"
+        return 0
+    fi
+
+    if [ "$target_in_snapshot" != true ]; then
+        sidebar_handover_result="retry"
+        return 0
+    fi
+
+    sidebar_handover_result="settled"
+    sidebar_handover_marker_action="consume"
+    if [ "$view_mode" != sessions ] || [ "$full_reconcile_required" = true ]; then
+        sidebar_handover_render_intent="full"
+    else
+        sidebar_handover_render_intent="delta"
+    fi
+    if [ "$transition_active" = true ] || [ "$transition_committed" = true ]; then
+        sidebar_handover_render_intent="deferred"
+    fi
+}
+# <<< MODULE: sidebar_handover.sh <<<
+
 # >>> MODULE: sidebar_archive.sh >>>
 # Session Archive Serialization & File Service Module
 
@@ -7492,12 +7538,6 @@ sidebar_consume_pending_target_marker()
     fi
     [ -n "$target_session" ] || return 1
 
-    # 1. Retrieve the target session name ($target_session)
-    # 2. Consume/clear the @dotfiles_sidebar_target_marker option on the window
-    tmux set-option -wq -t "$SIDEBAR_WINDOW_ID" "${SIDEBAR_TARGET_MARKER_OPTION:-@dotfiles_sidebar_target_marker}" "" 2>/dev/null || true
-    tmux set-option -wq -t "$SIDEBAR_WINDOW_ID" "${SIDEBAR_SELECTION_SYNC_OPTION:-@dotfiles_sidebar_selection_sync}" "" 2>/dev/null || true
-    tmux set-option -wq -t "$SIDEBAR_WINDOW_ID" "${SIDEBAR_SELECTION_SYNC_ACK_OPTION:-@dotfiles_sidebar_selection_sync_ack}" "$target_session" 2>/dev/null || true
-
     local old_current="$current_session"
     local old_selected_index="$selected_index"
     local old_selected_session="$selected_session"
@@ -7526,12 +7566,41 @@ sidebar_consume_pending_target_marker()
     done
     if [ "$topology_dirty" = true ] || [ "$found" != true ] || [ "${#session_names[@]}" -le 1 ]; then
         collect_sessions true "$target_session"
+        found=false
+        for idx in "${!session_names[@]}"; do
+            if [ "${session_names[$idx]}" = "$target_session" ]; then
+                found=true
+                break
+            fi
+        done
     fi
 
-    # 3. Call selection_coordinator_align_current "$target_session"
-    selection_coordinator_align_current "$target_session"
+    local target_exists=false
+    if sidebar_port_session_exists "$target_session"; then
+        target_exists=true
+    fi
 
-    # 4. Update current_session="$target_session" and selected_session="$target_session"
+    # Do not mutate presenter selection while the target is only temporarily
+    # absent from this snapshot. A retry must leave the current frame intact.
+    sidebar_handover_decide "$target_session" "$target_exists" "$found" false false false "$view_mode"
+    case "$sidebar_handover_result" in
+        retry)
+            trace_event "marker.handover.retry target=$target_session window=$SIDEBAR_WINDOW_ID"
+            return 1
+            ;;
+        discarded)
+            tmux set-option -wq -t "$SIDEBAR_WINDOW_ID" "${SIDEBAR_TARGET_MARKER_OPTION:-@dotfiles_sidebar_target_marker}" "" 2>/dev/null || true
+            tmux set-option -wq -t "$SIDEBAR_WINDOW_ID" "${SIDEBAR_SELECTION_SYNC_OPTION:-@dotfiles_sidebar_selection_sync}" "" 2>/dev/null || true
+            request_full_render marker-handover-target-gone
+            trace_event "marker.handover.discarded target=$target_session window=$SIDEBAR_WINDOW_ID"
+            return 0
+            ;;
+    esac
+
+    # Align local selection before deciding whether the completed handover
+    # needs a full or delta frame. Marker/ack mutation happens only after the
+    # module reports a settled result.
+    selection_coordinator_align_current "$target_session"
     current_session="$target_session"
     selected_session="$target_session"
     ensure_selection_visible
@@ -7549,25 +7618,24 @@ sidebar_consume_pending_target_marker()
         geometry_dirty=true
     fi
 
-    # 6. Re-render
-    if [ "$view_mode" = "sessions" ]; then
-        if [ "$topology_dirty" = true ] || [ "$geometry_dirty" = true ]; then
-            # The transition coordinator owns the target frame while a
-            # session switch is active.  Rendering here as well duplicates
-            # the transition frame and can produce a second clear/redraw on
-            # the warm-session path.  Leave the handover marker consumed; the
-            # coordinator will render the settled frame once.
-            if transition_is_active || transition_commit_pending; then
-                trace_event "render.full.skip reason=marker-handover-transition target=$target_session"
-            else
-                render_full "marker-handover-reconcile"
-            fi
-        else
-            render_marker_delta "$old_current" "$old_selected_index" "$old_selected_session"
-            # Self-healing footer boundary: always self-heal footer row so transient messages never persist
-            render_footer
-        fi
+    local full_reconcile_required=false transition_active=false transition_committed=false
+    if [ "$topology_dirty" = true ] || [ "$geometry_dirty" = true ]; then
+        full_reconcile_required=true
     fi
+    transition_is_active && transition_active=true
+    transition_commit_pending && transition_committed=true
+    sidebar_handover_decide "$target_session" "$target_exists" "$found" \
+        "$transition_active" "$transition_committed" "$full_reconcile_required" "$view_mode"
+
+    [ "$sidebar_handover_result" = settled ] || return 1
+
+    tmux set-option -wq -t "$SIDEBAR_WINDOW_ID" "${SIDEBAR_TARGET_MARKER_OPTION:-@dotfiles_sidebar_target_marker}" "" 2>/dev/null || true
+    tmux set-option -wq -t "$SIDEBAR_WINDOW_ID" "${SIDEBAR_SELECTION_SYNC_OPTION:-@dotfiles_sidebar_selection_sync}" "" 2>/dev/null || true
+    tmux set-option -wq -t "$SIDEBAR_WINDOW_ID" "${SIDEBAR_SELECTION_SYNC_ACK_OPTION:-@dotfiles_sidebar_selection_sync}" "$target_session" 2>/dev/null || true
+    handover_render_intent="$sidebar_handover_render_intent"
+    handover_render_old_current="$old_current"
+    handover_render_old_selected_index="$old_selected_index"
+    handover_render_old_selected_session="$old_selected_session"
     sidebar_tmux_cmd set-option -gq "@sidebar_force_refresh_$target_session" 0 2>/dev/null || true
     sidebar_tmux_cmd set-option -gq "@sidebar_force_refresh_${sidebar_session_cached:-$target_session}" 0 2>/dev/null || true
     refresh_signal_pending=false
@@ -7575,6 +7643,34 @@ sidebar_consume_pending_target_marker()
     last_force_refresh_check_epoch="${EPOCHSECONDS:-$SECONDS}"
     trace_event "marker.handover.consumed target=$target_session window=$SIDEBAR_WINDOW_ID index=$selected_index"
     return 0
+}
+
+transition_coordinator_flush_handover_render()
+{
+    local intent="${handover_render_intent:-none}"
+    [ "$intent" != none ] || return 0
+
+    case "$intent" in
+        delta)
+            render_marker_delta "${handover_render_old_current:-}" \
+                "${handover_render_old_selected_index:--1}" \
+                "${handover_render_old_selected_session:-}"
+            render_footer
+            ;;
+        full)
+            request_full_render marker-handover-reconcile
+            ;;
+        deferred)
+            if transition_commit_pending; then
+                request_full_render enter-session-switch
+            elif transition_is_active; then
+                return 0
+            else
+                request_full_render marker-handover-reconcile
+            fi
+            ;;
+    esac
+    handover_render_intent=none
 }
 
 transition_render_pending_for_current_session()
@@ -10221,6 +10317,7 @@ run_tui()
         if [ "$selection_sync_signal_tick" = "true" ]; then
             sidebar_consume_pending_target_marker || true
         fi
+        transition_coordinator_flush_handover_render
         flush_full_render_request
         if [ "$full_render_required" = "true" ]; then
             trace_event "render.full.check reason=${full_render_required_reason:-unspecified} sync_window=$(sidebar_tmux_cmd show-option -wqv -t "${SIDEBAR_WINDOW_ID:-}" "$SIDEBAR_SELECTION_SYNC_OPTION" 2>/dev/null || true)"

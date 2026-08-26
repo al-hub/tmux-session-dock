@@ -35,6 +35,7 @@ LIBS=(
     "sidebar_presenter.sh"
     "sidebar_ime.sh"
     "sidebar_coordinator.sh"
+    "sidebar_handover.sh"
     "sidebar_archive.sh"
 )
 
