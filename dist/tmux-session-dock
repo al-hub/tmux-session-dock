@@ -7591,7 +7591,8 @@ sidebar_consume_pending_target_marker()
         discarded)
             tmux set-option -wq -t "$SIDEBAR_WINDOW_ID" "${SIDEBAR_TARGET_MARKER_OPTION:-@dotfiles_sidebar_target_marker}" "" 2>/dev/null || true
             tmux set-option -wq -t "$SIDEBAR_WINDOW_ID" "${SIDEBAR_SELECTION_SYNC_OPTION:-@dotfiles_sidebar_selection_sync}" "" 2>/dev/null || true
-            request_full_render marker-handover-target-gone
+            transition_coordinator_queue_handover_render full "$target_session" \
+                "$old_current" "$old_selected_index" "$old_selected_session"
             trace_event "marker.handover.discarded target=$target_session window=$SIDEBAR_WINDOW_ID"
             return 0
             ;;
@@ -7632,10 +7633,8 @@ sidebar_consume_pending_target_marker()
     tmux set-option -wq -t "$SIDEBAR_WINDOW_ID" "${SIDEBAR_TARGET_MARKER_OPTION:-@dotfiles_sidebar_target_marker}" "" 2>/dev/null || true
     tmux set-option -wq -t "$SIDEBAR_WINDOW_ID" "${SIDEBAR_SELECTION_SYNC_OPTION:-@dotfiles_sidebar_selection_sync}" "" 2>/dev/null || true
     tmux set-option -wq -t "$SIDEBAR_WINDOW_ID" "${SIDEBAR_SELECTION_SYNC_ACK_OPTION:-@dotfiles_sidebar_selection_sync}" "$target_session" 2>/dev/null || true
-    handover_render_intent="$sidebar_handover_render_intent"
-    handover_render_old_current="$old_current"
-    handover_render_old_selected_index="$old_selected_index"
-    handover_render_old_selected_session="$old_selected_session"
+    transition_coordinator_queue_handover_render "$sidebar_handover_render_intent" "$target_session" \
+        "$old_current" "$old_selected_index" "$old_selected_session"
     sidebar_tmux_cmd set-option -gq "@sidebar_force_refresh_$target_session" 0 2>/dev/null || true
     sidebar_tmux_cmd set-option -gq "@sidebar_force_refresh_${sidebar_session_cached:-$target_session}" 0 2>/dev/null || true
     refresh_signal_pending=false
@@ -7643,6 +7642,22 @@ sidebar_consume_pending_target_marker()
     last_force_refresh_check_epoch="${EPOCHSECONDS:-$SECONDS}"
     trace_event "marker.handover.consumed target=$target_session window=$SIDEBAR_WINDOW_ID index=$selected_index"
     return 0
+}
+
+transition_coordinator_queue_handover_render()
+{
+    local intent="$1" target="$2" old_current="$3" old_selected_index="$4" old_selected_session="$5"
+    [ "$intent" != none ] || return 0
+    if [ "${handover_render_intent:-none}" != none ]; then
+        trace_event "handover.render.coalesce previous_target=${handover_render_target:-none} target=$target"
+    fi
+    handover_render_generation=$(( ${handover_render_generation:-0} + 1 ))
+    handover_render_intent="$intent"
+    handover_render_target="$target"
+    handover_render_old_current="$old_current"
+    handover_render_old_selected_index="$old_selected_index"
+    handover_render_old_selected_session="$old_selected_session"
+    trace_event "handover.render.queue generation=$handover_render_generation target=$target intent=$intent"
 }
 
 transition_coordinator_flush_handover_render()
@@ -7670,7 +7685,9 @@ transition_coordinator_flush_handover_render()
             fi
             ;;
     esac
+    trace_event "handover.render.flush generation=${handover_render_generation:-0} target=${handover_render_target:-none} intent=$intent"
     handover_render_intent=none
+    handover_render_target=""
 }
 
 transition_render_pending_for_current_session()

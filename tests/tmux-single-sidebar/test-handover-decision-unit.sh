@@ -24,8 +24,12 @@ assert_result() {
 sidebar_handover_decide "target" true true false false false sessions
 assert_result settled consume delta
 
-# A committed or active transition owns the first target frame.
-sidebar_handover_decide "target" true true true true false sessions
+# An active transition owns the first target frame.
+sidebar_handover_decide "target" true true true false false sessions
+assert_result settled consume deferred
+
+# A committed transition also owns the first target frame.
+sidebar_handover_decide "target" true true false true false sessions
 assert_result settled consume deferred
 
 # A target that still exists but has not reached the local snapshot is retried.
