@@ -2636,13 +2636,19 @@ signal_managed_sidebar_refresh()
 signal_managed_sidebar_refresh_batch()
 {
     bump_topology_epoch
-    local session_name_value pane_id pane_pid
-    while IFS='|' read -r session_name_value pane_id pane_pid; do
+    local session_name_value window_id pane_id pane_pid
+    while IFS='|' read -r session_name_value window_id pane_id pane_pid; do
         [ -n "$pane_id" ] || continue
+        # A newly split sidebar has a live PID before run_tui installs its
+        # USR2 trap. Match the regular refresh path and defer its signal.
+        if ! sidebar_window_ready "$window_id" "$pane_id"; then
+            trace_event "sidebar.window.refresh.batch-skip session=$session_name_value window=$window_id pane=$pane_id reason=not-ready"
+            continue
+        fi
         [ -n "$pane_pid" ] && kill -USR2 "$pane_pid" 2>/dev/null &&
             trace_event "sidebar.window.refresh.batch-signal session=$session_name_value pane=$pane_id pid=$pane_pid"
-    done < <(sidebar_tmux_cmd list-panes -a -F '#{session_name}|#{pane_id}|#{pane_title}|#{pane_pid}|#{pane_dead}' 2>/dev/null |
-        awk -F '|' -v title="$SIDEBAR_TITLE" '$3 == title && $5 == 0 { print $1 "|" $2 "|" $4 }')
+    done < <(sidebar_tmux_cmd list-panes -a -F '#{session_name}|#{window_id}|#{pane_id}|#{pane_title}|#{pane_pid}|#{pane_dead}' 2>/dev/null |
+        awk -F '|' -v title="$SIDEBAR_TITLE" '$4 == title && $6 == 0 { print $1 "|" $2 "|" $3 "|" $5 }')
 }
 
 wait_for_managed_sidebar_session()
@@ -6265,6 +6271,7 @@ restore_archive()
     window_geometry=""
     current_window_active_pane=""
     created_target=""
+    first_restore_window_target=""
     pane_id=""
     restored_work_pane_ids=""
 
@@ -6333,6 +6340,7 @@ restore_archive()
                     current_window_pane_ids="${pane_id#%}"
                     restored_work_pane_ids+="${restored_work_pane_ids:+ }$pane_id"
                     restore_window_targets["$window_index"]="$created_target"
+                    first_restore_window_target="$created_target"
                     [ "$window_active" = "1" ] && active_window_target="$created_target"
                     created=true
                     first_window=false
@@ -6347,6 +6355,7 @@ restore_archive()
                     current_window_pane_ids="${pane_id#%}"
                     restored_work_pane_ids+="${restored_work_pane_ids:+ }$pane_id"
                     restore_window_targets["$window_index"]="$created_target"
+                    [ -n "$first_restore_window_target" ] || first_restore_window_target="$created_target"
                     [ "$window_active" = "1" ] && active_window_target="$created_target"
                     first_pane_in_window=false
                 else
@@ -6390,6 +6399,14 @@ restore_archive()
         esac
     done < "$archive_path"
     trace_event "restore.panes.end session=$restore_name created=$created"
+
+    # A detached archived session has no tmux-active window. Its first
+    # restored window is still the session's user-visible default and must
+    # receive the selective eager-warm contract.
+    if [ -z "$active_window_target" ] && [ -n "$first_restore_window_target" ]; then
+        active_window_target="$first_restore_window_target"
+        trace_event "restore.active-window.fallback session=$restore_name target=$active_window_target"
+    fi
 
     restore_created_identity="$(session_identity_fingerprint "$restore_name")"
     check_restore_precondition "$restore_operation_id" after-create "$restore_owner_identity" "$restore_original_session" "$restore_original_identity" "$restore_name" || {

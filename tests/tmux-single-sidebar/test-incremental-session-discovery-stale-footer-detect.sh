@@ -36,6 +36,10 @@ tmuxc run-shell "$LAUNCHER --ensure-sidebar-window '$beta_win' $initial_width"
 beta_sb="$(tmuxc list-panes -t "$beta_win" -F '#{pane_id}|#{pane_title}' | awk -F '|' '$2 == "dotfiles-session-sidebar" { print $1; exit }')"
 [ -n "$beta_sb" ] || { echo "FAIL: sess-beta sidebar missing"; exit 1; }
 wait_until "sess-beta ready" "tmuxc show-options -wqv -t '$beta_win' @dotfiles_sidebar_ready | grep -Fq 1"
+# Provisioning hooks may briefly create and reconcile duplicate panes. Capture
+# the canonical pane only after the window has published readiness.
+beta_sb="$(tmuxc list-panes -t "$beta_win" -F '#{pane_id}|#{pane_title}' | awk -F '|' '$2 == "dotfiles-session-sidebar" { print $1; exit }')"
+[ -n "$beta_sb" ] || { echo "FAIL: sess-beta sidebar missing after ready"; exit 1; }
 wait_until "sess-beta visible on anchor" "[ -n \"\$(sidebar_row_for 'sess-beta')\" ]"
 # Give sess-beta enough time to complete initial background render and settle into idle
 sleep 1.0
