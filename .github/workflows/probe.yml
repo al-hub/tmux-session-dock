@@ -1,0 +1,18 @@
+name: tmux geometry probe
+
+# Manual diagnostic: how does the runner's tmux account pane geometry with
+# pane-border-status top, and what does the product's subpane swap produce.
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y tmux
+      - run: bash tests/tools/tmux-geometry-probe.sh
