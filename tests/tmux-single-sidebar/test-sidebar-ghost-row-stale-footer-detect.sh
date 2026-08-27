@@ -1,131 +1,64 @@
 #!/usr/bin/env bash
-# ==============================================================================
-# tests/tmux-single-sidebar/test-sidebar-ghost-row-stale-footer-detect.sh
-#
-# Standalone Isolated TDD Detection Test:
-# Stably reproduces and detects:
-# 1. Ghost duplicate rows / stray markers left in the terminal buffer during
-#    consecutive session switches across sessions with differing geometries/subpanes.
-# 2. Stale transient switch footer messages ("⚡ switching to...") stuck on the footer.
-# ==============================================================================
+# Verify that consecutive session switches leave a settled Presenter without
+# duplicate rows or a transient switch footer. The oracle is the visible pane,
+# sampled twice after the attached client reaches its target session.
 
 set -euo pipefail
 
 SCENARIO_NAME="ghost-row-stale-footer-detect"
-TMUX_SESSION_LAUNCHER_TRACE=1
-TMUX_SESSION_LAUNCHER_DEBUG=1
 TMUX_INTERACTIVE_CREATE_PEER=false
 
 TEST_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 source "$TEST_DIR/test-interactive-common.sh"
 
-echo "=== [1/5] Setting up isolated interactive test with attached client ==="
+SESSIONS=(interactive-anchor sess-alpha sess-beta sess-gamma sess-delta sess-epsilon)
+
+assert_settled_presenter() {
+    local target="$1" target_window screen session_name rows
+    target_window="$(tmuxc display-message -p -t "=$target:" '#{window_id}')"
+    wait_for_settled_presenter_screen "$target_window" "$target"
+    screen="$PRESENTER_SCREEN_RESULT"
+    printf '%s\n' "$screen" > "$RUN_DIR/settled-$target-$step.screen"
+
+    for session_name in "${SESSIONS[@]}"; do
+        rows="$(presenter_screen_session_rows "$screen" "$session_name")"
+        if [ "$rows" -ne 1 ]; then
+            echo "PRODUCT_FAIL_PRESENTER: target=$target session=$session_name visible_rows=$rows" >&2
+            return 1
+        fi
+    done
+    if printf '%s\n' "$screen" | grep -Fq 'switching to'; then
+        echo "PRODUCT_FAIL_STALE_FOOTER: target=$target" >&2
+        return 1
+    fi
+}
+
+echo "=== [1/3] Setting up attached Presenter Window ==="
 setup_interactive_test
 wait_until "anchor sidebar ready" sidebar_ready
 
-anchor_win="$(tmuxc display-message -p -t '=interactive-anchor:' '#{window_id}')"
-anchor_sb="$(tmuxc list-panes -t "$anchor_win" -F '#{pane_id}|#{pane_title}' | awk -F '|' '$2 == "dotfiles-session-sidebar" { print $1; exit }')"
-initial_width="$(tmuxc display-message -p -t "$anchor_sb" '#{pane_width}')"
+anchor_window="$(tmuxc display-message -p -t '=interactive-anchor:' '#{window_id}')"
+anchor_pane="$(window_sidebar_pane_id "$anchor_window")"
+sidebar_width="$(tmuxc display-message -p -t "$anchor_pane" '#{pane_width}')"
 
-echo "=== [2/5] Creating 5 additional sessions to match multi-session topology ==="
-SESSIONS=("interactive-anchor" "sess-alpha" "sess-beta" "sess-gamma" "sess-delta" "sess-epsilon")
+echo "=== [2/3] Creating warm sessions with distinct geometry ==="
+for session_name in sess-alpha sess-beta sess-gamma sess-delta sess-epsilon; do
+    tmuxc new-session -d -s "$session_name" -x 160 -y 50 -c "$REPO_ROOT" 'sleep 300'
+    session_window="$(tmuxc display-message -p -t "=$session_name:" '#{window_id}')"
+    tmuxc set-option -wq -t "$session_window" @dotfiles_sidebar_managed 1
+    tmuxc run-shell "$LAUNCHER --ensure-sidebar-window '$session_window' $sidebar_width"
+    wait_until "$session_name Presenter ready" "tmuxc show-options -wqv -t '$session_window' @dotfiles_sidebar_ready | grep -Fq 1"
+done
+alpha_window="$(tmuxc display-message -p -t '=sess-alpha:' '#{window_id}')"
+tmuxc run-shell "$LAUNCHER --toggle-subpane '$alpha_window'"
 
-for s in "sess-alpha" "sess-beta" "sess-gamma" "sess-delta" "sess-epsilon"; do
-    tmuxc new-session -d -s "$s" -x 160 -y 50 -c "$REPO_ROOT" 'sleep 300'
-    s_win="$(tmuxc display-message -p -t "=$s:" '#{window_id}')"
-    tmuxc set-option -wq -t "$s_win" @dotfiles_sidebar_managed 1
-    tmuxc run-shell "$LAUNCHER --ensure-sidebar-window '$s_win' $initial_width"
-    wait_until "$s sidebar ready" "tmuxc show-options -wqv -t '$s_win' @dotfiles_sidebar_ready | grep -Fq 1"
+echo "=== [3/3] Checking 10 settled Presenter handovers ==="
+step=0
+for _ in $(seq 1 10); do
+    step=$((step + 1))
+    target="$(switch_to_next_sidebar_selection)"
+    assert_settled_presenter "$target"
+    echo "PASS: step=$step target=$target Presenter settled without stale rows or footer"
 done
 
-# In sess-alpha, toggle subpane on so geometry differences exist across sessions
-alpha_win="$(tmuxc display-message -p -t '=sess-alpha:' '#{window_id}')"
-tmuxc run-shell "$LAUNCHER --toggle-subpane '$alpha_win'"
-sleep 0.5
-
-echo "=== [3/5] Performing 10 consecutive session moves and switches ==="
-detected_ghost_rows=0
-detected_missing_views=0
-detected_stale_footers=0
-
-selected_session_name() {
-    sidebar_selected_name | tr -d '\r' | awk '{ print $1 }'
-}
-
-for step in $(seq 1 10); do
-    cur_sess="$(client_session)"
-    
-    # Capture the requested target before Enter. The old client session remains
-    # observable while the handover is in flight, so it is not a completion signal.
-    focus_sidebar
-    send_keys $'\033[B'
-    wait_until "selection moved from $cur_sess" "[ -n \"\$(selected_session_name)\" ] && [ \"\$(selected_session_name)\" != '$cur_sess' ]"
-    target_sess="$(selected_session_name)"
-    [ -n "$target_sess" ] || {
-        echo "FAIL: no selected target after Down from $cur_sess" >&2
-        exit 1
-    }
-    target_win="$(tmuxc display-message -p -t "=$target_sess:" '#{window_id}')"
-
-    send_keys $'\r'
-
-    # The acknowledgement is a handover event, not durable state: switch_session
-    # clears it in its finalizer. Observe it first, then wait for the client and
-    # target Presenter Window to reach their durable ready state.
-    wait_for_selection_sync_ack "$target_win" "$target_sess"
-    wait_until "switch to $target_sess settled" "[ \"\$(client_session)\" = '$target_sess' ] && [ \"\$(tmuxc show-options -wqv -t '$target_win' @dotfiles_sidebar_ready 2>/dev/null || true)\" = 1 ]"
-
-    new_sess="$target_sess"
-    new_sb="$(tmuxc list-panes -t "$target_win" -F '#{pane_id}|#{pane_title}' | awk -F '|' '$2 == "dotfiles-session-sidebar" { print $1; exit }')"
-    [ -n "$new_sb" ] || {
-        echo "FAIL: target sidebar missing after switch to $new_sess" >&2
-        exit 1
-    }
-    
-    screen="$(tmuxc capture-pane -p -t "$new_sb")"
-    session_rows="$(echo "$screen" | head -n -1)"
-    
-    echo "--- Step $step: Switched to $new_sess (Sidebar: $new_sb) ---"
-    echo "$screen"
-    echo "-------------------------------------------------------------"
-    
-    # Detection 1: Ghost duplicate rows (check if any session name appears >1 time in session list)
-    for s in "${SESSIONS[@]}"; do
-        occ="$(echo "$session_rows" | grep -c -F "$s" || true)"
-        if [ "$occ" -gt 1 ]; then
-            echo "⚠️ DETECTED GHOST ROW: Session '$s' appears $occ times in session list!"
-            detected_ghost_rows=$((detected_ghost_rows + 1))
-            break
-        fi
-    done
-    
-    # Detection 2: Blank screen / missing current session in visible rows
-    if ! echo "$screen" | grep -Fq "$new_sess"; then
-        echo "⚠️ DETECTED BLANK/MISSING VIEW: Current session '$new_sess' not visible in sidebar!"
-        detected_missing_views=$((detected_missing_views + 1))
-    fi
-    
-    # Detection 3: Stale transient message on footer
-    if echo "$screen" | grep -Fq "switching to"; then
-        echo "⚠️ DETECTED STALE FOOTER: 'switching to' message is stuck on footer!"
-        detected_stale_footers=$((detected_stale_footers + 1))
-    fi
-    
-    sleep 0.1
-done
-
-echo "=== [4/5] Summary of Detected Anomalies in Isolated Test ==="
-echo "Ghost Duplicate Rows detected: $detected_ghost_rows / 10 switches"
-echo "Blank / Missing Views detected: $detected_missing_views / 10 switches"
-echo "Stale Footer Messages detected: $detected_stale_footers / 10 switches"
-
-if [ "$detected_ghost_rows" -gt 0 ] || [ "$detected_missing_views" -gt 0 ] || [ "$detected_stale_footers" -gt 0 ]; then
-    echo ""
-    echo "=========================================================================="
-    echo "DETECTED ISSUES IN ISOLATED TEST (RED): Display anomalies stably detected!"
-    echo "=========================================================================="
-    exit 1
-fi
-
-echo "ALL CLEAN (GREEN)"
-exit 0
+echo "PASS: 10 consecutive session handovers retained stable Presenter content"

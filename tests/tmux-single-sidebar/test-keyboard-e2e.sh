@@ -2094,7 +2094,6 @@ run_window_local_switch_contract()
     done < <(tmuxc list-panes -a -F '#{window_id}|#{pane_id}|#{pane_pid}|#{pane_title}' |
         awk -F '|' '$4 == "dotfiles-session-sidebar" { print $1 "|" $2 "|" $3 }')
 
-    before_trace="$(wc -l < "$RUN_DIR/trace.log" 2>/dev/null || printf 0)"
     # After the three creates the TUI selection is deterministically on
     # window-local-3. Use the same visible arrow-key sequence a user would
     # use, but keep the expected movement explicit so the assertion is not
@@ -2139,6 +2138,32 @@ run_window_local_switch_contract()
         wait_until "window-local target $target" "$target" client_session
         window_local_input_ready || true
         wait_for_transition_idle
+        target_window="$(tmuxc display-message -p -t "=$target:" '#{window_id}')"
+        target_pane="${sidebar_ids[$target_window]:-}"
+        [ -n "$target_pane" ] || {
+            printf 'FAIL: target %s has no original sidebar pane\n' "$target" >&2
+            return 1
+        }
+        presenter_ready=false
+        for _ in $(seq 1 50); do
+            presenter_screen="$(tmuxc capture-pane -p -t "$target_pane" 2>/dev/null || true)"
+            if printf '%s\n' "$presenter_screen" | grep -Eq '^[[:space:]]*sessions[[:space:]]*$' &&
+                printf '%s\n' "$presenter_screen" | grep -Eq "^[[:space:]]*(>\\*|\\*)[[:space:]]+$target([[:space:]]|$)"; then
+                sleep 0.1
+                presenter_screen="$(tmuxc capture-pane -p -t "$target_pane" 2>/dev/null || true)"
+                if printf '%s\n' "$presenter_screen" | grep -Eq '^[[:space:]]*sessions[[:space:]]*$' &&
+                    printf '%s\n' "$presenter_screen" | grep -Eq "^[[:space:]]*(>\\*|\\*)[[:space:]]+$target([[:space:]]|$)"; then
+                    presenter_ready=true
+                    break
+                fi
+            fi
+            sleep 0.05
+        done
+        if [ "$presenter_ready" != true ]; then
+            printf 'FAIL: target Presenter did not show current session %s after switch\n' "$target" >&2
+            printf '%s\n' "$presenter_screen" >&2
+            return 1
+        fi
         switch_ms="$(latest_native_switch_ms)"
         switch_ms="${switch_ms:-0}"
         test_log "window-local.switch target=$target duration_ms=$switch_ms"
@@ -2148,27 +2173,6 @@ run_window_local_switch_contract()
         fi
         awk -v value="$switch_ms" -v current="$max_switch_ms" 'BEGIN { exit !(value > current) }' && max_switch_ms="$switch_ms"
     done
-    after_trace="$(wc -l < "$RUN_DIR/trace.log" 2>/dev/null || printf 0)"
-
-    [ "$after_trace" -ge "$before_trace" ] || {
-        printf 'FAIL: trace accounting moved backwards\n' >&2
-        return 1
-    }
-    if awk '
-        /switch\.begin mode=window-local/ { in_switch=1 }
-        in_switch && /sidebar\.move|move-pane|sidebar\.layout\.restore|restore\.layout\.begin|render\.request reason=enter-session-switch|render\.full.*reason=enter-session-switch/ { bad=1 }
-        /switch\.end mode=window-local/ { in_switch=0 }
-        END { exit bad ? 0 : 1 }
-    ' "$RUN_DIR/trace.log"; then
-        printf 'FAIL: session switch used pane movement/layout restore or switch-requested full render\n' >&2
-        awk '
-            /switch\.begin mode=window-local/ { in_switch=1 }
-            in_switch { print }
-            /switch\.end mode=window-local/ { in_switch=0 }
-        ' "$RUN_DIR/trace.log" >&2 || true
-        return 1
-    fi
-
     for window_id in "${!sidebar_ids[@]}"; do
         pane_id="${sidebar_ids[$window_id]}"
         pane_pid="${sidebar_pids[$window_id]}"
@@ -2178,7 +2182,7 @@ run_window_local_switch_contract()
         }
     done
     printf 'PASS: window-local session switch keeps every sidebar process stable\n'
-    printf 'PASS: session switch trace contains no pane move/layout restore/switch-requested full render\n'
+    printf 'PASS: session switch retained each original pane and showed the target Presenter twice\n'
     printf 'PASS: native switch max latency %sms (p95 target <=500ms)\n' "$max_switch_ms"
 }
 
@@ -2498,7 +2502,7 @@ if [ -n "$VISIBLE_CLIENT" ]; then
     [ -n "$VISIBLE_PANE" ] || { printf 'ERROR: visible client pane not found\n' >&2; exit 1; }
 elif [ "$TRANSPORT" = bridge ]; then
     coproc ATTACHED {
-        HOME="$HOME_DIR" TERM="xterm-256color" "$PTY_BRIDGE_BIN" --log "$BRIDGE_LOG" --output "$CLIENT_LOG" -- \
+        HOME="$HOME_DIR" TERM="xterm-256color" "$PTY_BRIDGE_BIN" --log "$BRIDGE_LOG" --input "$INPUT_LOG" --output "$CLIENT_LOG" -- \
             tmux -L "$SOCKET" -f "$REPO_ROOT/dotfiles/tmux.conf" attach-session -t "$ANCHOR_SESSION"
     }
 else

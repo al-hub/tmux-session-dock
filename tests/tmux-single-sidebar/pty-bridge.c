@@ -257,10 +257,15 @@ int main(int argc, char **argv)
     if (child_pid > 0) {
         int status;
         if (waitpid(child_pid, &status, 0) == child_pid) {
-            if (WIFEXITED(status))
+            if (WIFEXITED(status)) {
                 trace_line("child.exit status=%d", WEXITSTATUS(status));
-            else if (WIFSIGNALED(status))
+                close(trace_fd);
+                return WEXITSTATUS(status);
+            } else if (WIFSIGNALED(status)) {
                 trace_line("child.signal signal=%d", WTERMSIG(status));
+                close(trace_fd);
+                return 128 + WTERMSIG(status);
+            }
         }
     }
     close(trace_fd);

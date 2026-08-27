@@ -23,8 +23,10 @@ if ! echo "$output" | grep -q "단축키"; then
     echo "FAIL: Help viewer output missing title header!"
     exit 1
 fi
-if ! echo "$output" | grep -q "v0.3.12"; then
-    echo "FAIL: Help viewer output missing version string!"
+expected_version="$(sed -n 's/^VERSION="\([^"]*\)"/\1/p' "$SCRIPT_DIR/setup.sh")"
+[ -n "$expected_version" ] || { echo "FAIL: setup.sh does not declare VERSION"; exit 1; }
+if ! echo "$output" | grep -Fq "$expected_version"; then
+    echo "FAIL: Help viewer output missing project version $expected_version!"
     exit 1
 fi
 if ! echo "$output" | grep -q "Ctrl+a s"; then

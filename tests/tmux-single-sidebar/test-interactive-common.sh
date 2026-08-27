@@ -210,7 +210,11 @@ sidebar_row_for() {
 sidebar_selected_name() {
   tmuxc capture-pane -p -t "$(sidebar_pane_id)" 2>/dev/null |
     sed $'s/\033\\[[0-9;]*m//g' |
-    awk '$1 == ">*" { $1=""; sub(/^ /, ""); print; exit } $1 == ">" { if ($2 == "*") { $1=""; $2=""; sub(/^  */, ""); print; exit } else { $1=""; sub(/^ /, ""); print; exit } }'
+    awk '
+      $1 == ">*" { print $2; exit }
+      $1 == ">" && $2 == "*" { print $3; exit }
+      $1 == ">" { print $2; exit }
+    '
 }
 
 sidebar_marker_invariant() {
@@ -236,22 +240,106 @@ focus_sidebar() {
 }
 
 select_session_by_name() {
-  local name="$1" i attempt
+  local name="$1" i selected
   focus_sidebar
   wait_until "session $name selectable" "[ -n \"\$(sidebar_row_for '$name')\" ]"
   for i in $(seq 1 12); do
-    focus_sidebar
-    send_keys $'\r'
-    for attempt in $(seq 1 20); do
-      [ "$(client_session 2>/dev/null || true)" = "$name" ] && return 0
-      sleep 0.05
-    done
-    focus_sidebar
+    selected="$(sidebar_selected_name 2>/dev/null || true)"
+    [ "$selected" = "$name" ] && break
+    focus_sidebar || return 1
     send_keys $'\033[B'
-    wait_until "selection step $i toward $name" sidebar_ready
+    wait_until "selection step $i toward $name" "selected=\$(sidebar_selected_name 2>/dev/null || true); [ -n \"\$selected\" ] && [ \"\$selected\" != '$selected' ]"
   done
+  wait_until "selection $name stable" "first=\$(sidebar_selected_name 2>/dev/null || true); sleep 0.1; second=\$(sidebar_selected_name 2>/dev/null || true); [ \"\$first\" = '$name' ] && [ \"\$second\" = '$name' ]"
+  [ "$(sidebar_selected_name 2>/dev/null || true)" = "$name" ] || {
+    echo "FAIL: could not select session $name through attached PTY input" >&2
+    return 1
+  }
+  send_keys $'\r'
   wait_until "session selection $name" "wait_session '$name'"
   wait_until "sidebar ready" sidebar_ready
+}
+
+# A Presenter is settled only when the user-visible terminal buffer is valid
+# twice after the client has reached the target session. Transient coordination
+# options are intentionally not part of this public display oracle.
+presenter_screen_has_current_session() {
+  local screen="$1" session_name="$2"
+  printf '%s\n' "$screen" | sed $'s/\033\\[[0-9;]*m//g' | awk -v name="$session_name" '
+    /^[[:space:]]*sessions[[:space:]]*$/ { title = 1 }
+    $1 == ">*" && $2 == name { current = 1 }
+    $1 == "*" && $2 == name { current = 1 }
+    $1 == ">" && $2 == "*" && $3 == name { current = 1 }
+    END { exit !(title && current) }
+  '
+}
+
+wait_for_settled_presenter_screen() {
+  local window_id="$1" session_name="$2" attempt pane_id first second
+  for attempt in $(seq 1 100); do
+    [ "$(client_session 2>/dev/null || true)" = "$session_name" ] || { sleep 0.05; continue; }
+    pane_id="$(window_sidebar_pane_id "$window_id" 2>/dev/null || true)"
+    [ -n "$pane_id" ] || { sleep 0.05; continue; }
+    [ "$(tmuxc display-message -p -t "$pane_id" '#{pane_dead}' 2>/dev/null || true)" = 0 ] || { sleep 0.05; continue; }
+    first="$(tmuxc capture-pane -p -t "$pane_id" 2>/dev/null || true)"
+    presenter_screen_has_current_session "$first" "$session_name" || { sleep 0.05; continue; }
+    sleep 0.1
+    second="$(tmuxc capture-pane -p -t "$pane_id" 2>/dev/null || true)"
+    if presenter_screen_has_current_session "$second" "$session_name"; then
+      PRESENTER_SCREEN_RESULT="$second"
+      return 0
+    fi
+    sleep 0.05
+  done
+  echo "FAIL: target Presenter did not settle for $session_name" >&2
+  return 1
+}
+
+presenter_screen_session_rows() {
+  local screen="$1" session_name="$2"
+  printf '%s\n' "$screen" | sed $'s/\033\\[[0-9;]*m//g' | awk -v name="$session_name" '
+    $1 == ">*" && $2 == name { count++ }
+    $1 == "*" && $2 == name { count++ }
+    $1 == ">" && $2 == "*" && $3 == name { count++ }
+    $1 == ">" && $2 == name { count++ }
+    $1 == name { count++ }
+    END { print count + 0 }
+  '
+}
+
+wait_for_sidebar_selection_change() {
+  local previous="$1" attempt first second
+  for attempt in $(seq 1 100); do
+    first="$(sidebar_selected_name 2>/dev/null || true)"
+    if [ -n "$first" ] && [ "$first" != "$previous" ]; then
+      sleep 0.1
+      second="$(sidebar_selected_name 2>/dev/null || true)"
+      if [ "$first" = "$second" ]; then
+        SIDEBAR_SELECTED_RESULT="$first"
+        return 0
+      fi
+    fi
+    sleep 0.05
+  done
+  echo "FAIL: sidebar selection did not advance from $previous" >&2
+  return 1
+}
+
+switch_to_next_sidebar_selection() {
+  local previous target
+  focus_sidebar || return 1
+  previous="$(sidebar_selected_name 2>/dev/null || true)"
+  [ -n "$previous" ] || {
+    echo "FAIL: sidebar has no visible selection before navigation" >&2
+    return 1
+  }
+  send_keys $'\033[B'
+  wait_for_sidebar_selection_change "$previous"
+  target="$SIDEBAR_SELECTED_RESULT"
+  send_keys $'\r'
+  wait_until "session selection $target" "wait_session '$target'"
+  wait_until "sidebar ready" sidebar_ready
+  printf '%s\n' "$target"
 }
 
 create_session() {
