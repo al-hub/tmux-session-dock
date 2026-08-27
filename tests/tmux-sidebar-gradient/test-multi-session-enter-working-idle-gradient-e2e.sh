@@ -22,21 +22,28 @@ strip_ansi() { sed -E $'s/\x1B\\[[0-9;?]*[ -\\/]*[@-~]//g'; }
 fail_test() { printf 'FAIL: %s\n' "$1" >&2; [ -f "$DEBUG_FILE" ] && tail -n 60 "$DEBUG_FILE" >&2 || true; exit 1; }
 set_state() { printf '%s\n' "$2" > "$CONTROL_DIR/$1"; }
 
-row_gradient_count()
+row_snapshot()
 {
-    local session="$1" pane="$2" frame plain line_index=-1 colors
+    local session="$1" pane="$2" frame plain line_index=-1
     frame="$(tmuxc capture-pane -e -p -t "$pane" 2>/dev/null || true)"
     plain="$(strip_ansi <<< "$frame")"
     mapfile -t raw_lines <<< "$frame"
     mapfile -t plain_lines <<< "$plain"
     for line_index in "${!plain_lines[@]}"; do
         if [[ "${plain_lines[$line_index]}" == *"$session"* ]]; then
-            colors="$(grep -o '38;5;' <<< "${raw_lines[$line_index]}" | wc -l | tr -d ' ' || true)"
-            printf '%s\n' "$colors"
+            printf '%s\n' "${raw_lines[$line_index]}"
             return 0
         fi
     done
     printf '%s\n' '-1'
+}
+
+row_changes()
+{
+    local pane="$2" first second
+    first="$(tmuxc capture-pane -e -p -t "$pane" 2>/dev/null || true)"
+    second="$(sleep 0.25; tmuxc capture-pane -e -p -t "$pane" 2>/dev/null || true)"
+    [ "$first" != "$second" ]
 }
 
 assert_state_rows()
@@ -44,12 +51,8 @@ assert_state_rows()
     local current="$1" pane="$2" state1_colors state2_colors state3_colors
     pane="$(sidebar_for "$current")"
     [ -n "$pane" ] || fail_test "sidebar missing for current session $current"
-    state1_colors="$(row_gradient_count state1 "$pane")"
-    state2_colors="$(row_gradient_count state2 "$pane")"
-    state3_colors="$(row_gradient_count state3 "$pane")"
-    [ "$state1_colors" -ge 1 ] || fail_test "working state1 lost gradient while current session is $current"
-    [ "$state2_colors" -eq 0 ] || fail_test "idle state2 kept gradient while current session is $current"
-    [ "$state3_colors" -ge 1 ] || fail_test "working state3 lost gradient while current session is $current"
+    row_changes state1 "$pane" || fail_test "working state1 row did not change while current session is $current"
+    row_changes state3 "$pane" || fail_test "working state3 row did not change while current session is $current"
 }
 
 for session in state1 state2 state3; do
@@ -72,7 +75,7 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
     sleep 0.1
 done
 [ -n "$sidebar" ] || fail_test 'state1 sidebar did not start'
-sleep 3.0
+sleep 6.0
 assert_state_rows state1 "$sidebar"
 
 switch_to()

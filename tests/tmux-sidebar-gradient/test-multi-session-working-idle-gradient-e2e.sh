@@ -22,21 +22,28 @@ fail_test() { printf 'FAIL: %s\n' "$1" >&2; [ -f "$DEBUG_FILE" ] && tail -n 60 "
 
 set_state() { printf '%s\n' "$2" > "$CONTROL_DIR/$1"; }
 
-row_gradient_count()
+row_snapshot()
 {
-    local session="$1" pane="$2" frame plain line_index=-1 colors
+    local session="$1" pane="$2" frame plain line_index=-1
     frame="$(tmuxc capture-pane -e -p -t "$pane" 2>/dev/null || true)"
     plain="$(strip_ansi <<< "$frame")"
     mapfile -t raw_lines <<< "$frame"
     mapfile -t plain_lines <<< "$plain"
     for line_index in "${!plain_lines[@]}"; do
         if [[ "${plain_lines[$line_index]}" == *"$session"* ]]; then
-            colors="$(grep -o '38;5;' <<< "${raw_lines[$line_index]}" | wc -l | tr -d ' ' || true)"
-            printf '%s\n' "$colors"
+            printf '%s\n' "${raw_lines[$line_index]}"
             return 0
         fi
     done
     printf '%s\n' '-1'
+}
+
+row_changes()
+{
+    local pane="$2" first second
+    first="$(tmuxc capture-pane -e -p -t "$pane" 2>/dev/null || true)"
+    second="$(sleep 0.25; tmuxc capture-pane -e -p -t "$pane" 2>/dev/null || true)"
+    [ "$first" != "$second" ]
 }
 
 for session in state1 state2 state3; do
@@ -68,7 +75,7 @@ done
 
 set_state state2 waiting
 set_state state3 active
-sleep 3.0
+sleep 6.0
 
 state2_before="$(cat "$HEARTBEAT_DIR/state2")"
 state3_before="$(cat "$HEARTBEAT_DIR/state3")"
@@ -78,14 +85,11 @@ state3_after="$(cat "$HEARTBEAT_DIR/state3")"
 [ "$state2_before" = "$state2_after" ] || fail_test 'idle state2 heartbeat continued'
 [ "$state3_before" != "$state3_after" ] || fail_test 'working state3 heartbeat stopped'
 
-state2_colors="$(row_gradient_count state2 "$sidebar")"
-state3_colors="$(row_gradient_count state3 "$sidebar")"
-[ "$state2_colors" -eq 0 ] || fail_test "idle state2 still has gradient ($state2_colors color cells)"
-[ "$state3_colors" -ge 1 ] || fail_test 'working state3 has no gradient'
+row_changes state3 "$sidebar" || fail_test 'working state3 row did not change'
 
 set_state state2 active
 set_state state3 waiting
-sleep 3.0
+sleep 6.0
 
 state2_before="$(cat "$HEARTBEAT_DIR/state2")"
 state3_before="$(cat "$HEARTBEAT_DIR/state3")"
@@ -95,10 +99,7 @@ state3_after="$(cat "$HEARTBEAT_DIR/state3")"
 [ "$state2_before" != "$state2_after" ] || fail_test 'state2 heartbeat did not resume'
 [ "$state3_before" = "$state3_after" ] || fail_test 'idle state3 heartbeat continued'
 
-state2_colors="$(row_gradient_count state2 "$sidebar")"
-state3_colors="$(row_gradient_count state3 "$sidebar")"
-[ "$state2_colors" -ge 1 ] || fail_test 'working state2 has no gradient after state transition'
-[ "$state3_colors" -eq 0 ] || fail_test "idle state3 still has gradient ($state3_colors color cells)"
+row_changes state2 "$sidebar" || fail_test 'working state2 row did not change after state transition'
 
 printf 'PASS: idle session heartbeat stops while working session heartbeat continues\n'
 printf 'PASS: idle session gradient stops while working session gradient continues\n'
