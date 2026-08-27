@@ -5638,6 +5638,42 @@ apply_restored_window_layout()
     trace_event "restore.layout.end target=$target"
 }
 
+# Bring the restored sidebar to the user's global width without letting tmux
+# hand the whole difference to the one work pane next to the sidebar: scale
+# every work column proportionally so the archived work-pane ratios survive.
+# No-op when the archived width already equals the global width.
+restore_sidebar_layout_apply_width()
+{
+    local target="$1" sidebar_pane="$2" width="$3"
+    local sidebar_before sidebar_after columns total_before total_after
+    local col_left col_width col_pane new_width remaining
+    sidebar_before="$(tmux display-message -p -t "$sidebar_pane" '#{pane_width}' 2>/dev/null || true)"
+    [ -n "$sidebar_before" ] && [ "$sidebar_before" != "$width" ] || return 0
+    # One entry per work column: leftmost edge, width, a pane in that column.
+    columns="$(tmux list-panes -t "$target" -F '#{pane_left}|#{pane_width}|#{pane_id}|#{pane_title}' 2>/dev/null |
+        awk -F '|' -v sidebar="$SIDEBAR_TITLE" -v subpane="${SIDEBAR_SUBPANE_TITLE:-dotfiles-sidebar-subpane}" \
+            '$4 != sidebar && $4 != subpane && !($1 in seen) { seen[$1] = 1; print $1 "|" $2 "|" $3 }' |
+        sort -t '|' -n -k1,1)"
+    enforce_sidebar_width "$sidebar_pane" "$width" || true
+    sidebar_after="$(tmux display-message -p -t "$sidebar_pane" '#{pane_width}' 2>/dev/null || true)"
+    [ -n "$columns" ] && [ -n "$sidebar_after" ] && [ "$sidebar_after" != "$sidebar_before" ] || return 0
+    total_before=0
+    while IFS='|' read -r col_left col_width col_pane; do
+        [ -n "$col_width" ] && total_before=$((total_before + col_width))
+    done <<< "$columns"
+    total_after=$((total_before + sidebar_before - sidebar_after))
+    [ "$total_before" -gt 0 ] && [ "$total_after" -gt 0 ] || return 0
+    remaining="$(printf '%s\n' "$columns" | wc -l | tr -d ' ')"
+    while IFS='|' read -r col_left col_width col_pane; do
+        remaining=$((remaining - 1))
+        [ "$remaining" -gt 0 ] || break
+        new_width=$(( (col_width * total_after + total_before / 2) / total_before ))
+        [ "$new_width" -ge 1 ] || new_width=1
+        tmux resize-pane -t "$col_pane" -x "$new_width" 2>/dev/null || true
+    done <<< "$columns"
+    trace_event "restore.sidebar-layout.width target=$target sidebar=$sidebar_before->$sidebar_after work=$total_before->$total_after"
+}
+
 restore_archived_sidebar_layout()
 {
     local target="$1" layout="$2" archived_panes="$3" archived_active="$4"
@@ -5679,10 +5715,26 @@ restore_archived_sidebar_layout()
 
     trace_event "restore.sidebar-layout.begin target=$target archived-panes=$archived_panes mapped-panes=$mapped_panes"
     restored_layout="$(layout_with_pane_ids "$layout" "$mapped_panes")"
+    # The archived layout carries the sidebar width from archive time. The
+    # user's current global width wins: raise the apply guard first so the
+    # presenter does not persist the archived width while the layout lands,
+    # then re-assert the global width on the sidebar pane. Only an explicit
+    # global width counts (option or persisted file); sidebar_width() would
+    # otherwise fall back to this run-shell process's own pane width.
+    local current_width
+    current_width="$(tmux show-option -gqv '@dotfiles-session-sidebar-width' 2>/dev/null || true)"
+    case "$current_width" in
+        ''|*[!0-9]*) current_width="$(read_persisted_sidebar_width 2>/dev/null || true)" ;;
+    esac
+    tmux set-option -gq "$SIDEBAR_WIDTH_APPLY_GUARD_OPTION" "$(( $(date +%s%N) + 1000000000 ))" 2>/dev/null || true
     tmux select-layout -t "$target" "$restored_layout" >/dev/null 2>&1 || {
         trace_event "restore.sidebar-layout.error target=$target reason=select-layout"
         return 1
     }
+    case "$current_width" in
+        ''|*[!0-9]*) ;;
+        *) restore_sidebar_layout_apply_width "$target" "$sidebar_pane" "$current_width" ;;
+    esac
     [ "${archived_active#%}" = "${archived_sidebar_pane#%}" ] && active_pane="$sidebar_pane"
     [ -n "$active_pane" ] && tmux select-pane -t "$active_pane" >/dev/null 2>&1 || true
     trace_event "restore.sidebar-layout.end target=$target sidebar=$sidebar_pane active=${active_pane:-none}"
@@ -7583,9 +7635,25 @@ run_tui()
             if [ -n "$old_width" ] && [ -n "$old_height" ] &&
                 { [ "$old_width" != "$cached_pane_width" ] || [ "$old_height" != "$cached_pane_height" ]; }; then
                 if [ -n "$cached_pane_width" ] && [ "$cached_pane_width" -ge 15 ] && [ "$cached_pane_width" != "$old_width" ]; then
-                    _cache_sidebar_width="$cached_pane_width"
-                    tmux set-option -gq '@dotfiles-session-sidebar-width' "$cached_pane_width" 2>/dev/null || true
-                    persist_sidebar_width "$cached_pane_width" 2>/dev/null || true
+                    # A width the product itself applied (restore, reconcile)
+                    # is not a user choice: do not persist it as the global.
+                    # Neither is the width tmux hands the sidebar when the work
+                    # panes leave the window (archive, kill): a sidebar that
+                    # spans the whole window is not a sidebar width.
+                    local geometry_window_state geometry_window_panes geometry_window_width
+                    geometry_window_state="$(tmux display-message -p -t "${SIDEBAR_WINDOW_ID:-$TMUX_PANE}" '#{window_panes}|#{window_width}' 2>/dev/null || true)"
+                    geometry_window_panes="${geometry_window_state%%|*}"
+                    geometry_window_width="${geometry_window_state##*|}"
+                    if sidebar_width_apply_guard_active; then
+                        trace_event "geometry.signal width-not-persisted reason=apply-guard width=$cached_pane_width"
+                    elif [ "${geometry_window_panes:-2}" -le 1 ] 2>/dev/null ||
+                        { [ -n "$geometry_window_width" ] && [ "$cached_pane_width" -ge "$geometry_window_width" ] 2>/dev/null; }; then
+                        trace_event "geometry.signal width-not-persisted reason=no-work-pane width=$cached_pane_width window_panes=${geometry_window_panes:-none} window_width=${geometry_window_width:-none}"
+                    else
+                        _cache_sidebar_width="$cached_pane_width"
+                        tmux set-option -gq '@dotfiles-session-sidebar-width' "$cached_pane_width" 2>/dev/null || true
+                        persist_sidebar_width "$cached_pane_width" 2>/dev/null || true
+                    fi
                 fi
                 mark_full_render_required geometry-invalidated
                 trace_event "geometry.signal changed old=${old_width:-none},${old_height:-none} new=$cached_pane_width,$cached_pane_height"
