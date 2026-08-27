@@ -3,7 +3,6 @@
 # Two-slot User Height Intent preservation through the real Enter switch seam.
 # ============================================================================
 set -euo pipefail
-TEST_TMUX_CONF="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../fixtures" && pwd -P)/test-tmux.conf"  # never inherit ~/.tmux.conf
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -22,7 +21,7 @@ export TMUX_SESSION_SIDEBAR_SUBPANE_HEIGHT_STATE_FILE="$STATE_DIR/height"
 export TMUX_SESSION_SIDEBAR_SUBPANE_POSITION_STATE_FILE="$STATE_DIR/position"
 export TMUX_SESSION_SIDEBAR_SUBPANE_ENABLED_STATE_FILE="$STATE_DIR/enabled"
 
-tmuxc() { tmux -L "$SOCKET" -f "$TEST_TMUX_CONF" "$@"; }
+tmuxc() { tmux -L "$SOCKET" "$@"; }
 
 slot_pane() {
     local window_id="$1" slot="$2"
@@ -77,7 +76,7 @@ h2="$(tmuxc show-option -gqv @dotfiles_subpane_slot_2_height)"
 
 # This is the same seam used by pressing Enter in the launcher. The target
 # starts with a Presenter Window but no Subpane lease.
-tmuxc new-session -d -s sess2 -n main -x 120 -y 60 'sleep 120'
+tmuxc -f /dev/null new-session -d -s sess2 -n main -x 120 -y 60 'sleep 120'
 win2="$(tmuxc display-message -p -t sess2:main '#{window_id}')"
 sidebar2="$(setup_presenter "$win2")"
 source "$REPO_ROOT/scripts/lib/sidebar_domain.sh"

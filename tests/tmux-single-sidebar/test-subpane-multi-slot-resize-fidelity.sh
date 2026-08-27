@@ -13,7 +13,6 @@
 # adding a separate test for every permutation of count/position/session.
 # ============================================================================
 set -euo pipefail
-TEST_TMUX_CONF="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../fixtures" && pwd -P)/test-tmux.conf"  # never inherit ~/.tmux.conf
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -32,7 +31,7 @@ export TMUX_SESSION_SIDEBAR_SUBPANE_HEIGHT_STATE_FILE="$STATE_DIR/height"
 export TMUX_SESSION_SIDEBAR_SUBPANE_POSITION_STATE_FILE="$STATE_DIR/position"
 export TMUX_SESSION_SIDEBAR_SUBPANE_ENABLED_STATE_FILE="$STATE_DIR/enabled"
 
-tmuxc() { tmux -L "$SOCKET" -f "$TEST_TMUX_CONF" "$@"; }
+tmuxc() { tmux -L "$SOCKET" "$@"; }
 
 slot_pane() {
     local window_id="$1" slot="$2"
@@ -132,7 +131,7 @@ for slot in 1 2 3; do
         "${slot1_heights[$slot]}" "$(slot_height "${slot1_panes[$slot]}")"
 done
 
-tmuxc new-session -d -s sess2 -n main -x 140 -y 70 'sleep 120'
+tmuxc -f /dev/null new-session -d -s sess2 -n main -x 140 -y 70 'sleep 120'
 win2="$(tmuxc display-message -p -t sess2:main '#{window_id}')"
 sidebar2="$(setup_presenter_window "$win2")"
 
