@@ -3,7 +3,8 @@ set -euo pipefail
 
 export TERM="${TERM:-xterm-256color}"
 
-TEST_DIR="$(cd -- "$(dirname -- "$BASH_SOURCE")" && pwd -P)"
+# Scenario directory (pty-bridge.c lives there); this helper sits in tests/lib.
+TEST_DIR="$(cd -- "$(dirname -- "$BASH_SOURCE")/../tmux-single-sidebar" && pwd -P)"
 REPO_ROOT="$(cd -- "$TEST_DIR/../.." && pwd -P)"
 RUN_DIR="${TMUX_INTERACTIVE_RUN_DIR:-/tmp/dotfiles-$SCENARIO_NAME-$$}"
 HOME_DIR="$RUN_DIR/home"

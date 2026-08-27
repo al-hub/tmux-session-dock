@@ -9,7 +9,7 @@ SCENARIO_NAME="first-enter-flicker-detect"
 TMUX_INTERACTIVE_CREATE_PEER=false
 
 TEST_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-source "$TEST_DIR/test-interactive-common.sh"
+source "$TEST_DIR/../lib/interactive_common.sh"
 
 MIN_BURST_BYTES="${TMUX_FLICKER_MIN_BURST_BYTES:-500}"
 BURST_INTERVAL_MS="${TMUX_FLICKER_BURST_INTERVAL_MS:-250}"

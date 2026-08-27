@@ -2,7 +2,7 @@
 set -euo pipefail
 SCENARIO_NAME=rename-roundtrip
 export SCENARIO_NAME
-source "$(dirname -- "$BASH_SOURCE")/test-interactive-common.sh"
+source "$(dirname -- "$BASH_SOURCE")/../lib/interactive_common.sh"
 
 setup_interactive_test
 tmuxc rename-session -t '=interactive-anchor:' a

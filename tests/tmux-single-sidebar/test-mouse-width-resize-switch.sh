@@ -15,7 +15,7 @@ TMUX_SESSION_LAUNCHER_DEBUG=1
 TMUX_INTERACTIVE_CREATE_PEER=false
 
 TEST_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-source "$TEST_DIR/test-interactive-common.sh"
+source "$TEST_DIR/../lib/interactive_common.sh"
 
 echo "=== [1/4] Setting up interactive client on interactive-anchor ==="
 setup_interactive_test

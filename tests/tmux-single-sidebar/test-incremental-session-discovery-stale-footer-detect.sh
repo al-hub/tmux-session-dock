@@ -12,7 +12,7 @@ SCENARIO_NAME="incremental-discovery-stale-footer"
 TMUX_INTERACTIVE_CREATE_PEER=false
 
 TEST_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-source "$TEST_DIR/test-interactive-common.sh"
+source "$TEST_DIR/../lib/interactive_common.sh"
 
 echo "=== [1/3] Setting up interactive client on interactive-anchor ==="
 setup_interactive_test

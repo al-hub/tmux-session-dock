@@ -9,7 +9,7 @@ SCENARIO_NAME="ghost-row-stale-footer-detect"
 TMUX_INTERACTIVE_CREATE_PEER=false
 
 TEST_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-source "$TEST_DIR/test-interactive-common.sh"
+source "$TEST_DIR/../lib/interactive_common.sh"
 
 SESSIONS=(interactive-anchor sess-alpha sess-beta sess-gamma sess-delta sess-epsilon)
 

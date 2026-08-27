@@ -5,7 +5,7 @@ set -euo pipefail
 SCENARIO_NAME=keyboard-one-step-switch-contract
 
 TEST_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-source "$TEST_DIR/test-interactive-common.sh"
+source "$TEST_DIR/../lib/interactive_common.sh"
 
 setup_interactive_test
 tmuxc rename-session -t '=interactive-anchor:' a
