@@ -37,6 +37,8 @@ usage: $0 [--ci | --manual | --health] [-f] [--timeout SEC] [--only PATTERN]
   -f, --fail-fast   stop at first failure
   --timeout SEC     per-test timeout (default ${TIMEOUT_S}; env TEST_TIMEOUT)
   --only PATTERN    run only list entries matching PATTERN (grep -E)
+
+  env TEST_LOG_DIR  keep every test's full output as <dir>/<test>.log
 EOF
     exit 0
 }
@@ -118,7 +120,12 @@ for rel in "${TEST_LIST[@]}"; do
     path="${TESTS_DIR}/${rel}"
     echo -n -e "▶ ${rel} ... "
     s=$(now_ms)
-    log=$(mktemp)
+    if [ -n "${TEST_LOG_DIR:-}" ]; then
+        mkdir -p "$TEST_LOG_DIR"
+        log="$TEST_LOG_DIR/$(basename "$rel" .sh).log"
+    else
+        log=$(mktemp)
+    fi
     timeout --foreground -k 5 "$TIMEOUT_S" bash "$path" > "$log" 2>&1
     rc=$?
     e=$(now_ms)
@@ -139,9 +146,9 @@ for rel in "${TEST_LIST[@]}"; do
         tail -n 15 "$log" | sed 's/^/    /'
         echo -e "${RED}-----------------------------------${NC}"
         FAILED+=("$rel")
-        if [ "$FAIL_FAST" -eq 1 ]; then rm -f "$log"; break; fi
+        if [ "$FAIL_FAST" -eq 1 ]; then [ -n "${TEST_LOG_DIR:-}" ] || rm -f "$log"; break; fi
     fi
-    rm -f "$log"
+    [ -n "${TEST_LOG_DIR:-}" ] || rm -f "$log"
 done
 
 T1=$(date +%s)

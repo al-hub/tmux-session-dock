@@ -50,4 +50,32 @@ jobs:
         run: make test-health
 
       - name: Run CI test list
+        env:
+          TEST_LOG_DIR: ${{ runner.temp }}/test-logs
         run: make test
+
+      - name: Collect failure artifacts
+        if: failure()
+        run: |
+          set -x
+          out="${{ runner.temp }}/failure-artifacts"
+          mkdir -p "$out"
+          # tests keep their run dir on failure (failure_artifacts/, trace, debug logs)
+          for d in /tmp/dotfiles-* /tmp/test-*; do
+            [ -d "$d" ] && cp -r "$d" "$out/" 2>/dev/null || true
+          done
+          [ -f /tmp/tmux-session-launcher-trace.log ] && cp /tmp/tmux-session-launcher-trace.log "$out/" || true
+          tmux -V > "$out/tmux-version.txt" 2>&1 || true
+          { nproc; locale; echo "TERM=$TERM"; echo "SHELL=$SHELL"; stty -a </dev/tty 2>&1 || echo "no /dev/tty"; } > "$out/runner-env.txt" 2>&1 || true
+          du -sh "$out"
+
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-artifacts-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/test-logs
+            ${{ runner.temp }}/failure-artifacts
+          retention-days: 7
+          if-no-files-found: warn
