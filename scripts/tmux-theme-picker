@@ -131,6 +131,42 @@ if [ "$1" = "--preview" ]; then
             echo "  • Benefit   : Warm parchment cream texture & anti-glare"
             echo "  • Best For  : Daytime natural sunlight & documentation"
             ;;
+        disp-ips-*)
+            echo "  • Benefit   : Lifted #1a1a1a blacks hide IPS glow & backlight bleed"
+            echo "  • Best For  : IPS / VA LCD monitors with uneven black levels"
+            ;;
+        disp-eink-*)
+            echo "  • Benefit   : Achromatic 4-level grey, no mid-tone ghosting"
+            echo "  • Best For  : Dasung / Boox e-ink monitors"
+            ;;
+        disp-sunlight-*)
+            echo "  • Benefit   : 21:1 black-on-white + saturated primaries beat glare"
+            echo "  • Best For  : Outdoor laptops, sunlit desks, projectors"
+            ;;
+        disp-256color-*)
+            echo "  • Benefit   : Every hex is an exact xterm-256 index - no quantisation drift"
+            echo "  • Best For  : SSH, screen, TERM without TrueColor"
+            ;;
+        retro-c64-*)
+            echo "  • Style     : Commodore 64 boot screen, Pepto-measured VIC-II blues"
+            echo "  • Best For  : 8-bit nostalgia (authentically low-contrast body text)"
+            ;;
+        retro-dos-*)
+            echo "  • Style     : IBM CGA blue/grey/cyan - Turbo Pascal & Norton Commander"
+            echo "  • Best For  : Text-mode IDE nostalgia, TUI-heavy workflows"
+            ;;
+        retro-gameboy-*)
+            echo "  • Style     : DMG-01 four-shade olive LCD, dark-on-light"
+            echo "  • Best For  : Daylight retro look without a black background"
+            ;;
+        retro-win95-*)
+            echo "  • Style     : Windows 95 teal desktop, silver chrome, navy title bar"
+            echo "  • Best For  : 90s desktop nostalgia"
+            ;;
+        os-*)
+            echo "  • Style     : Distro / platform brand colours on a neutral dark ground"
+            echo "  • Best For  : Matching the host OS identity"
+            ;;
         retro-*)
             echo "  • Benefit   : Monochromatic phosphor aesthetic & 80s nostalgia"
             echo "  • Best For  : Deep focus terminal work & retro hacking"

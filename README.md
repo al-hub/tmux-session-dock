@@ -1,12 +1,12 @@
 # tmux-session-dock ⚡
 
 > **The ultra-fast, zero-flicker workspace dock & session orchestrator for tmux.**  
-> *Window-Local Thin Presenter • 24fps Real-Time AI Waveform Telemetry • 47 Canonical Themes • Autonomous Lifecycle*
+> *Window-Local Thin Presenter • 24fps Real-Time AI Waveform Telemetry • 59 Canonical Themes • Autonomous Lifecycle*
 
 [![CI](https://github.com/al-hub/tmux-session-dock/actions/workflows/ci.yml/badge.svg)](https://github.com/al-hub/tmux-session-dock/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![tmux](https://img.shields.io/badge/tmux-3.2a+-brightgreen.svg)](https://github.com/tmux/tmux)
-[![Themes](https://img.shields.io/badge/themes-47%20canonical-blueviolet.svg)](docs/THEMES.md)
+[![Themes](https://img.shields.io/badge/themes-59%20canonical-blueviolet.svg)](docs/THEMES.md)
 
 [**🇰🇷 한국어 설명서 (Korean Manual)**](README.ko.md) | [**Architecture**](docs/ARCHITECTURE.md) | [**Keybindings**](docs/KEYBINDINGS.md) | [**Theme Catalog**](docs/THEMES.md)
 
@@ -24,7 +24,7 @@
 
 ### 2. Theme management
 
-- **Dozens of bundled themes**: 47 Canonical themes are included.
+- **Dozens of bundled themes**: 59 Canonical themes are included.
 - **Select and customize themes**: Choose with live ANSI preview via `Prefix + T`; set the default through `@session-dock-theme` or adjust a theme configuration file.
 
 ### 3. Keybindings and status visibility
@@ -94,7 +94,7 @@ cd ~/.local/share/tmux-session-dock
 | Keybinding | Action Description |
 | :--- | :--- |
 | **`Prefix + s`** | Toggle session dock sidebar open / close |
-| **`Prefix + T`** | 🎨 Open 47-theme interactive picker with live ANSI preview |
+| **`Prefix + T`** | 🎨 Open 59-theme interactive picker with live ANSI preview |
 | **`Prefix + /`** | ⌨️ Open searchable command palette |
 | **`Prefix + h`** / **`?`** | 📖 Open interactive help viewer popup |
 | **`Prefix + \|`** / **`%`** | Safe horizontal split (preserves dock layout) |

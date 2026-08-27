@@ -59,7 +59,7 @@ draw_help() {
     printf "    ${CYAN}${BOLD}Alt + s${RESET}             ${GRAY}─${RESET}  ⚡ 세션 도크 0ms 즉시 포커스 점프 / 토글\n"
     printf "    ${CYAN}${BOLD}Ctrl+a s${RESET}             ${GRAY}─${RESET}  세션 도크 사이드바 열기 / 닫기\n"
     printf "    ${CYAN}${BOLD}Ctrl+a S${RESET}             ${GRAY}─${RESET}  ⚙️ 서브 터미널 스택 설정 팝업 열기\n"
-    printf "    ${CYAN}${BOLD}Ctrl+a T${RESET}             ${GRAY}─${RESET}  🎨 47종 프리미엄 테마 피커 팝업 열기\n"
+    printf "    ${CYAN}${BOLD}Ctrl+a T${RESET}             ${GRAY}─${RESET}  🎨 59종 프리미엄 테마 피커 팝업 열기\n"
     printf "    ${CYAN}${BOLD}Ctrl+a /${RESET}           ${GRAY}─${RESET}  ⌨️ 전체 단축키 검색 (커맨드 팔레트)\n"
     printf "    ${CYAN}${BOLD}Ctrl+a h${RESET} / ${CYAN}${BOLD}?${RESET}     ${GRAY}─${RESET}  📖 본 도움말 가이드 팝업 열기\n\n"
 

@@ -201,7 +201,7 @@ do_install() {
     local user_theme_dir="${XDG_CONFIG_HOME:-$HOME/.config}/tmux/themes"
     mkdir -p "$user_theme_dir"
     cp "$SCRIPT_DIR/themes"/*.conf "$user_theme_dir/" 2>/dev/null || true
-    log_ok "47 themes synchronized to $user_theme_dir"
+    log_ok "59 themes synchronized to $user_theme_dir"
 
     # 4. Inject configuration into ~/.tmux.conf if requested
     if [ "$no_conf" -eq 0 ]; then
