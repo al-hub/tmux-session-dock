@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# MANUAL ONLY: touches the user's live tmux server (default socket).
+# Refuses to run unless explicitly allowed.
+if [ "${SESSION_DOCK_ALLOW_USER_SERVER:-0}" != 1 ]; then
+    echo "SKIP: $(basename "$0") uses the user's tmux server; set SESSION_DOCK_ALLOW_USER_SERVER=1 to run" >&2
+    exit 0
+fi
+
 TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ -n "${TMUX_USER_VISIBLE_RUN_DIR:-}" ]; then
     RUN_DIR="$TMUX_USER_VISIBLE_RUN_DIR"

@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# MANUAL ONLY: touches the user's live tmux server (default socket).
+# Refuses to run unless explicitly allowed.
+if [ "${SESSION_DOCK_ALLOW_USER_SERVER:-0}" != 1 ]; then
+    echo "SKIP: $(basename "$0") uses the user's tmux server; set SESSION_DOCK_ALLOW_USER_SERVER=1 to run" >&2
+    exit 0
+fi
+
 # Full live test against the user's existing tmux server. The test creates
 # only managed keyboard-* sessions and never kills the shared server.
 
