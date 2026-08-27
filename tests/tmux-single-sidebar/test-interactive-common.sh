@@ -325,16 +325,50 @@ wait_for_sidebar_selection_change() {
   return 1
 }
 
+# A selection is actionable only after two user-visible Presenter frames agree.
+# This deliberately avoids internal readiness/options as an activation oracle.
+wait_for_stable_sidebar_selection() {
+  local expected="$1" attempt first second
+  for attempt in $(seq 1 100); do
+    first="$(sidebar_selected_name 2>/dev/null || true)"
+    if [ "$first" = "$expected" ]; then
+      sleep 0.1
+      second="$(sidebar_selected_name 2>/dev/null || true)"
+      if [ "$second" = "$expected" ]; then
+        return 0
+      fi
+    fi
+    sleep 0.05
+  done
+  echo "FAIL: sidebar selection did not settle on $expected" >&2
+  return 1
+}
+
+pty_output_size() {
+  [ -f "$OUTPUT_LOG" ] && wc -c < "$OUTPUT_LOG" | tr -d ' ' || printf '0\n'
+}
+
+# Verify one real navigation key caused a rendered selection change. A target
+# fixture must make the expected marker adjacent to the current one.
+navigate_sidebar_once() {
+  local key="$1" expected="$2" before_size after_size
+  before_size="$(pty_output_size)"
+  send_keys "$key"
+  wait_until "PTY output after navigation" "[ \"\$(pty_output_size)\" -gt '$before_size' ]"
+  wait_for_stable_sidebar_selection "$expected"
+  after_size="$(pty_output_size)"
+  [ "$after_size" -gt "$before_size" ] || return 1
+}
+
 switch_to_next_sidebar_selection() {
   local previous target
   focus_sidebar || return 1
+  # The pane can be focused before its first paint. Wait for the visible marker
+  # rather than treating that render race as a product navigation failure.
+  wait_until "sidebar selection visible" "[ -n \"\$(sidebar_selected_name 2>/dev/null || true)\" ]"
   previous="$(sidebar_selected_name 2>/dev/null || true)"
-  [ -n "$previous" ] || {
-    echo "FAIL: sidebar has no visible selection before navigation" >&2
-    return 1
-  }
   send_keys $'\033[B'
-  wait_for_sidebar_selection_change "$previous"
+  wait_for_sidebar_selection_change "$previous" || return 1
   target="$SIDEBAR_SELECTED_RESULT"
   send_keys $'\r'
   wait_until "session selection $target" "wait_session '$target'"

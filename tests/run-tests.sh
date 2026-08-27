@@ -117,19 +117,11 @@ case "${TARGET_SUITE}" in
         ;;
     gate_b)
         TEST_LIST=(
-            "${SINGLE_DIR}/test-keyboard-e2e-repeat.sh"
-            "${SINGLE_DIR}/test-keyboard-e2e-direct-layout.sh"
-            "${SINGLE_DIR}/test-keyboard-e2e-split-cycle.sh"
-            "${SINGLE_DIR}/test-keyboard-e2e-split-cycle-vertical.sh"
-            "${SINGLE_DIR}/test-keyboard-e2e-arbitrary-topology.sh"
-            "${SINGLE_DIR}/test-keyboard-e2e-multi-window-topology.sh"
-            "${SINGLE_DIR}/test-keyboard-e2e-pane-reorder.sh"
+            "${SINGLE_DIR}/test-keyboard-one-step-switch-contract.sh"
             "${SINGLE_DIR}/test-keyboard-e2e-history-select-all.sh"
             "${SINGLE_DIR}/test-keyboard-e2e-rapid-operations.sh"
             "${SINGLE_DIR}/test-keyboard-e2e-rename-roundtrip.sh"
             "${SINGLE_DIR}/test-delete-zero-stale-row.sh"
-            "${SINGLE_DIR}/test-keyboard-e2e-window-local-switch.sh"
-            "${SINGLE_DIR}/test-keyboard-e2e-window-local-toggle.sh"
             "${SINGLE_DIR}/test-batch-restore-layout-integrity.sh"
             "${SINGLE_DIR}/test-split-restore-edge-cases.sh"
         )
@@ -140,7 +132,6 @@ case "${TARGET_SUITE}" in
             "${SINGLE_DIR}/test-multi-client-operation-conflict.sh"
             "${SINGLE_DIR}/test-window-local-multi-client.sh"
             "${SINGLE_DIR}/test-window-local-lifecycle-contract.sh"
-            "${SINGLE_DIR}/test-keyboard-e2e-window-local-lifecycle.sh"
         )
         ;;
     subpane)
@@ -234,8 +225,6 @@ case "${TARGET_SUITE}" in
             "${SINGLE_DIR}/test-subpane-contract.sh"
             "${SINGLE_DIR}/test-subpane-position-contract.sh"
             "${SINGLE_DIR}/test-layout-subpane-isolation.sh"
-            "${SINGLE_DIR}/test-keyboard-e2e-repeat.sh"
-            "${SINGLE_DIR}/test-keyboard-e2e-window-local-switch.sh"
             "${SINGLE_DIR}/test-batch-restore-layout-integrity.sh"
             "${SINGLE_DIR}/test-multi-client-ownership.sh"
             "${SINGLE_DIR}/test-theme-persistence.sh"

@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
-# ==============================================================================
-# tests/tmux-single-sidebar/test-width-persistence-contract.sh
-#
-# 사이드바 폭(Width) 영속화, Fallback 및 아카이브 독립성 계약 테스트
-# ==============================================================================
+# Verify public sidebar-width behavior. State-file corruption is setup only;
+# persistence and archive isolation are asserted through visible pane geometry.
 
 set -euo pipefail
 
@@ -35,74 +32,74 @@ trap cleanup EXIT
 
 tmuxc() { HOME="$HOME_DIR" TMUX_SESSION_HISTORY_DIR="$HISTORY_DIR" "${TMUX[@]}" "$@"; }
 
-echo "=== [1/3] Testing State File Corruption Fallback ==="
-# Write corrupted state content
-echo "CORRUPTED_TEXT_NOT_A_NUMBER" > "$WIDTH_STATE_FILE"
+sidebar_pane_for() {
+    tmuxc list-panes -t "=$1:" -F '#{pane_id}|#{pane_title}' |
+        awk -F '|' '$2 == "dotfiles-session-sidebar" { print $1; exit }'
+}
 
-tmuxc new-session -d -s anchor -x 120 -y 50 -c "$REPO_ROOT" 'sleep 300'
-tmuxc new-session -d -s test-fallback -x 120 -y 50 -c "$REPO_ROOT" 'sleep 300'
-win_id="$(tmuxc list-windows -t '=test-fallback:' -F '#{window_id}' | head -n 1)"
-tmuxc set-option -wq -t "$win_id" @dotfiles_sidebar_managed 1
+wait_for_width() {
+    local pane_id="$1" expected="$2" attempt actual
+    for attempt in $(seq 1 100); do
+        actual="$(tmuxc display-message -p -t "$pane_id" '#{pane_width}' 2>/dev/null || true)"
+        [ "$actual" = "$expected" ] && return 0
+        sleep 0.05
+    done
+    echo "FAIL: expected visible sidebar width $expected, got ${actual:-absent}" >&2
+    return 1
+}
 
-# Ensure sidebar with corrupted width file -> should safely fallback to default (32)
-tmuxc run-shell "$LAUNCHER --ensure-sidebar-window '$win_id'"
+provision_session() {
+    local session_name="$1" width="${2:-}" window_id pane_id
+    tmuxc new-session -d -s "$session_name" -x 140 -y 50 -c "$REPO_ROOT" 'sleep 300'
+    window_id="$(tmuxc display-message -p -t "=$session_name:" '#{window_id}')"
+    tmuxc set-option -wq -t "$window_id" @dotfiles_sidebar_managed 1
+    if [ -n "$width" ]; then
+        tmuxc run-shell "$LAUNCHER --ensure-sidebar-window '$window_id' '$width'"
+    else
+        tmuxc run-shell "$LAUNCHER --ensure-sidebar-window '$window_id'"
+    fi
+    for _ in $(seq 1 100); do
+        pane_id="$(sidebar_pane_for "$session_name")"
+        [ -n "$pane_id" ] && { printf '%s\n' "$pane_id"; return 0; }
+        sleep 0.05
+    done
+    echo "FAIL: sidebar was not provisioned for $session_name" >&2
+    return 1
+}
 
-sb_pane="$(tmuxc list-panes -t "$win_id" -F '#{pane_id}|#{pane_title}' | awk -F '|' '$2 == "dotfiles-session-sidebar" { print $1 }')"
-[ -n "$sb_pane" ] || { echo "FAIL: sidebar pane not created on corrupted state"; exit 1; }
+echo "=== [1/3] Corrupt persisted width falls back to a drawable pane ==="
+printf 'not-a-width\n' > "$WIDTH_STATE_FILE"
+fallback_pane="$(provision_session fallback)"
+fallback_width="$(tmuxc display-message -p -t "$fallback_pane" '#{pane_width}')"
+[ "$fallback_width" -ge 20 ] && [ "$fallback_width" -le 45 ] || {
+    echo "FAIL: corrupt width state created unsupported visible width $fallback_width" >&2
+    exit 1
+}
 
-sb_width="$(tmuxc display-message -p -t "$sb_pane" '#{pane_width}')"
-echo "Corrupted state fallback sidebar width: $sb_width"
-# Width must be between 20 and 45, default is 32 or clamped correctly
-[ "$sb_width" -ge 20 ] && [ "$sb_width" -le 45 ] || { echo "FAIL: width out of range on fallback: $sb_width"; exit 1; }
-
-echo "=== [2/3] Testing Global Width Persistence Across Resize & Restart ==="
-# User resizes sidebar to 40
-tmuxc resize-pane -t "$sb_pane" -x 40
-tmuxc run-shell "$LAUNCHER --persist-sidebar-width 40" 2>/dev/null || echo "40" > "$WIDTH_STATE_FILE"
-
-# Verify persisted state file has 40
-persisted_w="$(cat "$WIDTH_STATE_FILE" | tr -d '[:space:]')"
-[ "$persisted_w" = "40" ] || { echo "FAIL: persisted width expected 40, got '$persisted_w'"; exit 1; }
-
-# Kill server and restart to verify persistence
+echo "=== [2/3] User resize survives a server restart ==="
+tmuxc resize-pane -t "$fallback_pane" -x 40
+wait_for_width "$fallback_pane" 40
+for _ in $(seq 1 100); do
+    [ "$(tr -d '[:space:]' < "$WIDTH_STATE_FILE" 2>/dev/null || true)" = 40 ] && break
+    sleep 0.05
+done
 tmuxc kill-server
 sleep 0.2
-
 tmuxc new-session -d -s anchor -x 140 -y 50 -c "$REPO_ROOT" 'sleep 300'
-tmuxc new-session -d -s test-restart -x 140 -y 50 -c "$REPO_ROOT" 'sleep 300'
-new_win_id="$(tmuxc list-windows -t '=test-restart:' -F '#{window_id}' | head -n 1)"
-tmuxc set-option -wq -t "$new_win_id" @dotfiles_sidebar_managed 1
-tmuxc run-shell "$LAUNCHER --ensure-sidebar-window '$new_win_id'"
+restart_pane="$(provision_session restarted)"
+wait_for_width "$restart_pane" 40
 
-new_sb_pane="$(tmuxc list-panes -t "$new_win_id" -F '#{pane_id}|#{pane_title}' | awk -F '|' '$2 == "dotfiles-session-sidebar" { print $1 }')"
-[ -n "$new_sb_pane" ] || { echo "FAIL: sidebar pane not created on restart"; exit 1; }
+echo "=== [3/3] Archive restore keeps the current user width ==="
+tmuxc run-shell "$LAUNCHER --archive-session restarted false"
+archive_path="$HISTORY_DIR/restarted.tsv"
+[ -f "$archive_path" ] || { echo "FAIL: archive was not created" >&2; exit 1; }
+tmuxc resize-pane -t "$restart_pane" -x 28
+wait_for_width "$restart_pane" 28
+tmuxc kill-session -t '=restarted:'
+tmuxc run-shell "$LAUNCHER --restore-archive '$archive_path' op-width-test false"
+tmuxc has-session -t '=restarted:' || { echo "FAIL: archived session was not restored" >&2; exit 1; }
+restored_pane="$(sidebar_pane_for restarted)"
+[ -n "$restored_pane" ] || { echo "FAIL: restored session has no sidebar" >&2; exit 1; }
+wait_for_width "$restored_pane" 28
 
-restarted_w="$(tmuxc display-message -p -t "$new_sb_pane" '#{pane_width}')"
-echo "Restarted sidebar width: $restarted_w"
-[ "$restarted_w" -eq 40 ] || { echo "FAIL: expected width 40 on restart, got $restarted_w"; exit 1; }
-
-echo "=== [3/3] Testing Archive Restore Does Not Overwrite Global Sidebar Width ==="
-# Archive test-restart session (which was saved with width 40)
-tmuxc run-shell "$LAUNCHER --archive-session test-restart false"
-[ -f "$HISTORY_DIR/test-restart.tsv" ] || { echo "FAIL: archive test-restart.tsv missing"; exit 1; }
-
-# User now changes global width to 28
-echo "28" > "$WIDTH_STATE_FILE"
-tmuxc set-option -gq '@dotfiles-session-sidebar-width' 28
-tmuxc kill-session -t '=test-restart:'
-
-# Restore archive
-tmuxc run-shell "$LAUNCHER --restore-archive '$HISTORY_DIR/test-restart.tsv' op-width-test false"
-tmuxc has-session -t '=test-restart:' || { echo "FAIL: session test-restart not restored"; exit 1; }
-
-# Re-ensure sidebar on restored window
-restored_win="$(tmuxc list-windows -t '=test-restart:' -F '#{window_id}' | head -n 1)"
-tmuxc run-shell "$LAUNCHER --ensure-sidebar-window '$restored_win'"
-
-restored_sb_pane="$(tmuxc list-panes -t "$restored_win" -F '#{pane_id}|#{pane_title}' | awk -F '|' '$2 == "dotfiles-session-sidebar" { print $1 }')"
-restored_sb_width="$(tmuxc display-message -p -t "$restored_sb_pane" '#{pane_width}')"
-echo "Restored window sidebar width: $restored_sb_width"
-# The global width (28) must be respected and NOT overwritten by archive's old width (40)
-[ "$restored_sb_width" -eq 28 ] || { echo "FAIL: expected global width 28, but got $restored_sb_width"; exit 1; }
-
-echo "PASS: all width persistence, fallback, and archive isolation tests succeeded."
+echo "PASS: visible width fallback, restart persistence, and archive isolation hold"
