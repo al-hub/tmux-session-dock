@@ -103,6 +103,26 @@ if [ "$1" = "--preview" ]; then
             echo "  • Benefit   : Purkinje green wavelength adaptation"
             echo "  • Best For  : Darkroom & low luminance environments"
             ;;
+        eye-cvd-*)
+            echo "  • Benefit   : Okabe-Ito palette, state shown by luminance not hue"
+            echo "  • Best For  : Protan / deutan / tritan colour vision deficiency"
+            ;;
+        eye-photophobia-*)
+            echo "  • Benefit   : FL-41 rose analogue, no 480-520nm cyan/green"
+            echo "  • Best For  : Migraine, photophobia & daytime light sensitivity"
+            ;;
+        eye-dyslexia-*)
+            echo "  • Benefit   : Rello & Bigham 2017 peach #EDD1B0 reading ground"
+            echo "  • Best For  : Dyslexia & long-form reading in a bright room"
+            ;;
+        eye-myopia-*)
+            echo "  • Benefit   : Negative polarity (Aleman 2018) + 650nm red accents"
+            echo "  • Best For  : Long reading sessions; not a substitute for RLRL therapy"
+            ;;
+        eye-calm-*)
+            echo "  • Benefit   : Low saturation & brightness = lowest arousal (Wilms 2018)"
+            echo "  • Best For  : Stress reduction, deadline days & long pairing sessions"
+            ;;
         disp-oled-*)
             echo "  • Benefit   : 100% True Black (#000000) pixel power shutoff"
             echo "  • Best For  : OLED / QD-OLED monitors & laptop battery saving"

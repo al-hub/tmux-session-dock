@@ -1,6 +1,6 @@
-# 38 Canonical Themes & Visual Catalog
+# 47 Canonical Themes & Visual Catalog
 
-`tmux-session-dock` includes 38 pre-configured, professionally tuned color themes conforming to the Canonical 3-Tier Taxonomy:
+`tmux-session-dock` includes 47 pre-configured, professionally tuned color themes conforming to the Canonical 3-Tier Taxonomy:
 
 $$\mathbf{Pattern:\quad} \texttt{<category>-<family>[-<flavor>][-focus].conf}$$
 
@@ -11,7 +11,7 @@ $$\mathbf{Pattern:\quad} \texttt{<category>-<family>[-<flavor>][-focus].conf}$$
 | **`[BASE]`** | `base-classic` | Baseline default |
 | **`[OPEN]`** | Dracula, Kanagawa, Everforest, Catppuccin Mocha, Nord, OneDark, Gruvbox, TokyoNight, RoséPine, Solarized Dark | 10 Standard + 10 Focus Pairs |
 | **`[CODE]`** | Windows Terminal (Campbell), PowerShell, Cyberpunk Neon, Monokai Pro, GitHub Light | 5 Coding Shell themes |
-| **`[EYE]`** | Astigmatism-Safe, Circadian-Warm (Blue-light filtering), Scotopic-Forest | 3 Standard + 3 Focus Pairs |
+| **`[EYE]`** | Astigmatism-Safe, Circadian-Warm (blue-light filtering), Scotopic-Forest, CVD-Safe (Okabe-Ito), Photophobia-Rose (FL-41), Myopia-Guard (negative polarity), Calm-Sage (low arousal), Dyslexia-Peach (light, Rello & Bigham 2017) | 7 Standard + 7 Focus Pairs + 1 Light |
 | **`[DISP]`** | OLED PureBlack (100% True Black), Paper Sepia (Kindle cream) | 2 Display-specific themes |
 | **`[OS]`** | Ubuntu Aubergine, Apple Terminal Pro | 2 Platform signatures |
 | **`[RETRO]`** | CRT Phosphor Green, CRT Amber (0% blue light) | 2 Retro terminal themes |

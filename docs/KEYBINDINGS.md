@@ -8,7 +8,7 @@ Uses standard English keys without input-method-specific aliases.
 | :--- | :--- |
 | **`Prefix + s`** | Toggle session dock sidebar open / close |
 | **`Prefix + S`** | ⚙️ Open subpane stack & position configurator popup |
-| **`Prefix + T`** | Open 38-theme interactive picker with live ANSI preview |
+| **`Prefix + T`** | Open 47-theme interactive picker with live ANSI preview |
 | **`Prefix + /`** | Open searchable command palette |
 | **`Prefix + h`** / **`?`** | Open interactive help viewer popup |
 | **`Prefix + \|`** / **`%`** | Work-pane safe horizontal split (preserves dock geometry) |
