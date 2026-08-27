@@ -61,7 +61,15 @@ curl -fsSL https://raw.githubusercontent.com/al-hub/tmux-session-dock/refs/heads
 
 # 완전 삭제 (Purge)
 curl -fsSL https://raw.githubusercontent.com/al-hub/tmux-session-dock/refs/heads/main/setup.sh | bash -s -- purge
+
+# 특정 릴리스로 고정 또는 다운그레이드 (태그·브랜치·커밋)
+curl -fsSL https://raw.githubusercontent.com/al-hub/tmux-session-dock/refs/heads/main/setup.sh | bash -s -- install --ref v0.3.19
+
+# 최신 main 으로 복귀
+curl -fsSL https://raw.githubusercontent.com/al-hub/tmux-session-dock/refs/heads/main/setup.sh | bash -s -- update
 ```
+
+`--ref`(또는 `TMUX_DOCK_REF=...`)는 `~/.local/share/tmux-session-dock` 관리 클론에 대한 `install`·`update` 에 적용됩니다. 지정하지 않으면 두 명령 모두 최신 `main` 을 따릅니다. 실행 중인 사이드바는 구버전 코드를 유지하므로 `tmux kill-server` 후 재접속하세요. `./setup.sh status` 가 심링크가 가리키는 체크아웃 ref 를 보여줍니다.
 
 ### 3. 로컬 Git Clone 및 `setup.sh` 관리
 

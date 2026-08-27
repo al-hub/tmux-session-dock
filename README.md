@@ -69,7 +69,15 @@ curl -fsSL https://raw.githubusercontent.com/al-hub/tmux-session-dock/refs/heads
 
 # Clean Purge
 curl -fsSL https://raw.githubusercontent.com/al-hub/tmux-session-dock/refs/heads/main/setup.sh | bash -s -- purge
+
+# Pin or downgrade to a specific release (tag, branch or commit)
+curl -fsSL https://raw.githubusercontent.com/al-hub/tmux-session-dock/refs/heads/main/setup.sh | bash -s -- install --ref v0.3.19
+
+# Back to latest main
+curl -fsSL https://raw.githubusercontent.com/al-hub/tmux-session-dock/refs/heads/main/setup.sh | bash -s -- update
 ```
+
+`--ref` (or `TMUX_DOCK_REF=...`) works for `install` and `update` on the managed clone in `~/.local/share/tmux-session-dock`. Without it, both commands track the latest `main`. Restart the tmux server (`tmux kill-server`) so running sidebars pick up the new version; `./setup.sh status` shows which ref the installed symlinks point at.
 
 ### 3. Local Git Clone & Universal Setup Controller
 

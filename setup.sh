@@ -8,6 +8,8 @@ set -euo pipefail
 VERSION="v0.3.20"
 REPO_URL="https://github.com/al-hub/tmux-session-dock.git"
 INSTALL_DIR="${TMUX_DOCK_INSTALL_DIR:-$HOME/.local/share/tmux-session-dock}"
+# Git ref (tag, branch or commit) to install from; empty means latest main.
+REF="${TMUX_DOCK_REF:-}"
 BIN_DIR="${TMUX_DOCK_BIN_DIR:-$HOME/.local/bin}"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/tmux-session-dock"
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/tmux-session-dock"
@@ -43,17 +45,53 @@ resolve_repo_root() {
 
 SCRIPT_DIR="$(resolve_repo_root)"
 
+# Put the managed clone on the requested ref: latest main by default, or the
+# tag/branch/commit named by --ref / TMUX_DOCK_REF (downgrade or pin).
+_repo_synced=0
+sync_repo_ref() {
+    [ "$_repo_synced" = 1 ] && return 0
+    _repo_synced=1
+    if [ -z "$REF" ]; then
+        log_info "Syncing latest changes in $INSTALL_DIR..."
+        (cd "$INSTALL_DIR" && git fetch origin main 2>/dev/null &&
+            { git checkout -q -f main 2>/dev/null || git checkout -q -f -b main 2>/dev/null || true; } &&
+            git reset --hard origin/main 2>/dev/null && git clean -fd 2>/dev/null || true)
+        return 0
+    fi
+    log_info "Checking out ref '$REF' in $INSTALL_DIR..."
+    local rc=0
+    (
+        cd "$INSTALL_DIR" || exit 1
+        git fetch --tags origin >/dev/null 2>&1 || true
+        if git rev-parse --verify --quiet "refs/tags/$REF" >/dev/null; then
+            git checkout -q -f --detach "refs/tags/$REF"
+        elif git rev-parse --verify --quiet "origin/$REF" >/dev/null; then
+            git checkout -q -f --detach "origin/$REF"
+        elif git rev-parse --verify --quiet "$REF^{commit}" >/dev/null; then
+            git checkout -q -f --detach "$REF"
+        else
+            exit 2
+        fi
+        git clean -fd >/dev/null 2>&1 || true
+    ) || rc=$?
+    case "$rc" in
+        0) log_ok "Source pinned to $(cd "$INSTALL_DIR" && git describe --tags --always 2>/dev/null)" ;;
+        2) log_error "Unknown ref '$REF'. Tags: $(cd "$INSTALL_DIR" && git tag --sort=-v:refname | head -n 5 | tr '\n' ' ')"; exit 1 ;;
+        *) log_error "Failed to check out '$REF' in $INSTALL_DIR"; exit 1 ;;
+    esac
+}
+
 ensure_repo_present() {
     if [ "$SCRIPT_DIR" = "$INSTALL_DIR" ] || [ ! -f "$SCRIPT_DIR/scripts/build-dist.sh" ]; then
         mkdir -p "$(dirname "$INSTALL_DIR")"
         if [ ! -d "$INSTALL_DIR/.git" ]; then
             log_info "Downloading tmux-session-dock into $INSTALL_DIR..."
             git clone "$REPO_URL" "$INSTALL_DIR"
-        else
-            log_info "Syncing latest changes in $INSTALL_DIR..."
-            (cd "$INSTALL_DIR" && git fetch origin main 2>/dev/null && git reset --hard origin/main 2>/dev/null && git clean -fd 2>/dev/null || true)
         fi
+        sync_repo_ref
         SCRIPT_DIR="$INSTALL_DIR"
+    elif [ -n "$REF" ]; then
+        log_warn "--ref '$REF' ignored: running from a local clone ($SCRIPT_DIR). Check out the ref there yourself."
     fi
 }
 
@@ -73,6 +111,8 @@ usage() {
     echo ""
     echo -e "${BOLD}Options:${NC}"
     echo -e "  --bin-dir DIR     Custom target directory for binary symlinks (default: ~/.local/bin)"
+    echo -e "  --ref REF         Install/update from a git tag, branch or commit instead of latest main"
+    echo -e "                    (curl mode and ~/.local/share clone only; env: TMUX_DOCK_REF)"
     echo -e "  --no-tmux-conf    Skip modifying ~/.tmux.conf"
     echo -e "  -h, --help        Show this help message"
     exit 0
@@ -111,7 +151,16 @@ do_status() {
     echo -e "${CYAN}${BOLD}======================================================================${NC}"
     echo -e "  ${BOLD}tmux-session-dock - Status & Diagnostics (${VERSION})${NC}"
     echo -e "${CYAN}${BOLD}======================================================================${NC}"
-    
+
+    # Which checkout the symlinks point at, and what ref it is on
+    local source_dir source_ref
+    source_dir="$(dirname "$(dirname "$(readlink -f "$BIN_DIR/tmux-session-dock" 2>/dev/null || echo "$SCRIPT_DIR/dist/x")")")"
+    if [ -d "$source_dir/.git" ]; then
+        source_ref="$(cd "$source_dir" && git describe --tags --always 2>/dev/null || echo "?")"
+        echo -e "  Source:       ${GREEN}${source_ref}${NC} ($source_dir)"
+    else
+        echo -e "  Source:       $source_dir"
+    fi
     # Check binary in BIN_DIR
     if [ -x "$BIN_DIR/tmux-session-dock" ]; then
         echo -e "  Binary:       ${GREEN}INSTALLED${NC} ($BIN_DIR/tmux-session-dock)"
@@ -323,6 +372,17 @@ fi
 
 CMD="${1:-install}"
 shift || true
+
+# --ref applies to every command; strip it before the per-command parsers.
+ARGS=()
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --ref)   REF="${2:-}"; shift 2 || shift; continue ;;
+        --ref=*) REF="${1#--ref=}"; shift; continue ;;
+    esac
+    ARGS+=("$1"); shift
+done
+set -- "${ARGS[@]}"
 
 case "$CMD" in
     install)    do_install "$@" ;;
