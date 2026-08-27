@@ -510,11 +510,17 @@ subpane_hub_atomic_migrate() {
     if [ "$total_slots" -le 2 ]; then
         for ((idx=0; idx<total_slots; idx++)); do
             local resize_l="${resolved_heights[$idx]}"
-            # On tmux 3.2, a single-slot top stack has one additional outer
-            # border in the first resize target. Two-slot stacks account for
-            # it through the join and use the user height verbatim.
+            # A single-slot top stack has one additional outer border in the
+            # first resize target on tmux < 3.3; tmux 3.4 applies resize-pane
+            # -y verbatim (measured: tests/tools/tmux-geometry-probe.sh). Let
+            # the domain rule pick the correction per version. Two-slot stacks
+            # account for it through the join and use the user height verbatim.
             if [ "$sub_pos" = "top" ] && [ "$idx" -eq 0 ] && [ "$total_slots" -eq 1 ]; then
-                resize_l=$((resize_l + 1))
+                if declare -f sidebar_subpane_calc_resize_length >/dev/null 2>&1; then
+                    resize_l="$(sidebar_subpane_calc_resize_length top "$resize_l")"
+                else
+                    resize_l=$((resize_l + 1))
+                fi
             fi
             sidebar_tmux_cmd resize-pane -t "${resolved_panes[$idx]}" -y "$resize_l" 2>/dev/null || return 1
         done
