@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export TERM=xterm-256color  # attached clients must not inherit a dumb TERM (CI runners)
+TEST_TMUX_CONF="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../fixtures" && pwd -P)/test-tmux.conf"  # never inherit ~/.tmux.conf
 
 TEST_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$TEST_DIR/../.." && pwd)"
@@ -18,7 +20,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-tmuxc() { tmux -L "$SOCKET" "$@"; }
+tmuxc() { tmux -L "$SOCKET" -f "$TEST_TMUX_CONF" "$@"; }
 sidebar_for() {
     tmuxc list-panes -t "=$1:" -F '#{pane_id}|#{pane_title}' |
         awk -F'|' '$2 == "dotfiles-session-sidebar" { print $1; exit }'

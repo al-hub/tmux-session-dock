@@ -3,6 +3,7 @@
 # Validates Alt+s (0ms Quick Focus Jump) behavior between Work Pane, Subpane, and Sidebar.
 
 set -euo pipefail
+TEST_TMUX_CONF="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../fixtures" && pwd -P)/test-tmux.conf"  # never inherit ~/.tmux.conf
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BIN="$SCRIPT_DIR/dist/tmux-session-dock"
@@ -14,7 +15,7 @@ cleanup() {
 trap cleanup EXIT
 
 echo "=== [1/4] Starting test session with sidebar ==="
-tmux -L "$SOCKET" new-session -d -s test-sess -c "$PWD" "sleep 300"
+tmux -L "$SOCKET" -f "$TEST_TMUX_CONF" new-session -d -s test-sess -c "$PWD" "sleep 300"
 win="$(tmux -L "$SOCKET" display-message -p '#{window_id}')"
 tmux -L "$SOCKET" set-option -gq @dotfiles_sidebar_enabled 1
 tmux -L "$SOCKET" set-option -w -t "$win" @dotfiles_sidebar_managed 1

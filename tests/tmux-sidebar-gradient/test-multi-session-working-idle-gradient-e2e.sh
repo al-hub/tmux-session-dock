@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export TERM=xterm-256color  # attached clients must not inherit a dumb TERM (CI runners)
+TEST_TMUX_CONF="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../fixtures" && pwd -P)/test-tmux.conf"  # never inherit ~/.tmux.conf
 
 TEST_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$TEST_DIR/../.." && pwd)"
@@ -15,7 +17,7 @@ cp "$(command -v bash)" "$TMP_DIR/codex"
 
 cleanup() { kill "${CLIENT_PID:-}" >/dev/null 2>&1 || true; tmux -L "$SOCKET" kill-server >/dev/null 2>&1 || true; rm -rf "$TMP_DIR"; }
 trap cleanup EXIT INT TERM
-tmuxc() { tmux -L "$SOCKET" "$@"; }
+tmuxc() { tmux -L "$SOCKET" -f "$TEST_TMUX_CONF" "$@"; }
 sidebar_for() { tmuxc list-panes -t "=$1:" -F '#{pane_id}|#{pane_title}' | awk -F'|' '$2 == "dotfiles-session-sidebar" { print $1; exit }'; }
 strip_ansi() { sed -E $'s/\x1B\\[[0-9;?]*[ -\\/]*[@-~]//g'; }
 fail_test() { printf 'FAIL: %s\n' "$1" >&2; [ -f "$DEBUG_FILE" ] && tail -n 60 "$DEBUG_FILE" >&2 || true; exit 1; }

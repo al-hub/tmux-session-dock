@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+TEST_TMUX_CONF="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../fixtures" && pwd -P)/test-tmux.conf"  # never inherit ~/.tmux.conf
 SOCKET="test-subpane-ctrl-alt-$$"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
@@ -22,7 +23,7 @@ source "$SCRIPT_DIR/scripts/lib/sidebar_port_tmux.sh"
 source "$SCRIPT_DIR/scripts/lib/sidebar_subpane_hub.sh"
 
 # 1. Setup session and provision launcher pane
-tmux -L "$SOCKET" new-session -d -s work-session -n main -x 120 -y 50 'sleep 60'
+tmux -L "$SOCKET" -f "$TEST_TMUX_CONF" new-session -d -s work-session -n main -x 120 -y 50 'sleep 60'
 win_id="$(tmux -L "$SOCKET" display-message -p -t work-session '#{window_id}')"
 launcher_p="$(tmux -L "$SOCKET" split-window -P -F '#{pane_id}' -d -t "$win_id" -h -f -b -l 30 'sleep 60')"
 tmux -L "$SOCKET" select-pane -t "$launcher_p" -T "dotfiles-session-sidebar"

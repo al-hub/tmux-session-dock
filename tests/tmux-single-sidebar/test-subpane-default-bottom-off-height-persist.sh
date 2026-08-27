@@ -6,13 +6,14 @@
 # 3. Height-only persistence: Subpane height is preserved across cold server restarts and used on restore
 
 set -euo pipefail
+TEST_TMUX_CONF="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../fixtures" && pwd -P)/test-tmux.conf"  # never inherit ~/.tmux.conf
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TEST_SOCKET="subpane-bottom-off-test-$$"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/dotfiles"
 
 tmuxc() {
-    tmux -L "$TEST_SOCKET" "$@"
+    tmux -L "$TEST_SOCKET" -f "$TEST_TMUX_CONF" "$@"
 }
 
 cleanup() {

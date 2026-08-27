@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+TEST_TMUX_CONF="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../fixtures" && pwd -P)/test-tmux.conf"  # never inherit ~/.tmux.conf
 
 # Test Scenario: Verifies that rapid, repeated 'P' key swaps (e.g. 20 consecutive swaps)
 # preserve the subpane height with 100% fidelity without any decay or drift.
@@ -21,7 +22,7 @@ export TMUX_SESSION_SIDEBAR_SUBPANE_POSITION_STATE_FILE="$STATE_DIR/pos"
 export TMUX_SESSION_SIDEBAR_SUBPANE_ENABLED_STATE_FILE="$STATE_DIR/enabled"
 
 # 1. Setup 50-row window
-tmux -L "$SOCKET" new-session -d -s work -n main -x 120 -y 50 "sleep 100"
+tmux -L "$SOCKET" -f "$TEST_TMUX_CONF" new-session -d -s work -n main -x 120 -y 50 "sleep 100"
 win_id="$(tmux -L "$SOCKET" display-message -p -t work "#{window_id}")"
 launcher_p="$(tmux -L "$SOCKET" split-window -P -F "#{pane_id}" -d -t "$win_id" -h -f -b -l 30 "sleep 100")"
 tmux -L "$SOCKET" select-pane -t "$launcher_p" -T "dotfiles-session-sidebar"

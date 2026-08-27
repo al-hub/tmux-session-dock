@@ -7,6 +7,7 @@
 # 3) Ghost pane duplication and launcher collapse
 # ==============================================================================
 set -euo pipefail
+TEST_TMUX_CONF="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../fixtures" && pwd -P)/test-tmux.conf"  # never inherit ~/.tmux.conf
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -103,7 +104,7 @@ if [ "$top_h1" -ne "$CUSTOM_H1" ] || [ "$top_h2" -ne "$CUSTOM_H2" ]; then
 fi
 
 # 1. Create sess2
-tmux -L "$TEST_SOCKET" new-session -d -s sess2 -n main -x 120 -y 50
+tmux -L "$TEST_SOCKET" -f "$TEST_TMUX_CONF" new-session -d -s sess2 -n main -x 120 -y 50
 win2="$(tmux -L "$TEST_SOCKET" display-message -p -t "sess2:main" '#{window_id}')"
 m2="$(tmux -L "$TEST_SOCKET" display-message -p -t "sess2:main" '#{pane_id}')"
 s2_bar="$(tmux -L "$TEST_SOCKET" split-window -h -b -t "$m2" -l 34 -P -F '#{pane_id}')"

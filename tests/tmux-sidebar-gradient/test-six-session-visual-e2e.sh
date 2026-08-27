@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+TEST_TMUX_CONF="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../fixtures" && pwd -P)/test-tmux.conf"  # never inherit ~/.tmux.conf
 
 TEST_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$TEST_DIR/../.." && pwd)"
@@ -22,7 +23,7 @@ trap cleanup EXIT INT TERM
 
 tmuxc()
 {
-    tmux -L "$SOCKET" "$@"
+    tmux -L "$SOCKET" -f "$TEST_TMUX_CONF" "$@"
 }
 
 fail_with_capture()

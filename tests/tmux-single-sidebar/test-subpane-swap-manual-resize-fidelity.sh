@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+TEST_TMUX_CONF="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../fixtures" && pwd -P)/test-tmux.conf"  # never inherit ~/.tmux.conf
 
 SOCKET="test-swap-resize-fidelity-$$"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -23,13 +24,13 @@ source "$SCRIPT_DIR/scripts/lib/sidebar_topology.sh"
 source "$SCRIPT_DIR/scripts/lib/sidebar_switch.sh"
 
 # 1. Setup 2 sessions
-tmux -L "$SOCKET" new-session -d -s sess_1 -n work -x 120 -y 50 "sleep 100"
+tmux -L "$SOCKET" -f "$TEST_TMUX_CONF" new-session -d -s sess_1 -n work -x 120 -y 50 "sleep 100"
 win_1="$(tmux -L "$SOCKET" display-message -p -t sess_1 "#{window_id}")"
 sb_1="$(tmux -L "$SOCKET" split-window -P -F "#{pane_id}" -d -t "$win_1" -h -f -b -l 30 "sleep 100")"
 tmux -L "$SOCKET" select-pane -t "$sb_1" -T "dotfiles-session-sidebar"
 tmux -L "$SOCKET" set-option -p -q -t "$sb_1" @dotfiles_sidebar_pane 1
 
-tmux -L "$SOCKET" new-session -d -s sess_2 -n work -x 120 -y 50 "sleep 100"
+tmux -L "$SOCKET" -f "$TEST_TMUX_CONF" new-session -d -s sess_2 -n work -x 120 -y 50 "sleep 100"
 win_2="$(tmux -L "$SOCKET" display-message -p -t sess_2 "#{window_id}")"
 sb_2="$(tmux -L "$SOCKET" split-window -P -F "#{pane_id}" -d -t "$win_2" -h -f -b -l 30 "sleep 100")"
 tmux -L "$SOCKET" select-pane -t "$sb_2" -T "dotfiles-session-sidebar"

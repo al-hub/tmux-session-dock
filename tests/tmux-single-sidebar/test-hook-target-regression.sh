@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+TEST_TMUX_CONF="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../fixtures" && pwd -P)/test-tmux.conf"  # never inherit ~/.tmux.conf
 
 # Regression test for the user-visible blank hook target:
 #   tmux-session-launcher --ensure-sidebar-window  returned 1
@@ -57,7 +58,7 @@ wait_for_trace "args=--ensure-sidebar-window $window_id"
 tmux -L "$SOCKET" split-window -d -h -t "$window_id" 'sleep 300'
 wait_for_trace "args=--sync-sidebar-layout $window_id"
 
-tmux -L "$SOCKET" new-session -d -s hook-created -c "$REPO_ROOT" 'sleep 300'
+tmux -L "$SOCKET" -f "$TEST_TMUX_CONF" new-session -d -s hook-created -c "$REPO_ROOT" 'sleep 300'
 wait_for_trace 'args=--ensure-sidebar-session hook-created'
 
 perl -pe 's/\e\[[0-9;?]*[ -\/]*[@-~]//g; s/\e\][^\a]*\a//g; s/\r//g' \

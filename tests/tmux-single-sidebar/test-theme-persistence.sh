@@ -3,6 +3,7 @@
 # Validates theme loading and persistence across tmux restarts.
 
 set -euo pipefail
+TEST_TMUX_CONF="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../fixtures" && pwd -P)/test-tmux.conf"  # never inherit ~/.tmux.conf
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SOCKET="test-theme-$$"
@@ -18,7 +19,7 @@ echo "=== [1/3] Verifying saved theme persistence via theme.conf ==="
 mkdir -p "$TMP_XDG/tmux"
 cp "$SCRIPT_DIR/themes/open-tokyonight.conf" "$TMP_XDG/tmux/theme.conf"
 
-tmux -L "$SOCKET" new-session -d -s test-theme 'sleep 60'
+tmux -L "$SOCKET" -f "$TEST_TMUX_CONF" new-session -d -s test-theme 'sleep 60'
 tmux -L "$SOCKET" run-shell "XDG_CONFIG_HOME='$TMP_XDG' bash '$SCRIPT_DIR/session-dock.tmux'"
 
 # Tokyonight sets status-style bg='#16161e'
@@ -34,7 +35,7 @@ tmux -L "$SOCKET" kill-server >/dev/null 2>&1 || true
 echo "=== [2/3] Verifying fallback to @session-dock-theme option ==="
 rm -f "$TMP_XDG/tmux/theme.conf"
 
-tmux -L "$SOCKET" new-session -d -s test-theme 'sleep 60'
+tmux -L "$SOCKET" -f "$TEST_TMUX_CONF" new-session -d -s test-theme 'sleep 60'
 tmux -L "$SOCKET" set-option -g @session-dock-theme 'cyberpunk-neon'
 tmux -L "$SOCKET" run-shell "XDG_CONFIG_HOME='$TMP_XDG' bash '$SCRIPT_DIR/session-dock.tmux'"
 
@@ -51,7 +52,7 @@ tmux -L "$SOCKET" kill-server >/dev/null 2>&1 || true
 echo "=== [3/3] Verifying theme.conf takes priority over @session-dock-theme ==="
 cp "$SCRIPT_DIR/themes/open-tokyonight.conf" "$TMP_XDG/tmux/theme.conf"
 
-tmux -L "$SOCKET" new-session -d -s test-theme 'sleep 60'
+tmux -L "$SOCKET" -f "$TEST_TMUX_CONF" new-session -d -s test-theme 'sleep 60'
 tmux -L "$SOCKET" set-option -g @session-dock-theme 'cyberpunk-neon'
 tmux -L "$SOCKET" run-shell "XDG_CONFIG_HOME='$TMP_XDG' bash '$SCRIPT_DIR/session-dock.tmux'"
 

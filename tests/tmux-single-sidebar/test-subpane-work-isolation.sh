@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+TEST_TMUX_CONF="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../fixtures" && pwd -P)/test-tmux.conf"  # never inherit ~/.tmux.conf
 
 SOCKET="test-subpane-work-iso-$$"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -17,7 +18,7 @@ export TMUX_SESSION_SIDEBAR_SUBPANE_HEIGHT_STATE_FILE="$STATE_DIR/height"
 export TMUX_SESSION_SIDEBAR_SUBPANE_POSITION_STATE_FILE="$STATE_DIR/pos"
 export TMUX_SESSION_SIDEBAR_SUBPANE_ENABLED_STATE_FILE="$STATE_DIR/enabled"
 
-tmux -L "$SOCKET" new-session -d -s main -n work -x 120 -y 50 "sleep 100"
+tmux -L "$SOCKET" -f "$TEST_TMUX_CONF" new-session -d -s main -n work -x 120 -y 50 "sleep 100"
 sleep 0.5
 win_id="$(tmux -L "$SOCKET" display-message -p -t main "#{window_id}")"
 

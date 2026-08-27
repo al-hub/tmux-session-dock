@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+TEST_TMUX_CONF="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../fixtures" && pwd -P)/test-tmux.conf"  # never inherit ~/.tmux.conf
 
 # Test Scenario: Verifies that when a user manually resizes the subpane via mouse drag (e.g. to 28)
 # and immediately switches session (Enter), the user's latest manual resize is 100% preserved.
@@ -21,10 +22,10 @@ export TMUX_SESSION_SIDEBAR_SUBPANE_POSITION_STATE_FILE="$STATE_DIR/pos"
 export TMUX_SESSION_SIDEBAR_SUBPANE_ENABLED_STATE_FILE="$STATE_DIR/enabled"
 
 # 1. Setup 2 sessions
-tmux -L "$SOCKET" new-session -d -s sess_1 -n work -x 120 -y 50 "sleep 100"
+tmux -L "$SOCKET" -f "$TEST_TMUX_CONF" new-session -d -s sess_1 -n work -x 120 -y 50 "sleep 100"
 win_1="$(tmux -L "$SOCKET" display-message -p -t sess_1 "#{window_id}")"
 
-tmux -L "$SOCKET" new-session -d -s sess_2 -n work -x 120 -y 50 "sleep 100"
+tmux -L "$SOCKET" -f "$TEST_TMUX_CONF" new-session -d -s sess_2 -n work -x 120 -y 50 "sleep 100"
 win_2="$(tmux -L "$SOCKET" display-message -p -t sess_2 "#{window_id}")"
 
 # Step 1: Open sidebar and subpane on sess_1 (default 12)

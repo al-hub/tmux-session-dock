@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+TEST_TMUX_CONF="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../fixtures" && pwd -P)/test-tmux.conf"  # never inherit ~/.tmux.conf
 SOCKET="test-subpane-switch-pos-$$"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
@@ -21,13 +22,13 @@ source "$SCRIPT_DIR/scripts/lib/sidebar_topology.sh"
 source "$SCRIPT_DIR/scripts/lib/sidebar_switch.sh"
 
 # 1. Setup isolated test socket, 2 sessions s1 and s2 (120x50)
-tmux -L "$SOCKET" new-session -d -s s1 -n main -x 120 -y 50 'sleep 60'
+tmux -L "$SOCKET" -f "$TEST_TMUX_CONF" new-session -d -s s1 -n main -x 120 -y 50 'sleep 60'
 win_s1="$(tmux -L "$SOCKET" display-message -p -t s1 '#{window_id}')"
 launcher_s1="$(tmux -L "$SOCKET" split-window -P -F '#{pane_id}' -d -t "$win_s1" -h -f -b -l 30 'sleep 60')"
 tmux -L "$SOCKET" select-pane -t "$launcher_s1" -T "dotfiles-session-sidebar"
 tmux -L "$SOCKET" set-option -g @dotfiles_sidebar_subpane_height 12
 
-tmux -L "$SOCKET" new-session -d -s s2 -n main -x 120 -y 50 'sleep 60'
+tmux -L "$SOCKET" -f "$TEST_TMUX_CONF" new-session -d -s s2 -n main -x 120 -y 50 'sleep 60'
 win_s2="$(tmux -L "$SOCKET" display-message -p -t s2 '#{window_id}')"
 launcher_s2="$(tmux -L "$SOCKET" split-window -P -F '#{pane_id}' -d -t "$win_s2" -h -f -b -l 30 'sleep 60')"
 tmux -L "$SOCKET" select-pane -t "$launcher_s2" -T "dotfiles-session-sidebar"

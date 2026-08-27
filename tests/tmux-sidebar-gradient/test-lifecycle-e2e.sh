@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+TEST_TMUX_CONF="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../fixtures" && pwd -P)/test-tmux.conf"  # never inherit ~/.tmux.conf
 
 TEST_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$TEST_DIR/../.." && pwd)"
@@ -40,7 +41,7 @@ wait_for_sidebar_gradient()
 printf 'active\n' > "$CONTROL_FILE"
 cp "$(command -v bash)" "$TMP_DIR/codex"
 fake_command="\"$TMP_DIR/codex\" \"$FAKE_AI\" \"$CONTROL_FILE\""
-ai_pane="$(tmux -L "$SOCKET" new-session -d -P -F '#{pane_id}' -s gradient -x 100 -y 30 "$fake_command")"
+ai_pane="$(tmux -L "$SOCKET" -f "$TEST_TMUX_CONF" new-session -d -P -F '#{pane_id}' -s gradient -x 100 -y 30 "$fake_command")"
 
 sidebar_command="env TMUX_SESSION_LAUNCHER_DEBUG=1 TMUX_SESSION_LAUNCHER_DEBUG_FILE=\"$DEBUG_FILE\" TMUX_SESSION_SIDEBAR_STATE_REFRESH_SECONDS=1 TMUX_SESSION_SIDEBAR_POLL_TIMEOUT=0.05 \"$LAUNCHER\" --sidebar"
 sidebar_pane="$(tmux -L "$SOCKET" split-window -d -P -F '#{pane_id}' -t "$ai_pane" -h -b -l 35 "$sidebar_command")"

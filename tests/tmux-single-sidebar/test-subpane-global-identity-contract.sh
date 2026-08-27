@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+TEST_TMUX_CONF="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../fixtures" && pwd -P)/test-tmux.conf"  # never inherit ~/.tmux.conf
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -21,7 +22,7 @@ source "$REPO_ROOT/tests/lib/subpane_topology_oracle.sh"
 
 create_presenter_window() {
     local session="$1"
-    tmux -L "$TEST_SOCKET" new-session -d -s "$session" -n main -x 120 -y 50
+    tmux -L "$TEST_SOCKET" -f "$TEST_TMUX_CONF" new-session -d -s "$session" -n main -x 120 -y 50
     local window work presenter
     window="$(tmux -L "$TEST_SOCKET" display-message -p -t "$session:main" '#{window_id}')"
     work="$(tmux -L "$TEST_SOCKET" display-message -p -t "$session:main" '#{pane_id}')"

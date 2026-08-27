@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # Test suite for verifying basic operational fixes (Issues 1-4)
 set -euo pipefail
+TEST_TMUX_CONF="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../fixtures" && pwd -P)/test-tmux.conf"  # never inherit ~/.tmux.conf
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 LAUNCHER="$REPO_ROOT/scripts/tmux-session-launcher"
 SOCKET="dotfiles-basic-defects-$$"
 
-tmuxc() { tmux -L "$SOCKET" "$@"; }
+tmuxc() { tmux -L "$SOCKET" -f "$TEST_TMUX_CONF" "$@"; }
 
 cleanup() {
     tmuxc kill-server >/dev/null 2>&1 || true

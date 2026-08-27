@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+TEST_TMUX_CONF="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../fixtures" && pwd -P)/test-tmux.conf"  # never inherit ~/.tmux.conf
 SOCKET="test-hub-contract-$$"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
@@ -20,7 +21,7 @@ subpane_hub_ensure_session
 subpane_hub_is_alive || { echo "FAIL: hub session not alive after 2nd ensure"; exit 1; }
 
 # 3. Create a window in another session and acquire hub pane
-tmux -L "$SOCKET" new-session -d -s work-session -n main 'sleep 60'
+tmux -L "$SOCKET" -f "$TEST_TMUX_CONF" new-session -d -s work-session -n main 'sleep 60'
 win_id="$(tmux -L "$SOCKET" display-message -p -t work-session '#{window_id}')"
 launcher_p="$(tmux -L "$SOCKET" split-window -P -F '#{pane_id}' -d -t "$win_id" -h -f -b -l 30 'sleep 60')"
 

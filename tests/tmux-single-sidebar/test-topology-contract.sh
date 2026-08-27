@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
+TEST_TMUX_CONF="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../fixtures" && pwd -P)/test-tmux.conf"  # never inherit ~/.tmux.conf
 SOCKET="test-top-contract-$$"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 cleanup() { tmux -L "$SOCKET" kill-server 2>/dev/null || true; }
 trap cleanup EXIT
 
-tmux -L "$SOCKET" new-session -d -s main -n work 'sleep 60'
+tmux -L "$SOCKET" -f "$TEST_TMUX_CONF" new-session -d -s main -n work 'sleep 60'
 win_id="$(tmux -L "$SOCKET" display-message -p -t main '#{window_id}')"
 export TMUX="$SOCKET"
 
