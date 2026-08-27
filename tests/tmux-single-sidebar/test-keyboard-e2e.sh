@@ -9,7 +9,8 @@ export TERM="${TERM:-xterm-256color}"
 
 TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$TEST_DIR/../.." && pwd)"
-LAUNCHER="$REPO_ROOT/scripts/tmux-session-launcher"
+LAUNCHER="${TMUX_KEYBOARD_E2E_LAUNCHER:-$REPO_ROOT/scripts/tmux-session-launcher}"
+HOOK_WRAPPER="${TMUX_KEYBOARD_E2E_HOOK_WRAPPER:-}"
 SOCKET="${TMUX_KEYBOARD_E2E_SOCKET:-dotfiles-single-sidebar-keyboard-$$}"
 RUN_DIR="${TMUX_KEYBOARD_E2E_RUN_DIR:-${TMPDIR:-/tmp}/dotfiles-single-sidebar-keyboard-$$}"
 HOME_DIR="$RUN_DIR/home"
@@ -805,7 +806,7 @@ launcher_ensure_error_scan()
 {
     local pane_id pane_title pane_session pane_window capture found=0
     : > "$RUN_DIR/ensure-sidebar-window-errors.log"
-    if grep -aE 'ensure-sidebar-window.*returned 1|--ensure-sidebar-window.*returned 1' \
+    if grep -aE 'ensure-sidebar-(window|session).*returned 1|--ensure-sidebar-(window|session).*returned 1' \
         "$CLIENT_LOG" "$RUN_DIR/trace.log" "$RUN_DIR/debug.log" 2>/dev/null >> "$RUN_DIR/ensure-sidebar-window-errors.log"; then
         found=1
     fi
@@ -813,7 +814,7 @@ launcher_ensure_error_scan()
         [ -n "$pane_id" ] || continue
         [ "$pane_title" = dotfiles-session-sidebar ] && continue
         capture="$(tmuxc capture-pane -p -t "$pane_id" 2>/dev/null || true)"
-        if printf '%s\n' "$capture" | grep -nE 'ensure-sidebar-window.*returned 1|--ensure-sidebar-window.*returned 1' >> "$RUN_DIR/ensure-sidebar-window-errors.log"; then
+        if printf '%s\n' "$capture" | grep -nE 'ensure-sidebar-(window|session).*returned 1|--ensure-sidebar-(window|session).*returned 1' >> "$RUN_DIR/ensure-sidebar-window-errors.log"; then
             printf 'pane=%s title=%s session=%s window=%s\n' \
                 "$pane_id" "$pane_title" "$pane_session" "$pane_window" >> "$RUN_DIR/ensure-sidebar-window-errors.log"
             found=1
@@ -834,7 +835,7 @@ client_pty_error_scan()
         skip="$offset" count="$bytes" status=none 2>/dev/null || return 1
     perl -pe 's/\e\[[0-9;?]*[ -\/]*[@-~]//g; s/\e\][^\a]*\a//g; s/\r//g' \
         "$raw_file" > "$normalized"
-    grep -Ein -- 'ensure-sidebar-window.*returned 1|session[[:space:]]+switch.*failed|longjmp[[:space:]]+causes[[:space:]]+uninitialized[[:space:]]+stack[[:space:]]+frame' \
+    grep -Ein -- 'ensure-sidebar-(window|session).*returned 1|session[[:space:]]+switch.*failed|longjmp[[:space:]]+causes[[:space:]]+uninitialized[[:space:]]+stack[[:space:]]+frame' \
         "$normalized" > "$RUN_DIR/client-pty-errors.log" 2>/dev/null
 }
 
@@ -846,6 +847,41 @@ session_row_visible()
     else
         printf 'false\n'
     fi
+}
+
+session_content_settled()
+{
+    local name="$1" pane capture
+    pane="$(sidebar_pane_id 2>/dev/null || true)"
+    [ -n "$pane" ] || return 1
+    capture="$(tmuxc capture-pane -p -t "$pane" 2>/dev/null || true)"
+    printf '%s\n' "$capture" | grep -Fq sessions || return 1
+    printf '%s\n' "$capture" | grep -Fq "$name" || return 1
+    ! printf '%s\n' "$capture" | grep -Fq 'switching to'
+}
+
+hook_exit_recorded()
+{
+    local name="$1"
+    if awk -F '\t' -v name="$name" '$2 == name { found=1 } END { exit !found }' \
+        "$RUN_DIR/hook-exits.tsv" 2>/dev/null; then
+        printf 'true\n'
+    else
+        printf 'false\n'
+    fi
+}
+
+hook_exit_status()
+{
+    local name="$1"
+    awk -F '\t' -v name="$name" '$2 == name { print $3; exit }' \
+        "$RUN_DIR/hook-exits.tsv" 2>/dev/null
+}
+
+record_runtime_observation()
+{
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" "$5" "$6" \
+        >> "$RUN_DIR/runtime-observations.tsv"
 }
 
 session_count_above()
@@ -862,6 +898,7 @@ run_session_create_latency_reproduction()
 {
     local iteration name before_sessions c_start prompt_ms enter_ms row_ms ready_ms total_ms
     local now prompt_start enter_start row_at ready_at client_output_before
+    local hook_failure=false
     local -a samples=(create-latency-1 create-latency-2 create-latency-3)
 
     # This is a measurement/reproduction scenario; retain the TSV and raw
@@ -871,6 +908,8 @@ run_session_create_latency_reproduction()
     wait_for_sidebar_input_ready
     printf '%b\n' 'iteration\tname\tc_to_prompt_ms\tenter_to_session_ms\tenter_to_row_ms\tenter_to_ready_ms\tc_to_row_ms' \
         > "$RUN_DIR/session-create-latency.tsv"
+    printf '%b\n' 'iteration\tname\thook_rc\tclient_switch\ttransition\tpresenter_content' \
+        > "$RUN_DIR/runtime-observations.tsv"
     client_output_before="$(wc -c < "$CLIENT_LOG" 2>/dev/null || printf 0)"
 
     for iteration in 1 2 3; do
@@ -899,7 +938,46 @@ run_session_create_latency_reproduction()
             "$iteration" "$name" "$prompt_ms" "$enter_ms" "$row_ms" "$ready_ms" "$total_ms" \
             >> "$RUN_DIR/session-create-latency.tsv"
         test_log "session-create.measure iteration=$iteration name=$name c_to_prompt_ms=$prompt_ms enter_to_session_ms=$enter_ms enter_to_row_ms=$row_ms enter_to_ready_ms=$ready_ms c_to_row_ms=$total_ms"
+        hook_rc=not-observed
+        if [ -n "$HOOK_WRAPPER" ]; then
+            if wait_until "hook exit for $name" true hook_exit_recorded "$name"; then
+                hook_rc="$(hook_exit_status "$name")"
+            fi
+        fi
+        focus_sidebar_via_prefix
+        send_keys $'\r'
+        client_switch=fail
+        transition=not-observed
+        presenter_content=fail
+        if wait_until "client switched to $name" "$name" client_session; then
+            client_switch=pass
+            if wait_for_transition_idle; then
+                transition=pass
+            fi
+            if wait_until "settled Presenter for $name" true session_content_settled "$name"; then
+                sleep 0.1
+                if session_content_settled "$name"; then
+                    presenter_content=pass
+                fi
+            fi
+        fi
+        record_runtime_observation "$iteration" "$name" "$hook_rc" "$client_switch" "$transition" "$presenter_content"
+        test_log "session-switch.observation iteration=$iteration name=$name hook_rc=$hook_rc client_switch=$client_switch transition=$transition presenter_content=$presenter_content"
     done
+
+    if awk -F '\t' 'NR > 1 && $3 != "0" { found=1 } END { exit !found }' "$RUN_DIR/runtime-observations.tsv"; then
+        printf 'PRODUCT_FAIL_HOOK_RC: one or more session hooks returned non-zero\n' >&2
+        hook_failure=true
+        KEEP_RUN_DIR=true
+    fi
+    if awk -F '\t' 'NR > 1 && ($4 != "pass" || $5 != "pass" || $6 != "pass") { found=1 } END { exit !found }' "$RUN_DIR/runtime-observations.tsv"; then
+        printf 'PRODUCT_FAIL_RUNTIME_RENDER: one or more create-and-switch observations failed\n' >&2
+        KEEP_RUN_DIR=true
+        return 1
+    fi
+    if [ "$hook_failure" = true ]; then
+        return 1
+    fi
 
     sleep 0.2
     if client_pty_error_scan "$CLIENT_LOG" "$client_output_before"; then
@@ -909,7 +987,7 @@ run_session_create_latency_reproduction()
         return 1
     fi
     if ! launcher_ensure_error_scan; then
-        printf 'FAIL: --ensure-sidebar-window returned 1 was observed outside sidebar\n' >&2
+        printf 'FAIL: ensure-sidebar-window/session returned 1 was observed outside sidebar\n' >&2
         cat "$RUN_DIR/ensure-sidebar-window-errors.log" >&2
         KEEP_RUN_DIR=true
         return 1
@@ -933,7 +1011,7 @@ run_session_create_latency_reproduction()
         "$RUN_DIR/session-create-latency.tsv"
     printf 'artifacts=%s\n' "$RUN_DIR"
     printf 'PASS: c/New/Enter session creation timing captured for 3 attached-PTY iterations\n'
-    printf 'PASS: no --ensure-sidebar-window returned 1 observed outside sidebar\n'
+    printf 'PASS: no ensure-sidebar-window/session returned 1 observed outside sidebar\n'
 }
 
 count_sidebars()
@@ -2232,6 +2310,14 @@ send_keys()
         esac
     else
         local fd="${ATTACHED[1]:-1}"
+        if ! printf '%b' "$payload" >&"$fd"; then
+            test_log "input.write.failed seq=$INPUT_SEQUENCE"
+            return 1
+        fi
+        test_log "input.transport pty seq=$INPUT_SEQUENCE"
+        return 0
+
+        # Kept below as documentation of the removed pane-injection paths.
         if [ "$payload" = "c" ] || [ "$payload" = "m" ] || [ "$payload" = "M" ]; then
             local c_pane
             c_pane="$(sidebar_pane_id 2>/dev/null || true)"
@@ -2438,6 +2524,13 @@ for attempt in $(seq 1 100); do
     [ -n "$CLIENT_TTY" ] && break
     sleep 0.05
 done
+
+if [ -n "$HOOK_WRAPPER" ]; then
+    tmuxc set-environment -g TMUX_KEYBOARD_E2E_HOOK_LOG "$RUN_DIR/hook-exits.tsv"
+    tmuxc set-environment -g TMUX_KEYBOARD_E2E_HOOK_LAUNCHER "$LAUNCHER"
+    tmuxc set-hook -g after-new-session "run-shell -b '$HOOK_WRAPPER #{session_name}'"
+    test_log "hook.wrapper-installed path=$HOOK_WRAPPER launcher=$LAUNCHER"
+fi
 
 # A control-mode client observes tmux notifications without being treated as
 # the user's input client.  It is output-only, so a process-substitution pipe

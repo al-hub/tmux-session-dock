@@ -2761,6 +2761,7 @@ SIDEBAR_TRANSITION_PHASE_OPTION="@dotfiles_sidebar_transition_phase"
 SIDEBAR_TRANSITION_GENERATION_OPTION="@dotfiles_sidebar_transition_generation"
 SIDEBAR_TRANSITION_DEFERRED_OPTION="@dotfiles_sidebar_transition_deferred"
 SIDEBAR_TRANSITION_RENDER_PENDING_OPTION="@dotfiles_sidebar_transition_render_pending"
+SIDEBAR_HANDOVER_RENDERED_OPTION="@dotfiles_sidebar_handover_rendered"
 SIDEBAR_FAST_TRANSITION_OPTION="@dotfiles_sidebar_fast_transition"
 SIDEBAR_SELECTION_SYNC_OPTION="@dotfiles_sidebar_selection_sync"
 SIDEBAR_SELECTION_SYNC_ACK_OPTION="@dotfiles_sidebar_selection_sync_ack"
@@ -5211,34 +5212,36 @@ sidebar_selection_sync_ack_ready()
 
 sidebar_content_ready()
 {
-    local window_id="$1" session_name_value="$2" pane_id content ack
-    ack="$(sidebar_tmux_cmd show-option -wqv -t "$window_id" "$SIDEBAR_SELECTION_SYNC_ACK_OPTION" 2>/dev/null || true)"
-    if [ "$ack" = "$session_name_value" ]; then
-        return 0
-    fi
+    local window_id="$1" session_name_value="$2" pane_id content
     pane_id="$(sidebar_window_pane "$window_id" || true)"
     [ -n "$pane_id" ] || return 1
-    content="$(tmux capture-pane -p -J -t "$pane_id" 2>/dev/null || true)"
-    printf '%s\n' "$content" | grep -Fxq 'sessions' || return 1
+    content="$(tmux capture-pane -p -t "$pane_id" 2>/dev/null || true)"
+    content="$(printf '%s\n' "$content" | sed $'s/\033\[[0-9;]*m//g')"
+    printf '%s\n' "$content" | grep -Eq '^[[:space:]]*sessions[[:space:]]*$' || return 1
     printf '%s\n' "$content" | grep -Fq -- "$session_name_value" || return 1
     printf '%s\n' "$content" |
-        sed $'s/\033\[[0-9;]*m//g' |
         grep -Eq "(^[[:space:]]*>[*]?[[:space:]]+$session_name_value([[:space:]]|$)|^[[:space:]]*\*?[[:space:]]+$session_name_value([[:space:]]|$))"
+}
+
+sidebar_handover_rendered_ready()
+{
+    local window_id="$1" session_name_value="$2"
+    [ "$(tmux show-option -wqv -t "$window_id" "$SIDEBAR_HANDOVER_RENDERED_OPTION" 2>/dev/null || true)" = "$session_name_value" ]
 }
 
 wait_for_sidebar_content_ready()
 {
     local window_id="$1" session_name_value="$2" attempt
     if sidebar_window_ready "$window_id" &&
-        (sidebar_selection_sync_ack_ready "$window_id" "$session_name_value" ||
-         sidebar_content_ready "$window_id" "$session_name_value"); then
+        sidebar_handover_rendered_ready "$window_id" "$session_name_value" &&
+        sidebar_content_ready "$window_id" "$session_name_value"; then
         trace_event "sidebar.content-ready window=$window_id session=$session_name_value attempts=0 result=ready"
         return 0
     fi
     for attempt in $(seq 1 250); do
         if sidebar_window_ready "$window_id" &&
-            (sidebar_selection_sync_ack_ready "$window_id" "$session_name_value" ||
-             sidebar_content_ready "$window_id" "$session_name_value"); then
+            sidebar_handover_rendered_ready "$window_id" "$session_name_value" &&
+            sidebar_content_ready "$window_id" "$session_name_value"; then
             trace_event "sidebar.content-ready window=$window_id session=$session_name_value attempts=$attempt result=ready"
             return 0
         fi
@@ -5286,13 +5289,19 @@ signal_managed_sidebar_refresh()
 signal_managed_sidebar_refresh_batch()
 {
     bump_topology_epoch
-    local session_name_value pane_id pane_pid
-    while IFS='|' read -r session_name_value pane_id pane_pid; do
+    local session_name_value window_id pane_id pane_pid
+    while IFS='|' read -r session_name_value window_id pane_id pane_pid; do
         [ -n "$pane_id" ] || continue
+        # A newly split sidebar has a live PID before run_tui installs its
+        # USR2 trap. Match the regular refresh path and defer its signal.
+        if ! sidebar_window_ready "$window_id" "$pane_id"; then
+            trace_event "sidebar.window.refresh.batch-skip session=$session_name_value window=$window_id pane=$pane_id reason=not-ready"
+            continue
+        fi
         [ -n "$pane_pid" ] && kill -USR2 "$pane_pid" 2>/dev/null &&
             trace_event "sidebar.window.refresh.batch-signal session=$session_name_value pane=$pane_id pid=$pane_pid"
-    done < <(sidebar_tmux_cmd list-panes -a -F '#{session_name}|#{pane_id}|#{pane_title}|#{pane_pid}|#{pane_dead}' 2>/dev/null |
-        awk -F '|' -v title="$SIDEBAR_TITLE" '$3 == title && $5 == 0 { print $1 "|" $2 "|" $4 }')
+    done < <(sidebar_tmux_cmd list-panes -a -F '#{session_name}|#{window_id}|#{pane_id}|#{pane_title}|#{pane_pid}|#{pane_dead}' 2>/dev/null |
+        awk -F '|' -v title="$SIDEBAR_TITLE" '$4 == title && $6 == 0 { print $1 "|" $2 "|" $3 "|" $5 }')
 }
 
 wait_for_managed_sidebar_session()
@@ -5614,6 +5623,10 @@ switch_session()
         trace_event "switch.abort reason=sidebar-input-unready session=$session_name window=$target_window pane=${sidebar_pane:-none}"
         return 1
     fi
+    # Selection sync acknowledges marker consumption, not a rendered frame.
+    # Commit here so the target Presenter flushes its queued handover render
+    # while this transition still owns the completion boundary.
+    transition_context_commit "$operation_id"
     if [ -n "$METRICS_FILE" ]; then
         metrics_switch_phase "$operation_id" switch-client "$switch_phase_start_us"
         switch_phase_start_us="$(metrics_now_us)"
@@ -5640,13 +5653,13 @@ switch_session()
         else
             trace_event "switch.target-sidebar.selection-sync-complete session=$session_name pane=$sidebar_pane pid=${sidebar_pid:-none}"
         fi
-        if ! wait_for_sidebar_content_ready "$target_window" "$session_name"; then
-            transition_context_finish failed sidebar-content-unready "$operation_id"
-            sidebar_operation_set idle "$operation_id"
-            message_line "session switch failed: sidebar content is not ready"
-            trace_event "switch.abort reason=sidebar-content-unready session=$session_name window=$target_window pane=${sidebar_pane:-none}"
-            return 1
-        fi
+    fi
+    if ! wait_for_sidebar_content_ready "$target_window" "$session_name"; then
+        transition_context_finish failed sidebar-content-unready "$operation_id"
+        sidebar_operation_set idle "$operation_id"
+        message_line "session switch failed: sidebar content is not ready"
+        trace_event "switch.abort reason=sidebar-content-unready session=$session_name window=$target_window pane=${sidebar_pane:-none}"
+        return 1
     fi
     [ -n "$METRICS_FILE" ] && metrics_write "op=switch phase=dispatch operation_id=$operation_id session=$session_name client_switch_us=$client_switch_us elapsed_us=$(( $(metrics_now_us) - switch_metrics_start_us ))"
     tmux set-option -wq -t "$target_window" "$SIDEBAR_SELECTION_SYNC_OPTION" "" 2>/dev/null || true
@@ -7680,6 +7693,7 @@ sidebar_consume_pending_target_marker()
     tmux set-option -wq -t "$SIDEBAR_WINDOW_ID" "${SIDEBAR_TARGET_MARKER_OPTION:-@dotfiles_sidebar_target_marker}" "" 2>/dev/null || true
     tmux set-option -wq -t "$SIDEBAR_WINDOW_ID" "${SIDEBAR_SELECTION_SYNC_OPTION:-@dotfiles_sidebar_selection_sync}" "" 2>/dev/null || true
     tmux set-option -wq -t "$SIDEBAR_WINDOW_ID" "${SIDEBAR_SELECTION_SYNC_ACK_OPTION:-@dotfiles_sidebar_selection_sync}" "$target_session" 2>/dev/null || true
+    tmux set-option -wq -t "$SIDEBAR_WINDOW_ID" "$SIDEBAR_HANDOVER_RENDERED_OPTION" "" 2>/dev/null || true
     transition_coordinator_queue_handover_render "$sidebar_handover_render_intent" "$target_session" \
         "$old_current" "$old_selected_index" "$old_selected_session"
     sidebar_tmux_cmd set-option -gq "@sidebar_force_refresh_$target_session" 0 2>/dev/null || true
@@ -7708,6 +7722,12 @@ request_full_render()
     trace_event "render.request reason=$reason generation=$((render_generation + 1))"
 }
 
+mark_handover_rendered()
+{
+    [ -n "${SIDEBAR_WINDOW_ID:-}" ] || return 0
+    tmux set-option -wq -t "$SIDEBAR_WINDOW_ID" "$SIDEBAR_HANDOVER_RENDERED_OPTION" "${current_session:-}" 2>/dev/null || true
+}
+
 flush_full_render_request()
 {
     local reason="${render_request_reason:-unspecified}"
@@ -7717,6 +7737,7 @@ flush_full_render_request()
     if [ "$reason" = "enter-session-switch" ] && transition_commit_pending; then
         transition_phase_set RENDER_DELTA "$current_transition_operation_id"
         if render_transition_delta "$current_transition_source" "$current_transition_target"; then
+            mark_handover_rendered
             transition_context_finish success none "$current_transition_operation_id"
             transition_render_coalesced=true
             return 0
@@ -7724,11 +7745,17 @@ flush_full_render_request()
         trace_event "render.delta.fallback reason=geometry-or-selection-not-visible operation_id=$current_transition_operation_id"
         transition_phase_set RENDER_ONCE "$current_transition_operation_id"
         render_full enter-session-switch-fallback
+        mark_handover_rendered
         transition_context_finish success delta-render-fallback "$current_transition_operation_id"
         transition_render_coalesced=true
         return 0
     fi
     render_full "$reason"
+    case "$reason" in
+        marker-handover-reconcile|enter-session-switch-fallback)
+            mark_handover_rendered
+            ;;
+    esac
 }
 
 render_age_cells()
@@ -8915,6 +8942,7 @@ restore_archive()
     window_geometry=""
     current_window_active_pane=""
     created_target=""
+    first_restore_window_target=""
     pane_id=""
     restored_work_pane_ids=""
 
@@ -8983,6 +9011,7 @@ restore_archive()
                     current_window_pane_ids="${pane_id#%}"
                     restored_work_pane_ids+="${restored_work_pane_ids:+ }$pane_id"
                     restore_window_targets["$window_index"]="$created_target"
+                    first_restore_window_target="$created_target"
                     [ "$window_active" = "1" ] && active_window_target="$created_target"
                     created=true
                     first_window=false
@@ -8997,6 +9026,7 @@ restore_archive()
                     current_window_pane_ids="${pane_id#%}"
                     restored_work_pane_ids+="${restored_work_pane_ids:+ }$pane_id"
                     restore_window_targets["$window_index"]="$created_target"
+                    [ -n "$first_restore_window_target" ] || first_restore_window_target="$created_target"
                     [ "$window_active" = "1" ] && active_window_target="$created_target"
                     first_pane_in_window=false
                 else
@@ -9040,6 +9070,14 @@ restore_archive()
         esac
     done < "$archive_path"
     trace_event "restore.panes.end session=$restore_name created=$created"
+
+    # A detached archived session has no tmux-active window. Its first
+    # restored window is still the session's user-visible default and must
+    # receive the selective eager-warm contract.
+    if [ -z "$active_window_target" ] && [ -n "$first_restore_window_target" ]; then
+        active_window_target="$first_restore_window_target"
+        trace_event "restore.active-window.fallback session=$restore_name target=$active_window_target"
+    fi
 
     restore_created_identity="$(session_identity_fingerprint "$restore_name")"
     check_restore_precondition "$restore_operation_id" after-create "$restore_owner_identity" "$restore_original_session" "$restore_original_identity" "$restore_name" || {

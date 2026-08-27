@@ -48,21 +48,39 @@ detected_ghost_rows=0
 detected_missing_views=0
 detected_stale_footers=0
 
+selected_session_name() {
+    sidebar_selected_name | tr -d '\r' | awk '{ print $1 }'
+}
+
 for step in $(seq 1 10); do
     cur_sess="$(client_session)"
-    cur_sb="$(tmuxc list-panes -t "=$cur_sess:" -F '#{pane_id}|#{pane_title}' | awk -F '|' '$2 == "dotfiles-session-sidebar" { print $1; exit }')"
     
-    # Send Down then Enter to switch to next session
-    tmuxc send-keys -t "$cur_sb" Down
-    sleep 0.05
-    tmuxc send-keys -t "$cur_sb" Enter
-    sleep 0.45
-    
-    new_sess="$(client_session)"
-    new_sb="$(tmuxc list-panes -t "=$new_sess:" -F '#{pane_id}|#{pane_title}' | awk -F '|' '$2 == "dotfiles-session-sidebar" { print $1; exit }')"
-    
-    # Wait up to 2s for target sidebar to consume marker and render rows
-    wait_until "sidebar on $new_sess rendered" "tmuxc capture-pane -p -t '$new_sb' | grep -Fq '$new_sess'" || true
+    # Capture the requested target before Enter. The old client session remains
+    # observable while the handover is in flight, so it is not a completion signal.
+    focus_sidebar
+    send_keys $'\033[B'
+    wait_until "selection moved from $cur_sess" "[ -n \"\$(selected_session_name)\" ] && [ \"\$(selected_session_name)\" != '$cur_sess' ]"
+    target_sess="$(selected_session_name)"
+    [ -n "$target_sess" ] || {
+        echo "FAIL: no selected target after Down from $cur_sess" >&2
+        exit 1
+    }
+    target_win="$(tmuxc display-message -p -t "=$target_sess:" '#{window_id}')"
+
+    send_keys $'\r'
+
+    # The acknowledgement is a handover event, not durable state: switch_session
+    # clears it in its finalizer. Observe it first, then wait for the client and
+    # target Presenter Window to reach their durable ready state.
+    wait_for_selection_sync_ack "$target_win" "$target_sess"
+    wait_until "switch to $target_sess settled" "[ \"\$(client_session)\" = '$target_sess' ] && [ \"\$(tmuxc show-options -wqv -t '$target_win' @dotfiles_sidebar_ready 2>/dev/null || true)\" = 1 ]"
+
+    new_sess="$target_sess"
+    new_sb="$(tmuxc list-panes -t "$target_win" -F '#{pane_id}|#{pane_title}' | awk -F '|' '$2 == "dotfiles-session-sidebar" { print $1; exit }')"
+    [ -n "$new_sb" ] || {
+        echo "FAIL: target sidebar missing after switch to $new_sess" >&2
+        exit 1
+    }
     
     screen="$(tmuxc capture-pane -p -t "$new_sb")"
     session_rows="$(echo "$screen" | head -n -1)"

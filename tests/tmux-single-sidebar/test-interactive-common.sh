@@ -14,6 +14,8 @@ INPUT_LOG="$RUN_DIR/input.log"
 OUTPUT_LOG="$RUN_DIR/output.log"
 TRACE_FILE="$RUN_DIR/trace.log"
 DEBUG_FILE="$RUN_DIR/debug.log"
+BRIDGE_LOG="$RUN_DIR/pty-bridge.log"
+PTY_BRIDGE_BIN="$RUN_DIR/pty-bridge"
 timestamp_mono_ms() { perl -MTime::HiRes=time -e 'printf "%.3f", time * 1000'; }
 timestamp_wall() { date -u '+%Y-%m-%dT%H:%M:%S%z'; }
 TEST_RUN_ID="${TEST_RUN_ID:-${SCENARIO_NAME}-$(timestamp_mono_ms | tr -d .)-$$}"
@@ -57,11 +59,10 @@ trap cleanup EXIT
 send_keys() {
   test_log "input.begin bytes=$(printf '%b' "$1" | od -An -tx1 | tr -d ' \n') client=$(client_tty 2>/dev/null || true) session=$(client_session 2>/dev/null || true) window=$(client_window_id 2>/dev/null || true) sidebar=$(sidebar_pane_id 2>/dev/null || true)"
   LAST_INPUT_EVENT_SEQUENCE="$TEST_EVENT_SEQUENCE"
-  if [ "$1" = $'\r' ] || [ "$1" = $'\n' ]; then
-    tmuxc send-keys -t "$(sidebar_pane_id 2>/dev/null || true)" Enter 2>/dev/null || true
-  else
-    eval 'exec 9>&"${ATTACHED[1]}"'
-    printf '%b' "$1" >&9
+  eval 'exec 9>&"${ATTACHED[1]}"'
+  if ! printf '%b' "$1" >&9; then
+    test_log "input.write.failed"
+    return 1
   fi
   test_log "input.end"
 }
@@ -85,6 +86,25 @@ wait_until() {
   tmuxc list-panes -a -F '#{session_name}|#{window_id}|#{pane_id}|#{pane_title}|#{pane_pid}|#{pane_active}' > "$RUN_DIR/failure-panes.txt" 2>/dev/null || true
   tmuxc show-options -g 2>/dev/null | grep -E 'dotfiles_sidebar|sidebar_force_refresh' > "$RUN_DIR/failure-options.txt" || true
   tmuxc capture-pane -p -t "$(sidebar_pane_id 2>/dev/null || true)" 2>/dev/null || true
+  return 1
+}
+
+wait_for_selection_sync_ack() {
+  local window_id="$1" session_name="$2" attempt ack
+  test_log "wait.begin description=selection sync acknowledged window=$window_id session=$session_name"
+  # A tmux option lookup dominates the 2ms sleep, so cap the probe at the
+  # same practical timeout as wait_until instead of accumulating minutes.
+  for attempt in $(seq 1 150); do
+    ack="$(tmuxc show-options -wqv -t "$window_id" @dotfiles_sidebar_selection_sync_ack 2>/dev/null || true)"
+    if [ "$ack" = "$session_name" ]; then
+      test_log "wait.end description=selection sync acknowledged window=$window_id session=$session_name attempts=$attempt result=pass"
+      return 0
+    fi
+    sleep 0.002
+  done
+  test_log "wait.end description=selection sync acknowledged window=$window_id session=$session_name attempts=150 result=timeout"
+  test_context_snapshot
+  echo "FAIL: timeout waiting for selection sync acknowledgement for $session_name" >&2
   return 1
 }
 
@@ -211,7 +231,7 @@ sidebar_marker_invariant() {
 
 focus_sidebar() {
   sidebar_active && return 0
-  tmuxc select-pane -t "$(sidebar_pane_id 2>/dev/null || true)" 2>/dev/null || true
+  tmuxc select-pane -t "$(sidebar_pane_id 2>/dev/null || true)" 2>/dev/null || return 1
   wait_until "sidebar focus" "sidebar_active"
 }
 
@@ -247,6 +267,9 @@ create_session() {
 }
 
 setup_interactive_test() {
+  if [ ! -x "$PTY_BRIDGE_BIN" ] || [ "$TEST_DIR/pty-bridge.c" -nt "$PTY_BRIDGE_BIN" ]; then
+    cc -O2 -Wall -Wextra "$TEST_DIR/pty-bridge.c" -lutil -o "$PTY_BRIDGE_BIN"
+  fi
   tmuxc new-session -d -s interactive-anchor -c "$REPO_ROOT" 'sleep 300'
   if [ "${TMUX_INTERACTIVE_CREATE_PEER:-true}" = true ]; then
     tmuxc new-session -d -s interactive-peer -c "$REPO_ROOT" 'sleep 300'
@@ -275,8 +298,11 @@ setup_interactive_test() {
   done
   SIDEBAR_PID="$(tmuxc display-message -p -t "$SIDEBAR_TARGET" '#{pane_pid}')"
   local attach_command
-  attach_command="tmux -L '$SOCKET' -f '$REPO_ROOT/dotfiles/tmux.conf' attach-session -t interactive-anchor"
-  coproc ATTACHED { script -qefc "$attach_command" --log-in "$INPUT_LOG" --log-out "$OUTPUT_LOG" >/dev/null 2>&1; }
+  coproc ATTACHED {
+    "$PTY_BRIDGE_BIN" --log "$BRIDGE_LOG" --input "$INPUT_LOG" --output "$OUTPUT_LOG" -- \
+      tmux -L "$SOCKET" -f "$REPO_ROOT/dotfiles/tmux.conf" attach-session -t interactive-anchor \
+      >/dev/null 2>&1
+  }
   CLIENT_PID="$ATTACHED_PID"
   sleep 0.3
   CLIENT_TTY="$(client_tty)"

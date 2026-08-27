@@ -17,6 +17,7 @@
 
 static pid_t child_pid = -1;
 static int trace_fd = -1;
+static int input_fd = -1;
 static volatile sig_atomic_t pending_signal = 0;
 
 static void trace_line(const char *format, ...)
@@ -128,12 +129,13 @@ static void note_signal(void)
 
 static void usage(const char *program)
 {
-    fprintf(stderr, "usage: %s --log FILE --output FILE -- COMMAND [ARGS...]\n", program);
+    fprintf(stderr, "usage: %s --log FILE --input FILE --output FILE -- COMMAND [ARGS...]\n", program);
 }
 
 int main(int argc, char **argv)
 {
     const char *log_path = NULL;
+    const char *input_path = NULL;
     const char *output_path = NULL;
     int command_index = -1;
     int master_fd = -1;
@@ -145,6 +147,8 @@ int main(int argc, char **argv)
     for (index = 1; index < argc; index++) {
         if (!strcmp(argv[index], "--log") && index + 1 < argc)
             log_path = argv[++index];
+        else if (!strcmp(argv[index], "--input") && index + 1 < argc)
+            input_path = argv[++index];
         else if (!strcmp(argv[index], "--output") && index + 1 < argc)
             output_path = argv[++index];
         else if (!strcmp(argv[index], "--")) {
@@ -155,14 +159,15 @@ int main(int argc, char **argv)
             return 2;
         }
     }
-    if (!log_path || !output_path || command_index < 0 || command_index >= argc) {
+    if (!log_path || !input_path || !output_path || command_index < 0 || command_index >= argc) {
         usage(argv[0]);
         return 2;
     }
 
     trace_fd = open(log_path, O_WRONLY | O_CREAT | O_TRUNC | O_APPEND, 0600);
+    input_fd = open(input_path, O_WRONLY | O_CREAT | O_TRUNC | O_APPEND, 0600);
     output_fd = open(output_path, O_WRONLY | O_CREAT | O_TRUNC | O_APPEND, 0600);
-    if (trace_fd < 0 || output_fd < 0) {
+    if (trace_fd < 0 || input_fd < 0 || output_fd < 0) {
         perror("pty-bridge open");
         return 1;
     }
@@ -219,6 +224,8 @@ int main(int argc, char **argv)
             if (length > 0) {
                 trace_fd_state("stdin.before-read", STDIN_FILENO);
                 trace_bytes("stdin.read", bytes, (size_t)length);
+                if (write_all(input_fd, bytes, (size_t)length) < 0)
+                    trace_line("input.write.error errno=%d", errno);
                 if (write_all(master_fd, bytes, (size_t)length) < 0)
                     trace_line("pty.write.error errno=%d", errno);
                 else
@@ -245,6 +252,7 @@ int main(int argc, char **argv)
     }
 
     close(master_fd);
+    close(input_fd);
     close(output_fd);
     if (child_pid > 0) {
         int status;
