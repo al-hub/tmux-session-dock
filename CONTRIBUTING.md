@@ -13,8 +13,11 @@ Thank you for your interest in contributing!
 4. Run syntax checks & test suites:
    ```bash
    make lint
-   make gate-a
-   make subpane
-   make gradient
+   make test          # tests/ci.list — every entry must pass
    ```
+   Every `tests/**/test-*.sh` must be listed in exactly one of `tests/ci.list`
+   or `tests/manual.list` (`make test-health` checks this). A test asserts one
+   user-visible fact (pane geometry, captured text, session state, a documented
+   `@session-dock-*` option); it never reads internal `@dotfiles_*` runtime
+   options or trace logs. A wait loop that times out is a failure.
 5. Submit a clean Pull Request targeting `main`.

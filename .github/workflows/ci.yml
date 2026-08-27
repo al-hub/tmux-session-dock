@@ -39,11 +39,8 @@ jobs:
       - name: Build Dist Bundle
         run: make build
 
-      - name: Run Gate A Tests
-        run: make gate-a
+      - name: Test list hygiene
+        run: make test-health
 
-      - name: Run Subpane Tests
-        run: make subpane
-
-      - name: Run Gradient Tests
-        run: make gradient
+      - name: Run CI test list
+        run: make test

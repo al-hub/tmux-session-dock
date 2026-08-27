@@ -2,7 +2,7 @@
 # tmux-session-dock - Makefile
 # Automation for Build, Test, Lint, and Lifecycle Management
 # ==============================================================================
-.PHONY: all build test clean install uninstall status lint gate-a gate-b subpane gradient stress ci
+.PHONY: all build test test-manual test-health clean install uninstall status lint ci
 
 all: build
 
@@ -10,22 +10,13 @@ build:
 	@bash scripts/build-dist.sh
 
 test:
-	@bash tests/run-tests.sh --gate-a
+	@bash tests/run-tests.sh --ci
 
-gate-a:
-	@bash tests/run-tests.sh --gate-a
+test-manual:
+	@bash tests/run-tests.sh --manual
 
-gate-b:
-	@bash tests/run-tests.sh --gate-b
-
-subpane:
-	@bash tests/run-tests.sh --subpane
-
-gradient:
-	@bash tests/run-tests.sh --gradient
-
-stress:
-	@bash tests/run-tests.sh --stress
+test-health:
+	@bash tests/run-tests.sh --health
 
 lint:
 	@bash -n setup.sh

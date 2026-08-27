@@ -121,14 +121,14 @@ tmux Server (@session_dock_owner_client)
 ## 🧪 Testing & Quality Assurance
 
 ```bash
-# Run unit & contract tests
-make gate-a
+# Run every test in tests/ci.list (unit, contract, subpane, gradient)
+make test
 
-# Run subpane tests
-make subpane
+# Check that every test file is listed exactly once (ci.list or manual.list)
+make test-health
 
-# Run waveform & animation tests
-make gradient
+# Tests that need your live tmux server (run on purpose only)
+SESSION_DOCK_ALLOW_USER_SERVER=1 make test-manual
 ```
 
 ---

@@ -5,8 +5,11 @@
 ## 실행
 
 ```sh
-bash tests/tmux-sidebar-gradient/run.sh
+make test                                   # tests/ci.list 전체
+bash tests/run-tests.sh --only gradient     # 이 디렉터리만
 ```
+
+live tmux 서버를 읽는 `test-live-*.sh`는 `tests/manual.list`에 있으며 CI에서 실행하지 않는다.
 
 tmux socket 접근이 제한된 sandbox에서는 `test-lifecycle-e2e.sh` 실행에 추가 권한이 필요할 수 있다.
 

@@ -1,0 +1,12 @@
+# tests/manual.list — not run by CI. Run on purpose: make test-manual
+# Reasons a test lives here (state the reason next to the entry):
+#   user-server : touches the user's live tmux server (needs SESSION_DOCK_ALLOW_USER_SERVER=1)
+#   live-ai     : asserts a real running AI CLI session
+#   flaky       : not deterministic yet; moves to ci.list once it is
+tmux-single-sidebar/test-user-tmux-full-monitored.sh          # user-server
+tmux-single-sidebar/test-user-tmux-required-monitored.sh      # user-server, overwrites ~/.local/bin/tmux-session-launcher
+tmux-single-sidebar/test-user-visible-full-monitored.sh       # user-server
+tmux-single-sidebar/test-live-full-monitored.sh               # long monitored run of test-keyboard-e2e (isolated socket)
+tmux-sidebar-gradient/test-live-node-codex-gradient-detect.sh # live-ai, user-server
+tmux-sidebar-gradient/test-live-stuck-gradient-detect.sh      # live-ai, user-server
+tmux-single-sidebar/test-keyboard-e2e.sh                       # flaky: "keyboard restore made no progress" 2/3 local runs (2026-08-27)
