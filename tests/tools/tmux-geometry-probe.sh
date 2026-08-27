@@ -46,3 +46,37 @@ echo "  after swap to top:"; panes "$win_id"
 echo "  subpane capture rows (visible, -e off): $("${T[@]}" capture-pane -p -t "$sub_p" | wc -l)"
 echo "  launcher capture rows: $("${T[@]}" capture-pane -p -t "$launcher_p" | wc -l)"
 echo "  border-status option: $("${T[@]}" show-options -wv -t "$win_id" pane-border-status 2>/dev/null || "${T[@]}" show-options -gv pane-border-status)"
+
+echo "== candidates: raw ops on a top subpane inside a 30-col sidebar column =="
+# Same shape as the product: main pane | sidebar column (30 cols), subpane
+# stacked above the launcher inside the column. Report reported height and
+# the rows a user sees after each op so the version-specific correction can
+# be chosen from data rather than from a guess.
+"${T[@]}" kill-session -t work 2>/dev/null || true
+rows_of() { "${T[@]}" capture-pane -p -t "$1" | wc -l | tr -d ' '; }
+hw() { "${T[@]}" display -p -t "$1" 'h=#{pane_height} top=#{pane_top}'; }
+cand() { # label, then commands
+    local label="$1"; shift
+    "${T[@]}" new-session -d -s c -x 120 -y 50 'sleep 120'
+    local col; col="$("${T[@]}" split-window -P -F '#{pane_id}' -d -t c -h -f -b -l 30 'sleep 120')"
+    "${T[@]}" select-pane -t "$col" -T "dotfiles-session-sidebar"
+    local sub=""
+    for step in "$@"; do
+        case "$step" in
+            split-b:*)  sub="$("${T[@]}" split-window -P -F '#{pane_id}' -d -v -b -t "$col" -l "${step#split-b:}" 'sleep 120')" ;;
+            split:*)    sub="$("${T[@]}" split-window -P -F '#{pane_id}' -d -v -t "$col" -l "${step#split:}" 'sleep 120')" ;;
+            swap)       "${T[@]}" swap-pane -d -s "$col" -t "$sub" ;;
+            resize:*)   "${T[@]}" resize-pane -t "$sub" -y "${step#resize:}" ;;
+            join-b:*)   "${T[@]}" new-window -d -t c -n hub 'sleep 120'; sub="$("${T[@]}" display -p -t c:hub '#{pane_id}')"
+                        "${T[@]}" join-pane -d -b -v -s "$sub" -t "$col" -l "${step#join-b:}" ;;
+        esac
+        sleep 0.15
+        printf '  %-34s %-12s sub %s rows=%s | launcher %s rows=%s\n' "$label" "$step" "$(hw "$sub")" "$(rows_of "$sub")" "$(hw "$col")" "$(rows_of "$col")"
+    done
+    "${T[@]}" kill-session -t c
+}
+cand "A split -b 13, resize 12, 11"   split-b:13 resize:12 resize:11
+cand "B split -b 12, resize 12"       split-b:12 resize:12
+cand "C split 12, swap, resize 12,13" split:12 swap resize:12 resize:13
+cand "D join -b 13, resize 12, 11"    join-b:13 resize:12 resize:11
+cand "E join -b 12, resize 12"        join-b:12 resize:12
