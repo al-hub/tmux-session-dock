@@ -109,11 +109,20 @@ health_check || exit 1
 # environment: same on every machine
 #   - fresh HOME whose ~/.tmux.conf is tests/fixtures/test-tmux.conf, so a
 #     test that starts tmux without -f still gets the fixture, never the
-#     developer's config
+#     developer's config; its ~/.bashrc gives pane shells a plain prompt
+#     that does not rewrite pane titles
 #   - TERM fixed: CI runners hand out TERM=dumb, which tmux clients reject
 # ------------------------------------------------------------------------------
 TEST_HOME="$(mktemp -d "${TMPDIR:-/tmp}/session-dock-test-home.XXXXXX")"
 cp "${TESTS_DIR}/fixtures/test-tmux.conf" "${TEST_HOME}/.tmux.conf"
+# Shells inside test panes read this. Ubuntu's default bashrc sets the
+# terminal title from the prompt when TERM=xterm*, which overwrites the
+# pane titles the product uses to find its panes (seen on GitHub runners).
+cat > "${TEST_HOME}/.bashrc" <<'BASHRC'
+PS1='$ '
+PROMPT_COMMAND=
+BASHRC
+cp "${TEST_HOME}/.bashrc" "${TEST_HOME}/.bash_profile"
 export HOME="$TEST_HOME"
 export TERM=xterm-256color
 trap 'rm -rf "$TEST_HOME"' EXIT
