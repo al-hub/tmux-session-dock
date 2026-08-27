@@ -131,6 +131,10 @@ for rel in "${TEST_LIST[@]}"; do
         else
             echo -e "${RED}[FAIL]${NC} ($((e - s))ms, rc=$rc)"
         fi
+        # Reason first: tests print "FAIL:/ERROR:" then may dump long
+        # diagnostics, so a plain tail would hide the reason.
+        echo -e "${RED}--- ${rel} reason ---${NC}"
+        grep -aE '^(FAIL|ERROR|PRODUCT_[A-Z_]+)[: ]' "$log" | head -n 5 | sed 's/^/    /'
         echo -e "${RED}--- ${rel} (last 15 lines) ---${NC}"
         tail -n 15 "$log" | sed 's/^/    /'
         echo -e "${RED}-----------------------------------${NC}"
