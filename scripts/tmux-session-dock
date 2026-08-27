@@ -4117,9 +4117,15 @@ EOF
         # be suppressed by an older idle observation from another presenter.
         activity_terminal_option="@dotfiles_sidebar_ai_terminal_${name}"
         if [ "$cli_state_value" = idle ] || [ "$cli_state_value" = gone ]; then
-            tmux set-option -gq "$activity_terminal_option" "$cli_state_value:$ai_fingerprint_value" 2>/dev/null || true
-            signal_managed_sidebar_refresh_batch
-            trace_event "ai-observer.terminal-sync session=$name state=$cli_state_value"
+            activity_terminal_value="$cli_state_value:$ai_fingerprint_value"
+            previous_activity_terminal_value="$(tmux show-option -gqv "$activity_terminal_option" 2>/dev/null || true)"
+            if [ "$previous_activity_terminal_value" != "$activity_terminal_value" ]; then
+                tmux set-option -gq "$activity_terminal_option" "$activity_terminal_value" 2>/dev/null || true
+                signal_managed_sidebar_refresh_batch
+                trace_event "ai-observer.terminal-sync session=$name state=$cli_state_value result=published"
+            else
+                trace_event "ai-observer.terminal-sync session=$name state=$cli_state_value result=unchanged"
+            fi
         elif [ "$cli_state_value" = running ] && [ -n "$ai_fingerprint_value" ] &&
             [ "$(tmux show-option -gqv "$activity_terminal_option" 2>/dev/null || true)" = "idle:$ai_fingerprint_value" ]; then
             cli_state_value=idle
