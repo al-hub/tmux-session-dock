@@ -20,12 +20,23 @@ fail()
     TEST_FAILURES=$((TEST_FAILURES + 1))
 }
 
+# Run the test body in a subshell with errexit enabled so that every failing
+# assert_* aborts the test.  A bare `if ("$@")` would silence errexit inside
+# the if-condition and honor only the last assertion of the function.
+# The subshell must run as a plain statement: inside an if-condition (or any
+# `||`/`&&` operand) bash ignores errexit for the whole command, including a
+# `set -e` issued inside it.
 run_test()
 {
     name="$1"
     shift
 
-    if ("$@"); then
+    set +e
+    ( set -e; "$@" )
+    test_body_status=$?
+    set -e
+
+    if [ "$test_body_status" -eq 0 ]; then
         pass "$name"
     else
         fail "$name"
@@ -37,7 +48,12 @@ run_xfail()
     name="$1"
     shift
 
-    if ("$@"); then
+    set +e
+    ( set -e; "$@" )
+    test_body_status=$?
+    set -e
+
+    if [ "$test_body_status" -eq 0 ]; then
         fail "XPASS: $name"
     else
         printf 'XFAIL: %s\n' "$name"
@@ -230,7 +246,6 @@ load_launcher_functions()
     declare -gA cached_pane_activity=()
     declare -gA cached_pane_pid=()
     declare -gA cached_pane_command=()
-    declare -gA session_ai_stable_count=()
     declare -gA previous_session_animate=()
     declare -ga session_animate=()
     declare -ga session_animation_seed=()

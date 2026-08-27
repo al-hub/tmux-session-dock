@@ -17,7 +17,7 @@ test_gradient_changes_by_frame()
     assert_contains "$frame_zero" $'\033[0m' 'gradient ANSI reset'
 }
 
-test_waiting_name_has_no_gradient()
+test_idle_name_has_no_gradient()
 {
     SIDEBAR_ANIMATION_ENABLED=true
     animation_frame=0
@@ -38,6 +38,6 @@ test_animation_can_be_disabled_globally()
 }
 
 run_test 'renderer changes ANSI colors between frames' test_gradient_changes_by_frame
-run_test 'renderer omits gradient for waiting state' test_waiting_name_has_no_gradient
+run_test 'renderer omits gradient for idle state' test_idle_name_has_no_gradient
 run_test 'renderer respects global animation disable' test_animation_can_be_disabled_globally
 finish_tests

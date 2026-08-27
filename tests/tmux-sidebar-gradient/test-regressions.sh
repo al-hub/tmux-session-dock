@@ -31,14 +31,16 @@ desired_one_stable_sample_keeps_running()
     assert_eq true "${session_animate[0]}" 'single stable sample animation'
 }
 
-desired_spinner_in_body_is_normalized()
+desired_spinner_redraw_counts_as_activity()
 {
+    # A spinner that changes in place is AI work in progress, so the production
+    # fingerprint must move even though pane_activity does not.
     TEST_CAPTURE=$'header\nspinner 1\nfooter'
     first="$(production_fingerprint_for_pane '%1')"
     TEST_CAPTURE=$'header\nspinner 2\nfooter'
     second="$(production_fingerprint_for_pane '%1')"
 
-    assert_eq "$first" "$second" 'spinner-normalized fingerprint'
+    assert_ne "$first" "$second" 'spinner redraw fingerprint'
 }
 
 desired_new_pane_generation_starts_active()
@@ -297,9 +299,9 @@ desired_session_sidebar_ensure_uses_cached_snapshot()
     fi
 }
 
-# These regression tests verify the stable transition threshold, spinner normalization, and pane generation resets.
+# These regression tests verify the idle grace period, spinner redraw observation, and pane generation resets.
 run_test 'one unchanged sample should not immediately stop gradient' desired_one_stable_sample_keeps_running
-run_test 'spinner changes in captured body should normalize away' desired_spinner_in_body_is_normalized
+run_test 'spinner redraw in captured body should count as activity' desired_spinner_redraw_counts_as_activity
 run_test 'new pane generation should discard previous fingerprint' desired_new_pane_generation_starts_active
 run_test 'sidebar click/focus change should not trigger gradient' desired_sidebar_click_does_not_trigger_gradient
 run_test 'terminal resize should not trigger gradient' desired_resize_does_not_trigger_gradient

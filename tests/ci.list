@@ -18,7 +18,7 @@ tmux-single-sidebar/test-switch-unit.sh
 tmux-single-sidebar/test-port-tmux-unit.sh
 tmux-single-sidebar/test-ime-unit.sh
 tmux-single-sidebar/test-restore-terminal-unit.sh
-tmux-single-sidebar/test-animation-lut-unit.sh
+tmux-single-sidebar/test-animation-cell-width-unit.sh
 
 # --- contract (real tmux, isolated socket, headless) ---
 tmux-single-sidebar/test-contract.sh

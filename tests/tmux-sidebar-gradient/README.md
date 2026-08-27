@@ -16,12 +16,12 @@ tmux socket 접근이 제한된 sandbox에서는 `test-lifecycle-e2e.sh` 실행�
 ## 구성
 
 - `test-render.sh`: frame별 ANSI gradient와 비활성 렌더 검증
-- `test-fingerprint.sh`: 현재 capture 정규화와 fingerprint 변화 검증
-- `test-state.sh`: 현재 `active -> waiting -> active` 상태 전이 검증
+- `test-fingerprint.sh`: production fingerprint(`act:<pane activity>:cap:<capture cksum>`)의 정규화와 변화 검증
+- `test-state.sh`: 관측 변화·grace 중 `running` 유지, shell-only `gone` 상태 검증
 - `test-session-isolation.sh`: 여러 session의 animation 상태 독립성 검증
 - `test-lifecycle-e2e.sh`: 격리 tmux와 fake `codex`를 사용한 시작, 정지, 재시작, 종료 검증
-- `test-regressions.sh`: 안정 관측, spinner 정규화, pane 세대 초기화, session/client 전환과 resize 회귀 검증
-- `lib.sh`: launcher 함수 로딩, tmux snapshot stub, assertion 공통 helper
+- `test-regressions.sh`: idle grace, spinner 재그리기 관측, pane 세대 초기화, session/client 전환과 resize 회귀 검증
+- `lib.sh`: launcher 함수 로딩, tmux snapshot stub, assertion 공통 helper. `run_test`는 test 본문을 errexit subshell로 실행하므로 모든 `assert_*` 실패가 FAIL이 된다
 
 ## 결과 의미
 

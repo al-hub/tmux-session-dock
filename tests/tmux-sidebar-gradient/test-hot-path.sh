@@ -32,13 +32,21 @@ test_render_is_tmux_free()
 test_collect_uses_one_client_snapshot()
 {
     set_single_ai_session test %1 bash
+    # Geometry sampling falls back to tmux only when tput fails, which depends
+    # on the runner's terminal.  Pin it so the call count below is deterministic.
+    update_pane_geometry()
+    {
+        cached_pane_width="$TEST_PANE_WIDTH"
+        cached_pane_height="$TEST_PANE_HEIGHT"
+    }
     reset_calls
     collect_sessions
 
     assert_eq 1 "$(call_count list-clients)" 'client snapshot calls'
-    # The snapshot still samples current session and geometry; it no longer
-    # performs one display-message activity query per session.
-    assert_eq 4 "$(call_count display-message)" 'activity display calls'
+    # The snapshot samples the current session (#S), resolves the sidebar's own
+    # session (#S -t pane) and probes the AI pane pid once; it no longer performs
+    # one display-message activity query per session.
+    assert_eq 3 "$(call_count display-message)" 'activity display calls'
     assert_eq 0 "$(call_count pgrep)" 'passive pane process probes'
 }
 
