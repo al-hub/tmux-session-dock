@@ -112,19 +112,32 @@ health_check || exit 1
 #     developer's config; its ~/.bashrc gives pane shells a plain prompt
 #     that does not rewrite pane titles
 #   - TERM fixed: CI runners hand out TERM=dumb, which tmux clients reject
+#   - TMUX/TMUX_PANE dropped: when the suite is launched from inside tmux the
+#     test servers inherit the host's TMUX_PANE (usually %0). Inside a test
+#     server %0 is a real pane (often in a session literally named "0"), and
+#     the product binds to TMUX_PANE as its own pane, so discovery and restore
+#     tests fail only on the developer's box, never in CI
 # ------------------------------------------------------------------------------
 TEST_HOME="$(mktemp -d "${TMPDIR:-/tmp}/session-dock-test-home.XXXXXX")"
-cp "${TESTS_DIR}/fixtures/test-tmux.conf" "${TEST_HOME}/.tmux.conf"
-# Shells inside test panes read this. Ubuntu's default bashrc sets the
-# terminal title from the prompt when TERM=xterm*, which overwrites the
-# pane titles the product uses to find its panes (seen on GitHub runners).
-cat > "${TEST_HOME}/.bashrc" <<'BASHRC'
+# Every test gets its own HOME under TEST_HOME. The product persists state
+# there (~/.local/state/dotfiles/tmux-sidebar-width), so a shared HOME would
+# let one test's persisted width leak into the next test's restore.
+make_test_home() {
+    local home
+    home="$(mktemp -d "${TEST_HOME}/home.XXXXXX")"
+    cp "${TESTS_DIR}/fixtures/test-tmux.conf" "${home}/.tmux.conf"
+    # Shells inside test panes read this. Ubuntu's default bashrc sets the
+    # terminal title from the prompt when TERM=xterm*, which overwrites the
+    # pane titles the product uses to find its panes (seen on GitHub runners).
+    cat > "${home}/.bashrc" <<'BASHRC'
 PS1='$ '
 PROMPT_COMMAND=
 BASHRC
-cp "${TEST_HOME}/.bashrc" "${TEST_HOME}/.bash_profile"
-export HOME="$TEST_HOME"
+    cp "${home}/.bashrc" "${home}/.bash_profile"
+    printf '%s\n' "$home"
+}
 export TERM=xterm-256color
+unset TMUX TMUX_PANE
 trap 'rm -rf "$TEST_HOME"' EXIT
 
 # ------------------------------------------------------------------------------
@@ -174,9 +187,11 @@ for rel in "${TEST_LIST[@]}"; do
     else
         log=$(mktemp)
     fi
-    timeout --foreground -k 5 "$TIMEOUT_S" bash "$path" > "$log" 2>&1
+    test_home="$(make_test_home)"
+    HOME="$test_home" timeout --foreground -k 5 "$TIMEOUT_S" bash "$path" > "$log" 2>&1
     rc=$?
     e=$(now_ms)
+    rm -rf "$test_home"
     if [ "$rc" -eq 0 ]; then
         echo -e "${GREEN}[PASS]${NC} ($((e - s))ms)"
         PASSED+=("$rel")
