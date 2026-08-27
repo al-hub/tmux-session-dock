@@ -25,9 +25,13 @@ jobs:
           test -x dist/tmux-sidebar-tmux-adapter
 
   test-suite:
-    name: Test Matrix (Tmux 3.2a+)
+    name: Tests (${{ matrix.os }})
     needs: lint-and-build
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]   # tmux 3.2a / tmux 3.4 as packaged
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
@@ -35,6 +39,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y tmux bc xclip build-essential
+
+      - name: Show tmux version
+        run: tmux -V
 
       - name: Build Dist Bundle
         run: make build
