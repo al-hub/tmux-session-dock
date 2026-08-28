@@ -91,6 +91,11 @@ SIDEBAR_AI_OBSERVATION_SECONDS="${TMUX_SESSION_SIDEBAR_AI_OBSERVATION_SECONDS:-1
 SIDEBAR_AI_OBSERVER_MODE="${TMUX_SESSION_SIDEBAR_AI_OBSERVER:-shared}"
 SIDEBAR_AI_OBSERVER_STALE_SECONDS="${TMUX_SESSION_SIDEBAR_AI_OBSERVER_STALE_SECONDS:-4}"
 SIDEBAR_AI_OBSERVER_IDLE_EXIT_SECONDS="${TMUX_SESSION_SIDEBAR_AI_OBSERVER_IDLE_EXIT_SECONDS:-30}"
+# Presenter watchdog run by the observer: off | log (record stale presenters
+# in <state>.watchdog.log) | recover (also send Escape to a stale presenter that
+# is not prompting, which unblocks a read stuck without a timer).
+SIDEBAR_WATCHDOG_MODE="${TMUX_SESSION_SIDEBAR_WATCHDOG:-log}"
+SIDEBAR_WATCHDOG_STALE_SECONDS="${TMUX_SESSION_SIDEBAR_WATCHDOG_STALE_SECONDS:-10}"
 SIDEBAR_TRANSITION_RENDER_PENDING_GRACE_SECONDS="${TMUX_SESSION_SIDEBAR_TRANSITION_RENDER_PENDING_GRACE_SECONDS:-3}"
 SIDEBAR_FORCE_REFRESH_CHECK_SECONDS="${TMUX_SESSION_SIDEBAR_FORCE_REFRESH_CHECK_SECONDS:-1}"
 SIDEBAR_KEY_MAINTENANCE_COOLDOWN_MS="${TMUX_SESSION_SIDEBAR_KEY_MAINTENANCE_COOLDOWN_MS:-250}"
@@ -4961,8 +4966,9 @@ ensure_ai_observer()
     # it this presenter's observation settings explicitly so a configured
     # grace, interval or lock root applies to the shared verdict as well.
     local spawn_env
-    printf -v spawn_env 'TMUX_SESSION_SIDEBAR_BUSY_SECONDS=%q TMUX_SESSION_SIDEBAR_AI_OBSERVATION_SECONDS=%q TMUX_SESSION_SIDEBAR_STATE_REFRESH_SECONDS=%q TMUX_SESSION_SIDEBAR_AI_OBSERVER_IDLE_EXIT_SECONDS=%q TMUX_SESSION_LAUNCHER_LOCK_ROOT=%q TMUX_SESSION_LAUNCHER_TRACE=%q TMUX_SESSION_LAUNCHER_TRACE_FILE=%q TMUX_SESSION_LAUNCHER_DEBUG=%q TMUX_SESSION_LAUNCHER_DEBUG_FILE=%q' \
+    printf -v spawn_env 'TMUX_SESSION_SIDEBAR_BUSY_SECONDS=%q TMUX_SESSION_SIDEBAR_AI_OBSERVATION_SECONDS=%q TMUX_SESSION_SIDEBAR_STATE_REFRESH_SECONDS=%q TMUX_SESSION_SIDEBAR_AI_OBSERVER_IDLE_EXIT_SECONDS=%q TMUX_SESSION_SIDEBAR_WATCHDOG=%q TMUX_SESSION_SIDEBAR_WATCHDOG_STALE_SECONDS=%q TMUX_SESSION_LAUNCHER_LOCK_ROOT=%q TMUX_SESSION_LAUNCHER_TRACE=%q TMUX_SESSION_LAUNCHER_TRACE_FILE=%q TMUX_SESSION_LAUNCHER_DEBUG=%q TMUX_SESSION_LAUNCHER_DEBUG_FILE=%q' \
         "$SIDEBAR_BUSY_SECONDS" "$SIDEBAR_AI_OBSERVATION_SECONDS" "$SIDEBAR_STATE_REFRESH_SECONDS" "$SIDEBAR_AI_OBSERVER_IDLE_EXIT_SECONDS" \
+        "$SIDEBAR_WATCHDOG_MODE" "$SIDEBAR_WATCHDOG_STALE_SECONDS" \
         "${TMUX_SESSION_LAUNCHER_LOCK_ROOT:-/tmp}" "${TMUX_SESSION_LAUNCHER_TRACE:-0}" "${TMUX_SESSION_LAUNCHER_TRACE_FILE:-}" \
         "${TMUX_SESSION_LAUNCHER_DEBUG:-0}" "${TMUX_SESSION_LAUNCHER_DEBUG_FILE:-}"
     sidebar_tmux_cmd run-shell -b "env $spawn_env '$SCRIPT_PATH' --observe >/dev/null 2>&1" 2>/dev/null || true
@@ -5007,6 +5013,45 @@ ai_observer_apply_shared()
     if [ "${TMUX_SESSION_LAUNCHER_DEBUG:-0}" = "1" ]; then
         debug_log "state session=$name source=shared state=$cli_state_value pane=${shared_ai_pane[$name]:-} changed=$observer_state_changed"
     fi
+}
+
+# Presenter watchdog.  Every presenter writes "<epoch> <read_timeout> <view>"
+# before each read; a heartbeat older than SIDEBAR_WATCHDOG_STALE_SECONDS
+# while the presenter process is alive means it is blocked somewhere without
+# a timer (seen once on a live server: a tty read with no alarm armed, cured
+# by a single key).  log mode records it; recover mode also sends Escape,
+# which is a no-op in the sessions view, but never while a prompt is open or
+# another view is active.
+declare -gA watchdog_last_action_epoch=()
+ai_observer_watchdog()
+{
+    local now="$1" panes_snapshot="$2" state_path="$3" mode="$SIDEBAR_WATCHDOG_MODE"
+    local pane_session pane_id pane_title pane_command pane_activity pane_pid
+    local hb_path hb_epoch hb_timeout hb_view rest age prompt_ready action
+    [ "$mode" = off ] && return 0
+    while IFS=$'\t' read -r pane_session pane_id pane_title pane_command pane_activity pane_pid; do
+        [ "$pane_title" = "$SIDEBAR_TITLE" ] || continue
+        hb_path="${state_path}.presenter-${pane_id//%/pane}.hb"
+        [ -r "$hb_path" ] || continue
+        hb_epoch=""; hb_timeout=""; hb_view=""
+        IFS=' ' read -r hb_epoch hb_timeout hb_view rest < "$hb_path" 2>/dev/null || continue
+        case "$hb_epoch" in ''|*[!0-9]*) continue ;; esac
+        age=$((now - hb_epoch))
+        [ "$age" -ge "$SIDEBAR_WATCHDOG_STALE_SECONDS" ] || continue
+        case "$pane_pid" in ''|*[!0-9]*) continue ;; esac
+        kill -0 "$pane_pid" 2>/dev/null || continue
+        # One action per stale interval per presenter.
+        [ $((now - ${watchdog_last_action_epoch[$pane_id]:-0})) -ge "$SIDEBAR_WATCHDOG_STALE_SECONDS" ] || continue
+        watchdog_last_action_epoch["$pane_id"]="$now"
+        prompt_ready="$(tmux show-option -wqv -t "$pane_id" '@dotfiles_sidebar_prompt_ready' 2>/dev/null || true)"
+        action=logged
+        if [ "$mode" = recover ] && [ "$prompt_ready" != 1 ] && [ "${hb_view:-sessions}" = sessions ]; then
+            tmux send-keys -t "$pane_id" Escape 2>/dev/null && action=escape-sent
+        fi
+        printf '%s pane=%s session=%s pid=%s age=%ss last_timeout=%s view=%s prompt_ready=%s action=%s\n' \
+            "$now" "$pane_id" "$pane_session" "$pane_pid" "$age" "${hb_timeout:-?}" "${hb_view:-?}" "${prompt_ready:-0}" "$action" >> "${state_path}.watchdog.log" 2>/dev/null
+        trace_event "watchdog.stale pane=$pane_id session=$pane_session age=$age last_timeout=${hb_timeout:-?} view=${hb_view:-?} action=$action"
+    done <<< "$panes_snapshot"
 }
 
 # The --observe process.  Exits when another observer holds the lock, when
@@ -5133,6 +5178,7 @@ run_ai_observer()
 
         tmp_path="${state_path}.tmp.$$"
         printf '#ts %s pid %s interval %s\n#topo %s\n#clients %s\n%s' "$now" "$$" "$interval" "$topo_hash" "$clients_line" "$body" > "$tmp_path" && mv -f "$tmp_path" "$state_path"
+        ai_observer_watchdog "$now" "$panes_snapshot" "$state_path"
         sleep "$interval"
     done
 }
@@ -8073,7 +8119,15 @@ run_tui()
         # was last about to read, and with which timeout.  A builtin redirect,
         # so it costs no fork even at the animation rate.
         [ -n "$presenter_heartbeat_path" ] &&
-            printf '%s %s\n' "${EPOCHSECONDS:-$SECONDS}" "$read_timeout" > "$presenter_heartbeat_path" 2>/dev/null
+            printf '%s %s %s\n' "${EPOCHSECONDS:-$SECONDS}" "$read_timeout" "${view_mode:-sessions}" > "$presenter_heartbeat_path" 2>/dev/null
+        # Test hook: when this file exists the presenter blocks in a tty read
+        # with no timeout, exactly like the stall the watchdog exists for.
+        if [ -n "${TMUX_SESSION_SIDEBAR_TEST_STALL_FILE:-}" ] && [ -e "$TMUX_SESSION_SIDEBAR_TEST_STALL_FILE" ]; then
+            rm -f "$TMUX_SESSION_SIDEBAR_TEST_STALL_FILE" 2>/dev/null
+            trace_event "test.stall.begin"
+            IFS= read -rsn1 stall_key || true
+            trace_event "test.stall.end key_hex=$(trace_key_hex "${stall_key:-}")"
+        fi
         key=""
         if read_key "$read_timeout"; then
             key="$key_result"

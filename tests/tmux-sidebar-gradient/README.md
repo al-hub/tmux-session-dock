@@ -27,6 +27,7 @@ tmux socket 접근이 제한된 sandbox에서는 `test-lifecycle-e2e.sh` 실행�
 - `test-shell-session-presenter-tracks-others-e2e.sh`: shell-only 세션에 머무는 presenter 가 다른 세션의 AI 상태(running/idle 전이, 나중에 시작된 AI 발견)를 계속 관측하는지 검증. "Enter 로 이동 후 gradient 가 멈춘다" 필드 리포트 재현
 - `test-shared-observer-e2e.sh`: 서버당 observer(`--observe`) 1개, 상태 파일 신선도, presenter 의 공유 상태 소비, observer 강제 종료 후 재기동, sidebar 소멸 후 자동 종료 검증
 - `test-ai-observer-state.sh`: 공유 상태 파일 파서·stale 판정·collect 반영 unit
+- `test-presenter-watchdog-e2e.sh`: observer 의 presenter watchdog — heartbeat 가 멈춘 presenter 를 `<state>.watchdog.log` 에 기록하고 recover 모드에서 Escape 로 복구, prompt 열린 presenter 는 건드리지 않음. 정지는 presenter 의 테스트 훅 `TMUX_SESSION_SIDEBAR_TEST_STALL_FILE`(파일 존재 시 timeout 없는 tty read 로 블록)로 재현 — 이 환경에선 tmux 자식에 SIGSTOP 이 전달되지 않음
 - `test-regressions.sh`: idle grace, spinner 재그리기 관측, pane 세대 초기화, session/client 전환과 resize 회귀 검증
 - `lib.sh`: launcher 함수 로딩, tmux snapshot stub, assertion 공통 helper. `run_test`는 test 본문을 errexit subshell로 실행하므로 모든 `assert_*` 실패가 FAIL이 된다
 

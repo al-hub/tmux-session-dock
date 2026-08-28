@@ -129,4 +129,5 @@ tmux-sidebar-gradient/test-equal-size-enter-observer-continues-e2e.sh
 tmux-sidebar-gradient/test-detached-presenter-no-animation-e2e.sh
 tmux-sidebar-gradient/test-shell-session-presenter-tracks-others-e2e.sh
 tmux-sidebar-gradient/test-shared-observer-e2e.sh
+tmux-sidebar-gradient/test-presenter-watchdog-e2e.sh
 tmux-sidebar-gradient/test-launcher-lifecycle.sh
