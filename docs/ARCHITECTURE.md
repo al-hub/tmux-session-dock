@@ -36,7 +36,7 @@ graph TD
 2. **Native `switch-client`**: Session switching executes pure native client switching without moving physical panes across windows.
 3. **0.75ms Fast-Path & In-Flight Handover**: In-place switching returns within 0.75ms with zero screen flicker.
 4. **Clean Shared History**: Session archive and restoration (`o`) preserves shell history with Zero Time-Travel Pollution.
-5. **24-Phase Waveform Gradient**: One shared AI Activity Observer per tmux server samples every AI pane once per second and publishes a state file; presenters read it (no capture or process probe of their own) and only the presenter with an attached client animates the wave, at 24 FPS (one cycle per second).
+5. **24-Phase Waveform Gradient**: One shared AI Activity Observer per tmux server samples every AI pane once per second and publishes a state file (per-session state plus a topology hash and the attached-client list); presenters read it with builtins and collect only when that summary changed, so an idle presenter issues no tmux commands. Only the presenter with an attached client animates the wave, at 24 FPS (one cycle per second).
 
 ## 3. Subpane Pool Invariants
 

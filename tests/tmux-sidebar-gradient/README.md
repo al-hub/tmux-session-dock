@@ -2,7 +2,7 @@
 
 이 테스트는 production launcher의 renderer, fingerprint, 상태 전이와 tmux lifecycle을 검증한다. 실제 AI CLI나 네트워크는 사용하지 않는다.
 
-AI 관측은 기본적으로 서버당 하나의 `--observe` 프로세스가 수행하고 presenter 는 그 상태 파일을 읽는다(`TMUX_SESSION_SIDEBAR_AI_OBSERVER=local` 로 presenter 자체 관측 복원; unit test 의 `lib.sh` 는 local 고정). 애니메이션은 client 가 attach 된 presenter 에서만 돈다. client 없이 frame 을 capture 하는 테스트는 launcher 에 `TMUX_SESSION_SIDEBAR_ANIMATE_DETACHED=true` 를 준다. wave 주기는 정확히 1초(24fps × 24 phase)이므로 frame 변화를 1초 간격 두 샘플로만 비교하면 aliasing 된다.
+AI 관측은 기본적으로 서버당 하나의 `--observe` 프로세스가 수행하고 presenter 는 그 상태 파일을 읽는다. 파일의 `#topo`(세션/pane/명령 hash)·`#clients`·세션 상태가 직전 collect 와 같으면 presenter 는 collect 자체를 건너뛴다(유휴 시 tmux 명령 0)(`TMUX_SESSION_SIDEBAR_AI_OBSERVER=local` 로 presenter 자체 관측 복원; unit test 의 `lib.sh` 는 local 고정). 애니메이션은 client 가 attach 된 presenter 에서만 돈다. client 없이 frame 을 capture 하는 테스트는 launcher 에 `TMUX_SESSION_SIDEBAR_ANIMATE_DETACHED=true` 를 준다. wave 주기는 정확히 1초(24fps × 24 phase)이므로 frame 변화를 1초 간격 두 샘플로만 비교하면 aliasing 된다.
 
 ## 실행
 

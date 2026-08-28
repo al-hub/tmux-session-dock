@@ -77,6 +77,45 @@ test_apply_shared_drives_collect_state()
     assert_eq '' "${session_ai_direct_pane_id[beta]:-}" 'gone session drops its tracked pane'
 }
 
+test_header_topology_clients_and_change_key()
+{
+    printf '#ts 1000 pid 1 interval 1\n#topo 111:22\n#clients alpha gamma\nalpha\trunning\t%%3\tfp-1\nbeta\tidle\t%%5\tfp-2\n' > "$AI_OBSERVER_STATE_PATH_CACHED"
+    SIDEBAR_AI_OBSERVER_STALE_SECONDS=4
+    ai_observer_state_load 1001
+    assert_eq '111:22' "$shared_ai_topo" 'topology hash'
+    assert_eq 'alpha gamma' "$shared_ai_clients" 'client sessions'
+    assert_eq true "$shared_ai_clients_known" 'clients line present'
+    first_key="$shared_ai_change_key"
+    assert_contains "$first_key" '111:22|alpha gamma|' 'change key carries topology and clients'
+    assert_contains "$first_key" 'alpha=running' 'change key carries states'
+
+    # A fingerprint change alone must not move the key (rows depend on state only).
+    printf '#ts 1002 pid 1 interval 1\n#topo 111:22\n#clients alpha gamma\nalpha\trunning\t%%3\tfp-9\nbeta\tidle\t%%5\tfp-8\n' > "$AI_OBSERVER_STATE_PATH_CACHED"
+    ai_observer_state_load 1003
+    assert_eq "$first_key" "$shared_ai_change_key" 'fingerprint-only change keeps the key'
+
+    # A state, client or topology change moves it.
+    printf '#ts 1004 pid 1 interval 1\n#topo 111:22\n#clients alpha gamma\nalpha\tidle\t%%3\tfp-9\nbeta\tidle\t%%5\tfp-8\n' > "$AI_OBSERVER_STATE_PATH_CACHED"
+    ai_observer_state_load 1005
+    assert_ne "$first_key" "$shared_ai_change_key" 'state change moves the key'
+    printf '#ts 1006 pid 1 interval 1\n#topo 999:22\n#clients alpha gamma\nalpha\trunning\t%%3\tfp-9\nbeta\tidle\t%%5\tfp-8\n' > "$AI_OBSERVER_STATE_PATH_CACHED"
+    ai_observer_state_load 1007
+    assert_ne "$first_key" "$shared_ai_change_key" 'topology change moves the key'
+
+    # Attach state derives from the published client list without tmux.
+    sidebar_session_cached=alpha
+    shared_ai_fresh=true
+    was_my_session_attached=false
+    : > "$TEST_TMUX_CALL_LOG"
+    refresh_animation_attach_state
+    assert_eq true "$was_my_session_attached" 'alpha is attached per shared clients'
+    assert_eq 0 "$(grep -c '^list-clients' "$TEST_TMUX_CALL_LOG" || true)" 'no list-clients fork when clients are shared'
+    sidebar_session_cached=beta
+    refresh_animation_attach_state
+    assert_eq false "$was_my_session_attached" 'beta is not attached per shared clients'
+}
+
+run_test 'header topology, clients and change key are parsed' test_header_topology_clients_and_change_key
 run_test 'fresh shared state file is loaded' test_fresh_state_is_loaded
 run_test 'stale shared state file is rejected but parsed' test_stale_state_is_rejected
 run_test 'missing file or garbage header is rejected' test_missing_or_garbage_header

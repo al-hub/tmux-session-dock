@@ -3635,6 +3635,7 @@ collect_sessions()
     old_selected="$selected_session"
     debug_log "collect_sessions start force_scan=$force_scan current_session=$current_session old_selected=$old_selected"
     ai_observer_sync "$current_epoch_second" || true
+    [ "$shared_ai_fresh" = true ] && shared_ai_applied_key="$shared_ai_change_key"
     local observer_sample_gap=false
     if [ -n "${observer_last_sample_epoch:-}" ] &&
         [ $((current_epoch_second - observer_last_sample_epoch)) -gt $((SIDEBAR_AI_OBSERVATION_SECONDS + 1)) ]; then
@@ -3963,7 +3964,12 @@ EOF
             continue
         fi
         if [ "$row_cache_reusable" = true ]; then
-            if [ "$name" != "$requested_scan_session" ] && [ -z "${session_ai_direct_pane_id[$name]:-}" ]; then
+            # A cached, untracked, non-requested row needs no work — unless the
+            # shared observer reports a different state for it (an AI CLI that
+            # just started there), which must be applied to the row.
+            if [ "$name" != "$requested_scan_session" ] && [ -z "${session_ai_direct_pane_id[$name]:-}" ] &&
+                { [ "$shared_ai_fresh" != true ] ||
+                    [ "${shared_ai_state[$name]:-gone}" = "${cached_session_cli_state[$name]:-gone}" ]; }; then
                 continue
             fi
             index="${cached_session_row_index[$name]:-$target_row_index}"
@@ -4768,7 +4774,11 @@ refresh_animation_attach_state()
 {
     local my_session="${sidebar_session_cached:-}" clients
     [ -n "$my_session" ] || return 0
-    clients="$(sidebar_tmux_cmd list-clients -F '#{?client_control_mode,,#{client_session}}' 2>/dev/null || true)"
+    if [ "$shared_ai_fresh" = true ] && [ "$shared_ai_clients_known" = true ]; then
+        clients="${shared_ai_clients// /$'\n'}"
+    else
+        clients="$(sidebar_tmux_cmd list-clients -F '#{?client_control_mode,,#{client_session}}' 2>/dev/null || true)"
+    fi
     case "|${clients//$'\n'/|}|" in
         *"|$my_session|"*) was_my_session_attached=true ;;
         *) was_my_session_attached=false ;;
@@ -4848,6 +4858,8 @@ render_animated_name_cells()
 # SIDEBAR_AI_OBSERVATION_SECONDS and publishes the result in a state file:
 #
 #   #ts <epoch> pid <pid> interval <seconds>
+#   #topo <hash of session/pane/command/pid>
+#   #clients <sessions with an attached client>
 #   <session>\t<state>\t<pane_id>\t<fingerprint>
 #
 # Presenters read that file with builtins (no fork) instead of capturing and
@@ -4859,6 +4871,14 @@ declare -gA shared_ai_fp=()
 declare -gA shared_ai_pane=()
 shared_ai_fresh=false
 shared_ai_last_spawn_epoch=0
+shared_ai_topo=""
+shared_ai_clients=""
+shared_ai_clients_known=false
+# "<topo>|<clients>|<session=state ...>": everything a presenter's collect
+# depends on.  While it equals shared_ai_applied_key nothing changed since the
+# last collect and the periodic observation can skip it altogether.
+shared_ai_change_key=""
+shared_ai_applied_key=""
 
 ai_observer_socket_tag()
 {
@@ -4894,11 +4914,15 @@ ai_observer_pid()
 # fresh (written within SIDEBAR_AI_OBSERVER_STALE_SECONDS), 1 otherwise.
 ai_observer_state_load()
 {
-    local path now_epoch="${1:-${EPOCHSECONDS:-$SECONDS}}" line ts="" name state pane fp rest
+    local path now_epoch="${1:-${EPOCHSECONDS:-$SECONDS}}" line ts="" name state pane fp rest state_sig=""
     path="$(ai_observer_state_path)"
     shared_ai_state=()
     shared_ai_fp=()
     shared_ai_pane=()
+    shared_ai_topo=""
+    shared_ai_clients=""
+    shared_ai_clients_known=false
+    shared_ai_change_key=""
     [ -r "$path" ] || return 1
     while IFS= read -r line || [ -n "$line" ]; do
         case "$line" in
@@ -4907,6 +4931,8 @@ ai_observer_state_load()
                 ts="${rest%% *}"
                 continue
                 ;;
+            '#topo '*) shared_ai_topo="${line#\#topo }"; continue ;;
+            '#clients'*) shared_ai_clients="${line#\#clients}"; shared_ai_clients="${shared_ai_clients# }"; shared_ai_clients_known=true; continue ;;
             ''|'#'*) continue ;;
         esac
         IFS=$'\t' read -r name state pane fp <<< "$line"
@@ -4914,7 +4940,9 @@ ai_observer_state_load()
         shared_ai_state["$name"]="$state"
         shared_ai_pane["$name"]="$pane"
         shared_ai_fp["$name"]="$fp"
+        state_sig+="${name}=${state} "
     done < "$path"
+    shared_ai_change_key="${shared_ai_topo}|${shared_ai_clients}|${state_sig}"
     case "$ts" in ''|*[!0-9]*) return 1 ;; esac
     [ $((now_epoch - ts)) -le "$SIDEBAR_AI_OBSERVER_STALE_SECONDS" ]
 }
@@ -4975,6 +5003,10 @@ ai_observer_apply_shared()
     else
         observer_state_changed=false
     fi
+    trace_event "ai-observer.apply session=$name state=$cli_state_value changed=$observer_state_changed"
+    if [ "${TMUX_SESSION_LAUNCHER_DEBUG:-0}" = "1" ]; then
+        debug_log "state session=$name source=shared state=$cli_state_value pane=${shared_ai_pane[$name]:-} changed=$observer_state_changed"
+    fi
 }
 
 # The --observe process.  Exits when another observer holds the lock, when
@@ -4993,10 +5025,17 @@ run_ai_observer()
     case "$interval" in ''|*[!0-9]*) interval=1 ;; esac
 
     if ! mkdir "$lock_dir" 2>/dev/null; then
-        if ai_observer_pid >/dev/null 2>&1; then
-            trace_event "ai-observer.duplicate holder=$(cat "$lock_dir/pid" 2>/dev/null || true)"
-            return 0
-        fi
+        # Several presenters may spawn an observer in the same second.  The
+        # holder writes its pid right after mkdir; give it a moment before
+        # treating the lock as stale, otherwise two observers end up running.
+        local attempt
+        for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            if ai_observer_pid >/dev/null 2>&1; then
+                trace_event "ai-observer.duplicate holder=$(cat "$lock_dir/pid" 2>/dev/null || true)"
+                return 0
+            fi
+            sleep 0.2
+        done
         rm -rf "$lock_dir" 2>/dev/null || true
         mkdir "$lock_dir" 2>/dev/null || return 1
     fi
@@ -5066,6 +5105,14 @@ run_ai_observer()
             [ -n "${probed_ai_pane[$probe_pane]:-}" ] && ai_pane_for_session["$probe_session"]="$probe_pane"
         done
 
+        # Topology summary for the presenters: which sessions/panes exist, what
+        # they run and their pids.  Activity fields are excluded so the hash
+        # only moves on structural change.  Clients are published as well so
+        # presenters can derive their attach state without a fork of their own.
+        local topo_hash clients_line
+        topo_hash="$(printf '%s\n' "$panes_snapshot" | awk -F '\t' '{ print $1 "\t" $2 "\t" $4 "\t" $6 }' | cksum | awk '{ print $1 ":" $2 }')"
+        clients_line="$(tmux list-clients -F '#{?client_control_mode,,#{client_session}}' 2>/dev/null | tr '\n' ' ')"
+
         body=""
         for name in "${!observed_sessions[@]}"; do
             pane="${ai_pane_for_session[$name]:-}"
@@ -5085,12 +5132,21 @@ run_ai_observer()
         done
 
         tmp_path="${state_path}.tmp.$$"
-        printf '#ts %s pid %s interval %s\n%s' "$now" "$$" "$interval" "$body" > "$tmp_path" && mv -f "$tmp_path" "$state_path"
+        printf '#ts %s pid %s interval %s\n#topo %s\n#clients %s\n%s' "$now" "$$" "$interval" "$topo_hash" "$clients_line" "$body" > "$tmp_path" && mv -f "$tmp_path" "$state_path"
         sleep "$interval"
     done
 }
 refresh_sidebar_state_if_due()
 {
+    # With a fresh shared state file, nothing this collect depends on has
+    # changed while topology, clients and per-session states equal what the
+    # last collect applied: skip it before spending a single tmux fork.
+    if state_refresh_due && ai_observer_sync "${EPOCHSECONDS:-$SECONDS}" &&
+        [ -n "$shared_ai_applied_key" ] && [ "$shared_ai_change_key" = "$shared_ai_applied_key" ]; then
+        trace_event "ai-observer.skip reason=no-change"
+        last_state_refresh_epoch="${EPOCHSECONDS:-$SECONDS}"
+        return 1
+    fi
     # Session switching owns the layout/frame boundary.  An observer tick
     # during that transaction can make the normal refresh path see the
     # half-restored geometry and request a second full render.  Defer the
@@ -5119,6 +5175,16 @@ refresh_sidebar_state_if_due()
     now_epoch="${EPOCHSECONDS:-$SECONDS}"
     if [ -z "${last_state_refresh_epoch:-}" ] ||
         [ $((now_epoch - last_state_refresh_epoch)) -ge "$SIDEBAR_AI_OBSERVATION_SECONDS" ]; then
+        # Shared observer: the no-change check above is the only skip.  When
+        # the key moved, collect right away; the local skip heuristics below
+        # would wait for tracked panes this presenter learns about only by
+        # collecting.
+        if [ "$shared_ai_fresh" = true ]; then
+            observer_full_rescan=false
+            refresh_if_needed
+            last_state_refresh_epoch="$now_epoch"
+            return 0
+        fi
         # Passive sessions do not need a full state scan when their pane
         # topology and command names are unchanged.  A single target-scoped
         # snapshot still detects a shell -> command transition.
@@ -5164,7 +5230,7 @@ refresh_sidebar_state_if_due()
         # session stays invisible to this presenter.  Rescan every pane on the
         # server once per SIDEBAR_STATE_REFRESH_SECONDS to pick those up.
         observer_full_rescan=false
-        if ai_discovery_due "$now_epoch"; then
+        if [ "$shared_ai_fresh" != true ] && ai_discovery_due "$now_epoch"; then
             observer_full_rescan=true
             last_ai_discovery_epoch="$now_epoch"
             trace_event "ai-observer.rescan reason=discovery"
