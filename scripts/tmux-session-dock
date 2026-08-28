@@ -258,6 +258,7 @@ history_restore_in_progress=false
 restore_batch_mode=false
 animation_frame=0
 observer_post_handover_refresh=false
+observer_full_rescan=false
 animation_attached_override_until=0
 animation_tick_counter=0
 key_result=""
@@ -4862,33 +4863,68 @@ refresh_sidebar_state_if_due()
         # snapshot still detects a shell -> command transition.
         if [ -n "${selected_session:-}" ] &&
             [ -z "${session_ai_direct_pane_id[$selected_session]:-}" ]; then
+            # The selected session has no tracked AI pane of its own.  It may
+            # skip the snapshot only while there is nothing to observe in the
+            # other sessions either: a presenter parked on a shell must still
+            # follow the AI activity of every other session, otherwise its
+            # gradient rows freeze in whatever state its last collect saw.
+            # With nothing tracked anywhere, rescan every
+            # SIDEBAR_STATE_REFRESH_SECONDS so newly started AI CLIs are found.
+            local selected_can_skip=false
             if session_has_shell_pane "$selected_session"; then
                 # A selected shell only needs a cheap process-tree probe.  Do
                 # not rebuild the target snapshot when no AI child exists.
                 if ! session_has_shell_child_ai_process "$selected_session"; then
-                    last_state_refresh_epoch="$now_epoch"
-                    return 1
+                    selected_can_skip=true
                 fi
             else
-            # A stable pane command signature is enough to keep ordinary
-            # non-AI sessions on their cached state.  The previous busy-command
-            # guard forced a full snapshot for fixtures such as `sleep`, even
-            # though no AI fingerprint could change without a command/pane
-            # transition.  AI-named panes remain on the fingerprint path above.
-            session_command_signature_from_tmux "$selected_session"
-            if [ "${session_command_signature_result:-}" = \
-                "${cached_session_command_signature[$selected_session]:-}" ]; then
+                # A stable pane command signature is enough to keep ordinary
+                # non-AI sessions on their cached state.  AI-named panes remain
+                # on the fingerprint path above.
+                session_command_signature_from_tmux "$selected_session"
+                if [ "${session_command_signature_result:-}" = \
+                    "${cached_session_command_signature[$selected_session]:-}" ]; then
+                    selected_can_skip=true
+                fi
+            fi
+            if [ "$selected_can_skip" = true ] &&
+                [ "${#session_ai_direct_pane_id[@]}" -eq 0 ] &&
+                ! ai_discovery_due "$now_epoch"; then
+                trace_event "ai-observer.skip reason=nothing-tracked selected=$selected_session"
                 last_state_refresh_epoch="$now_epoch"
                 return 1
             fi
-            fi
+        fi
+        # The incremental collect re-lists only the selected session and the
+        # sessions with a tracked AI pane, so an AI CLI started in any other
+        # session stays invisible to this presenter.  Rescan every pane on the
+        # server once per SIDEBAR_STATE_REFRESH_SECONDS to pick those up.
+        observer_full_rescan=false
+        if ai_discovery_due "$now_epoch"; then
+            observer_full_rescan=true
+            last_ai_discovery_epoch="$now_epoch"
+            trace_event "ai-observer.rescan reason=discovery"
         fi
         refresh_if_needed
+        observer_full_rescan=false
         last_state_refresh_epoch="$now_epoch"
         return 0
     fi
 
     return 1
+}
+
+# With no AI pane tracked anywhere, a presenter still rescans the server every
+# SIDEBAR_STATE_REFRESH_SECONDS so an AI CLI started in another session is
+# picked up.  The first call after start counts as a fresh scan.
+ai_discovery_due()
+{
+    local now_epoch_value="${1:-${EPOCHSECONDS:-$SECONDS}}"
+    if [ -z "${last_ai_discovery_epoch:-}" ]; then
+        last_ai_discovery_epoch="$now_epoch_value"
+        return 1
+    fi
+    [ $((now_epoch_value - last_ai_discovery_epoch)) -ge "$SIDEBAR_STATE_REFRESH_SECONDS" ]
 }
 
 state_refresh_due()
@@ -5256,8 +5292,9 @@ refresh_if_needed()
 
     debug_log "refresh_if_needed start old_signature=$old_signature old_width=$old_width old_height=$old_height"
     # The periodic refresh is the only idle-time state probe.  It refreshes the
-    # selected session while all other sessions remain on their cached values.
-    collect_sessions false "$selected_session"
+    # selected session (and every tracked AI session) while all other sessions
+    # remain on their cached values, except for the periodic discovery rescan.
+    collect_sessions "${observer_full_rescan:-false}" "$selected_session"
     if [ "$full_render_required" = "true" ] && [ "${observer_post_handover_refresh:-false}" = "true" ]; then
         # First observation after a handover: collect_sessions re-discovers the
         # client switch, the resize and the current-session change that the

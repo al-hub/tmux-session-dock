@@ -24,6 +24,7 @@ tmux socket 접근이 제한된 sandbox에서는 `test-lifecycle-e2e.sh` 실행�
 - `test-lifecycle-e2e.sh`: 격리 tmux와 fake `codex`를 사용한 시작, 정지, 재시작, 종료 검증
 - `test-equal-size-enter-observer-continues-e2e.sh`: 같은 크기 window 간 Enter 전환 후 target presenter 의 AI 관측이 계속되는지(gradient 시작·종료) 검증. handover 가 남긴 `transition_render_pending` marker 뒤에서 observer 가 영구 정지하던 회귀
 - `test-detached-presenter-no-animation-e2e.sh`: client 가 붙은 presenter 만 gradient 를 애니메이션하고, detached presenter 는 정적 frame 을 유지하며, Enter 전환 시 애니메이션이 client 를 따라가는지 검증
+- `test-shell-session-presenter-tracks-others-e2e.sh`: shell-only 세션에 머무는 presenter 가 다른 세션의 AI 상태(running/idle 전이, 나중에 시작된 AI 발견)를 계속 관측하는지 검증. "Enter 로 이동 후 gradient 가 멈춘다" 필드 리포트 재현
 - `test-regressions.sh`: idle grace, spinner 재그리기 관측, pane 세대 초기화, session/client 전환과 resize 회귀 검증
 - `lib.sh`: launcher 함수 로딩, tmux snapshot stub, assertion 공통 helper. `run_test`는 test 본문을 errexit subshell로 실행하므로 모든 `assert_*` 실패가 FAIL이 된다
 
