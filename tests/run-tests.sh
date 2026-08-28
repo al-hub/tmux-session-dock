@@ -138,6 +138,10 @@ BASHRC
 }
 export TERM=xterm-256color
 unset TMUX TMUX_PANE
+# Shared AI observer state files and locks go under the per-run HOME instead of
+# /tmp, so a test server that dies without cleanup leaves nothing behind.
+export TMUX_SESSION_LAUNCHER_LOCK_ROOT="$TEST_HOME/observer-locks"
+mkdir -p "$TMUX_SESSION_LAUNCHER_LOCK_ROOT"
 trap 'rm -rf "$TEST_HOME"' EXIT
 
 # ------------------------------------------------------------------------------

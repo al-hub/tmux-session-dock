@@ -5001,7 +5001,8 @@ run_ai_observer()
         mkdir "$lock_dir" 2>/dev/null || return 1
     fi
     printf '%s\n' "$$" > "$lock_dir/pid"
-    trap 'rm -rf "$lock_dir" 2>/dev/null; exit 0' EXIT INT TERM HUP
+    # Leave nothing behind: the lock and the state file belong to this server.
+    trap 'rm -rf "$lock_dir" "$state_path" "${state_path}.tmp.$$" 2>/dev/null; exit 0' EXIT INT TERM HUP
     trace_event "ai-observer.start pid=$$ state=$state_path interval=$interval"
 
     while true; do
