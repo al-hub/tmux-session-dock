@@ -37,7 +37,41 @@ test_animation_can_be_disabled_globally()
     assert_not_contains "$output" $'\033[' 'disabled gradient ANSI sequence'
 }
 
+test_animated_cell_matches_static_row_in_narrow_sidebar()
+{
+    SIDEBAR_ANIMATION_ENABLED=true
+    animation_frame=0
+    scroll_offset=0
+    cached_pane_width=15
+    cached_pane_height=10
+    session_names=(sw1)
+    session_created=(100)
+    session_status=(idle)
+    session_cli_state=(running)
+    session_animate=(true)
+    session_animation_seed=(0)
+    selected_index=0
+    selected_session=sw1
+
+    format_row 0
+    static_plain="$(strip_ansi <<< "$row_render_result")"
+    animated_plain="$(render_animated_name_cells | strip_ansi)"
+
+    assert_contains "$static_plain" 'sw1' 'static compact row shows full name'
+    assert_contains "$animated_plain" 'sw1' 'animated cell keeps full name at width 15'
+
+    cached_pane_width=35
+    animated_plain="$(render_animated_name_cells | strip_ansi)"
+    assert_contains "$animated_plain" 'sw1' 'animated cell keeps full name at width 35'
+}
+
+strip_ansi()
+{
+    sed -E $'s/\x1B\\[[0-9;?]*[ -\\/]*[@-~]//g'
+}
+
 run_test 'renderer changes ANSI colors between frames' test_gradient_changes_by_frame
+run_test 'animated name cell matches static row width in narrow sidebar' test_animated_cell_matches_static_row_in_narrow_sidebar
 run_test 'renderer omits gradient for idle state' test_idle_name_has_no_gradient
 run_test 'renderer respects global animation disable' test_animation_can_be_disabled_globally
 finish_tests

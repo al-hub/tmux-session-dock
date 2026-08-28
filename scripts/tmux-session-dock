@@ -82,6 +82,7 @@ SIDEBAR_ANIMATION_ENABLED="${TMUX_SESSION_SIDEBAR_ANIMATION_ENABLED:-true}"
 SIDEBAR_POLL_TIMEOUT="${TMUX_SESSION_SIDEBAR_POLL_TIMEOUT:-0.15}"
 SIDEBAR_STATE_REFRESH_SECONDS="${TMUX_SESSION_SIDEBAR_STATE_REFRESH_SECONDS:-5}"
 SIDEBAR_AI_OBSERVATION_SECONDS="${TMUX_SESSION_SIDEBAR_AI_OBSERVATION_SECONDS:-1}"
+SIDEBAR_TRANSITION_RENDER_PENDING_GRACE_SECONDS="${TMUX_SESSION_SIDEBAR_TRANSITION_RENDER_PENDING_GRACE_SECONDS:-3}"
 SIDEBAR_FORCE_REFRESH_CHECK_SECONDS="${TMUX_SESSION_SIDEBAR_FORCE_REFRESH_CHECK_SECONDS:-1}"
 SIDEBAR_KEY_MAINTENANCE_COOLDOWN_MS="${TMUX_SESSION_SIDEBAR_KEY_MAINTENANCE_COOLDOWN_MS:-250}"
 SIDEBAR_ANIMATION_INTERVAL="${TMUX_SESSION_SIDEBAR_ANIMATION_INTERVAL:-0.033}"
@@ -250,6 +251,7 @@ view_mode="sessions"
 history_restore_in_progress=false
 restore_batch_mode=false
 animation_frame=0
+observer_post_handover_refresh=false
 animation_tick_counter=0
 key_result=""
 key_raw=""
@@ -3635,7 +3637,16 @@ collect_sessions()
     old_pane_width="$current_width"
     old_pane_height="$current_height"
     if [ "$resize_occurred" = "true" ]; then
-        mark_full_render_required geometry-invalidated
+        # The WINCH path may already have re-rendered at this geometry (a
+        # handover target is spawned, resized by the client, and rendered
+        # before its first periodic collect).  Only a frame drawn for a
+        # different size needs another full render; the observer still treats
+        # this sample as a resize so capture noise is ignored either way.
+        if [ "$current_width" != "${last_width:-}" ] || [ "$current_height" != "${last_height:-}" ]; then
+            mark_full_render_required geometry-invalidated
+        else
+            trace_event "collect.resize.already-rendered width=$current_width height=$current_height"
+        fi
     fi
     local client_sessions=""
     client_sessions="$(sidebar_tmux_cmd list-clients -F '#{client_control_mode}|#{client_session}' 2>/dev/null |
@@ -4533,14 +4544,11 @@ format_row()
     mark="$row_mark_result"
     session_age_value "${session_created[$index]}"
     age="$session_age_result"
-    age_width=10
-    name_width=$((width - 2 - 1 - age_width - 2))
+    row_name_cell_width "$width"
+    name_width="$row_name_cell_width_result"
 
-    [ "$name_width" -lt 1 ] && name_width=1
     if [ "$width" -lt 16 ]; then
-        local short_name_w=$((width - 3))
-        [ "$short_name_w" -lt 0 ] && short_name_w=0
-        format_session_name "${session_names[$index]}" "$short_name_w" \
+        format_session_name "${session_names[$index]}" "$name_width" \
             "${session_animate[$index]}" "${session_animation_seed[$index]}"
         printf -v row_render_result '\033[%s;1H\033[2K%s %s' \
             "$line" "$mark" "$session_name_result"
@@ -4550,6 +4558,28 @@ format_row()
         printf -v row_render_result '\033[%s;1H\033[2K%s %s %s ' \
             "$line" "$mark" "$session_name_result" "$age"
     fi
+}
+
+# Width of the session-name cell for a sidebar of the given pane width.  The
+# static row renderer and the per-frame gradient renderer must agree on this,
+# otherwise an animation frame paints a differently truncated name over the
+# row (seen as the row "disappearing" in narrow sidebars).  Below 16 columns
+# the row drops the age column and gives the name everything after the mark.
+row_name_cell_width()
+{
+    local width="${1:-35}" age_width=10
+    if [ "$width" -lt 16 ]; then
+        row_name_cell_width_result=$((width - 3))
+        if [ "$row_name_cell_width_result" -lt 0 ]; then
+            row_name_cell_width_result=0
+        fi
+    else
+        row_name_cell_width_result=$((width - 2 - 1 - age_width - 2))
+        if [ "$row_name_cell_width_result" -lt 1 ]; then
+            row_name_cell_width_result=1
+        fi
+    fi
+    return 0
 }
 
 render_selection_pair()
@@ -4692,8 +4722,8 @@ render_animated_name_cells()
         if [ "${session_animate[$index]}" = "true" ]; then
             line=$((2 + index - scroll_offset))
             width="${cached_pane_width:-35}"
-            name_width=$((width - 2 - 1 - 10 - 2))
-            [ "$name_width" -lt 1 ] && name_width=1
+            row_name_cell_width "$width"
+            name_width="$row_name_cell_width_result"
             if [ -n "$METRICS_FILE" ]; then
                 metrics_now_us_value
                 metrics_format_start="$metrics_now_us_result"
@@ -4737,12 +4767,27 @@ refresh_sidebar_state_if_due()
     # Session switching owns the layout/frame boundary.  An observer tick
     # during that transaction can make the normal refresh path see the
     # half-restored geometry and request a second full render.  Defer the
-    # passive AI observation until the transition renderer has consumed its
-    # pending marker; the next due tick will observe the pane without changing
-    # the transition frame.
-    if transition_is_active || transition_commit_pending || transition_render_pending_for_current_session; then
+    # passive AI observation while a transition is running or committed, and
+    # for a short grace after the handover while the target window still
+    # carries its transition_render_pending marker.  The marker itself is
+    # consumed only by a geometry/topology render; after a handover between
+    # equal-size windows no such render ever comes, so waiting on it without
+    # a time bound froze the AI observer of every settled target presenter.
+    if transition_is_active || transition_commit_pending; then
         trace_event "ai-observer.defer reason=transition"
         return 1
+    fi
+    observer_post_handover_refresh=false
+    if transition_render_pending_for_current_session; then
+        if transition_render_pending_is_recent "$transition_render_pending_state"; then
+            trace_event "ai-observer.defer reason=render-pending"
+            return 1
+        fi
+        # The handover already painted this presenter for the client that now
+        # sits on it.  The first observation afterwards must not repaint the
+        # whole frame merely because collect_sessions notices that switch for
+        # itself (client-session-switch, session-change, geometry-invalidated).
+        observer_post_handover_refresh=true
     fi
     now_epoch="${EPOCHSECONDS:-$SECONDS}"
     if [ -z "${last_state_refresh_epoch:-}" ] ||
@@ -5004,13 +5049,38 @@ sidebar_consume_pending_target_marker()
     return 0
 }
 
+transition_render_pending_state=""
 transition_render_pending_for_current_session()
 {
     local state target
+    transition_render_pending_state=""
     [ -n "${SIDEBAR_WINDOW_ID:-}" ] || return 1
     state="$(tmux show-option -wqv -t "$SIDEBAR_WINDOW_ID" "$SIDEBAR_TRANSITION_RENDER_PENDING_OPTION" 2>/dev/null || true)"
+    transition_render_pending_state="$state"
     target="${state##*target=}"
     [ -n "$target" ] && [ "$target" = "$current_session" ]
+}
+
+# A render-pending marker names the operation that set it; operation ids
+# embed the epoch nanoseconds of the switch (new_sidebar_operation_id).  The
+# marker is "recent" while that switch is younger than
+# SIDEBAR_TRANSITION_RENDER_PENDING_GRACE_SECONDS.  Unparseable markers are
+# never recent so they cannot hold the observer indefinitely.
+transition_render_pending_is_recent()
+{
+    local state="${1:-}" operation_ns="" started_epoch now_epoch
+    operation_ns="${state#*operation_id=op-}"
+    [ "$operation_ns" != "$state" ] || return 1
+    operation_ns="${operation_ns%%-*}"
+    case "$operation_ns" in
+        ''|*[!0-9]*) return 1 ;;
+    esac
+    [ "${#operation_ns}" -gt 9 ] || return 1
+    started_epoch="${operation_ns:0:${#operation_ns}-9}"
+    now_epoch="${EPOCHSECONDS:-$(date +%s)}"
+    local grace="$SIDEBAR_TRANSITION_RENDER_PENDING_GRACE_SECONDS"
+    case "$grace" in ''|*[!0-9]*) grace=3 ;; esac
+    [ $((now_epoch - started_epoch)) -lt "$grace" ]
 }
 
 request_full_render()
@@ -5118,11 +5188,23 @@ refresh_if_needed()
     # The periodic refresh is the only idle-time state probe.  It refreshes the
     # selected session while all other sessions remain on their cached values.
     collect_sessions false "$selected_session"
+    if [ "$full_render_required" = "true" ] && [ "${observer_post_handover_refresh:-false}" = "true" ]; then
+        # First observation after a handover: collect_sessions re-discovers the
+        # client switch, the resize and the current-session change that the
+        # handover renderer already painted.  Do not repaint for those; a real
+        # session-list or geometry change is still caught by the signature and
+        # size comparison below.
+        debug_log "refresh_if_needed skip full render reason=$full_render_required_reason (frame already produced by handover)"
+        trace_event "ai-observer.render-skip reason=$full_render_required_reason"
+        full_render_required=false
+        full_render_required_reason=""
+    fi
+    observer_post_handover_refresh=false
     if [ "$full_render_required" = "true" ] ||
         [ "$old_signature" != "$snapshot_signature" ] ||
         [ "$old_width" != "${cached_pane_width:-35}" ] ||
         [ "$old_height" != "${cached_pane_height:-20}" ]; then
-        debug_log "refresh_if_needed render because signature_or_size_changed new_signature=$snapshot_signature new_width=${cached_pane_width:-35} new_height=${cached_pane_height:-20}"
+        debug_log "refresh_if_needed render full_render_required=$full_render_required reason=${full_render_required_reason:-none} new_signature=$snapshot_signature new_width=${cached_pane_width:-35} new_height=${cached_pane_height:-20}"
         render_full periodic-refresh
         session_animation_refresh_indexes=()
     fi

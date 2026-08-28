@@ -124,4 +124,5 @@ tmux-sidebar-gradient/test-hot-path.sh
 tmux-sidebar-gradient/test-node-codex-gradient-e2e.sh
 tmux-sidebar-gradient/test-multi-sidebar-node-codex-gradient-e2e.sh
 tmux-sidebar-gradient/test-node-codex-enter-idle-recovery-e2e.sh
+tmux-sidebar-gradient/test-equal-size-enter-observer-continues-e2e.sh
 tmux-sidebar-gradient/test-launcher-lifecycle.sh
