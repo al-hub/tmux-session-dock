@@ -101,6 +101,13 @@ for index in $(seq 0 4); do
     switch_deadline=$(( $(date +%s) + 8 ))
     while [ "$(date +%s)" -lt "$switch_deadline" ] && [ "$(client_session)" != "$target" ]; do sleep 0.1; done
     [ "$(client_session)" = "$target" ] || fail_test "Enter did not switch to $target"
+    # Wait for the target presenter's handover frame (its own row marked
+    # current) before sampling; the render sequence before it clears rows.
+    handover_deadline=$(( $(date +%s) + 8 ))
+    while [ "$(date +%s)" -lt "$handover_deadline" ]; do
+        tmuxc capture-pane -p -t "$(sidebar_for "$target")" 2>/dev/null | grep -Eq "^>[^a-z]*$target" && break
+        sleep 0.1
+    done
     sleep 0.5
         declare -A gradient_seen=()
         for sample in $(seq 1 12); do

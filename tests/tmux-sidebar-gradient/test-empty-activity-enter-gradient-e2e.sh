@@ -77,6 +77,15 @@ while [ "$(date +%s)" -lt "$switch_deadline" ] && [ "$(client_session)" != live2
 
 sidebar="$(sidebar_for live2)"
 [ -n "$sidebar" ] || fail_test 'live2 sidebar missing after Enter switch'
+# Sample only after the live2 presenter has drawn its handover frame (its own
+# row marked current); until then the pane shows the frames of the handover
+# render sequence, whose cleared rows are not AI activity.
+handover_deadline=$(( $(date +%s) + 8 ))
+while [ "$(date +%s)" -lt "$handover_deadline" ]; do
+    tmuxc capture-pane -p -t "$sidebar" 2>/dev/null | grep -Eq '^>[^a-z]*live2' && break
+    sleep 0.1
+done
+tmuxc capture-pane -p -t "$sidebar" 2>/dev/null | grep -Eq '^>[^a-z]*live2' || fail_test 'live2 presenter never marked live2 current after Enter'
 gradient_samples=0
 previous_frame=''
 frame_changed=0
