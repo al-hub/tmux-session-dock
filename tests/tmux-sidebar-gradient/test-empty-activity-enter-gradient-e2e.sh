@@ -80,12 +80,20 @@ sidebar="$(sidebar_for live2)"
 # Sample only after the live2 presenter has drawn its handover frame (its own
 # row marked current); until then the pane shows the frames of the handover
 # render sequence, whose cleared rows are not AI activity.
+# ... and until that frame has held still for a moment: the handover render
+# sequence (initial, geometry, enter fallback) can still repaint after the
+# first marked frame.
 handover_deadline=$(( $(date +%s) + 8 ))
+settled_plain=""
 while [ "$(date +%s)" -lt "$handover_deadline" ]; do
-    tmuxc capture-pane -p -t "$sidebar" 2>/dev/null | grep -Eq '^>[^a-z]*live2' && break
-    sleep 0.1
+    plain_now="$(tmuxc capture-pane -p -t "$sidebar" 2>/dev/null || true)"
+    if grep -Eq '^>[^a-z]*live2' <<< "$plain_now" && [ "$plain_now" = "$settled_plain" ]; then
+        break
+    fi
+    settled_plain="$plain_now"
+    sleep 0.3
 done
-tmuxc capture-pane -p -t "$sidebar" 2>/dev/null | grep -Eq '^>[^a-z]*live2' || fail_test 'live2 presenter never marked live2 current after Enter'
+grep -Eq '^>[^a-z]*live2' <<< "$settled_plain" || fail_test 'live2 presenter never marked live2 current after Enter'
 gradient_samples=0
 previous_frame=''
 frame_changed=0

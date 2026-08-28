@@ -30,7 +30,15 @@ tmuxc set-option -q -t '=node-codex:' @dotfiles_sidebar_managed 1
 sidebar="$(tmuxc split-window -d -P -F '#{pane_id}' -t '=node-codex:' -h -b -l 35 \
     "TMUX_SESSION_LAUNCHER_DEBUG=1 TMUX_SESSION_LAUNCHER_DEBUG_FILE='$DEBUG_FILE' TMUX_SESSION_SIDEBAR_STATE_REFRESH_SECONDS=1 TMUX_SESSION_SIDEBAR_ANIMATE_DETACHED=true TMUX_SESSION_SIDEBAR_POLL_TIMEOUT=0.05 '$LAUNCHER' --sidebar")"
 
-ai_pane="$(tmuxc list-panes -t '=node-codex:' -F '#{pane_id}|#{pane_current_command}' | awk -F'|' '$2 == "node" { print $1; exit }')"
+# tmux starts the command through a shell; the pane reports "node" only once
+# the interpreter has been exec'd, which can take a moment on a loaded runner.
+ai_pane=""
+node_deadline=$(( $(date +%s) + 8 ))
+while [ "$(date +%s)" -lt "$node_deadline" ]; do
+    ai_pane="$(tmuxc list-panes -t '=node-codex:' -F '#{pane_id}|#{pane_current_command}' | awk -F'|' '$2 == "node" { print $1; exit }')"
+    [ -n "$ai_pane" ] && break
+    sleep 0.1
+done
 [ -n "$ai_pane" ] || fail_test 'Codex-like pane is not reported as node'
 
 deadline=$(( $(date +%s) + 8 ))

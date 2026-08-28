@@ -104,9 +104,14 @@ for index in $(seq 0 4); do
     # Wait for the target presenter's handover frame (its own row marked
     # current) before sampling; the render sequence before it clears rows.
     handover_deadline=$(( $(date +%s) + 8 ))
+    settled_plain=""
     while [ "$(date +%s)" -lt "$handover_deadline" ]; do
-        tmuxc capture-pane -p -t "$(sidebar_for "$target")" 2>/dev/null | grep -Eq "^>[^a-z]*$target" && break
-        sleep 0.1
+        plain_now="$(tmuxc capture-pane -p -t "$(sidebar_for "$target")" 2>/dev/null || true)"
+        if grep -Eq "^>[^a-z]*$target" <<< "$plain_now" && [ "$plain_now" = "$settled_plain" ]; then
+            break
+        fi
+        settled_plain="$plain_now"
+        sleep 0.3
     done
     sleep 0.5
         declare -A gradient_seen=()
