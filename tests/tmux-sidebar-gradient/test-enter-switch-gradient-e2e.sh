@@ -77,18 +77,28 @@ check_current_sidebar_gradient()
     local expected_session="$1" pane frame_one frame_two plain names colors attempt sample full_samples
     pane="$(sidebar_for "$expected_session")"
     [ -n "$pane" ] || fail_test "sidebar missing after Enter switch to $expected_session"
+    # Sample only once the target presenter has drawn its handover frame (its
+    # own row marked current); before that the pane still shows the stale
+    # frame of a detached presenter, which does not animate.
     names=0
-    for attempt in $(seq 1 20); do
+    local current_marked=0
+    for attempt in $(seq 1 60); do
         frame_one="$(tmuxc capture-pane -e -p -t "$pane" 2>/dev/null || true)"
         plain="$(strip_ansi <<< "$frame_one")"
         names="$(grep -o 'eg[1-6]' <<< "$plain" | sort -u | wc -l | tr -d ' ' || true)"
-        [ "$names" -eq 6 ] && break
+        current_marked="$(grep -c "^>[^a-z]*$expected_session" <<< "$plain" || true)"
+        [ "$names" -eq 6 ] && [ "$current_marked" -ge 1 ] && break
         sleep 0.05
     done
     [ "$names" -eq 6 ] || fail_test "expected six session rows after switch to $expected_session, got $names"
+    [ "$current_marked" -ge 1 ] || fail_test "target presenter never marked $expected_session current after Enter"
     colors="$(grep -o '38;5;' <<< "$frame_one" | wc -l | tr -d ' ' || true)"
     [ "$colors" -ge 6 ] || fail_test "gradient disappeared after Enter switch to $expected_session"
+    # The wave cycles once per second (24 fps x 24 phases), so a sample taken
+    # exactly one second after frame_one repeats it; any differing sample in
+    # the window proves the animation is running.
     full_samples=0
+    local frame_changed=0
     for sample in $(seq 1 20); do
         sleep 0.05
         frame_two="$(tmuxc capture-pane -e -p -t "$pane" 2>/dev/null || true)"
@@ -98,9 +108,10 @@ check_current_sidebar_gradient()
         [ "$names" -eq 6 ] || continue
         full_samples=$((full_samples + 1))
         [ "$colors" -ge 6 ] || fail_test "gradient disappeared during post-Enter sample $sample on $expected_session"
+        [ "$frame_two" != "$frame_one" ] && frame_changed=1
     done
     [ "$full_samples" -ge 5 ] || fail_test "sidebar never stabilized for five gradient samples after Enter on $expected_session"
-    [ "$frame_one" != "$frame_two" ] || fail_test "gradient stopped changing after Enter switch to $expected_session"
+    [ "$frame_changed" -eq 1 ] || fail_test "gradient stopped changing after Enter switch to $expected_session"
 }
 
 for index in 1 2 3 4 5 6; do

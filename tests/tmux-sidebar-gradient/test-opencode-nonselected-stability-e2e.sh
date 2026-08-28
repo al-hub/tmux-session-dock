@@ -34,9 +34,11 @@ fail_test() {
 }
 
 for session in live1 live2; do
+    # The fake AI exits when its control file is missing, which would destroy
+    # the session before the sidebar is split into it: write it first.
+    printf 'active\n' > "$TMP_DIR/$session.control"
     tmuxc new-session -d -s "$session" -x 100 -y 30 \
         "'$TMP_DIR/opencode' '$FAKE_AI' '$TMP_DIR/$session.control'" >/dev/null
-    printf 'active\n' > "$TMP_DIR/$session.control"
     tmuxc set-option -q -t "=$session:" @dotfiles_sidebar_managed 1
     tmuxc split-window -d -h -b -l 35 -t "=$session:" \
         "TMUX_SESSION_LAUNCHER_DEBUG=1 TMUX_SESSION_LAUNCHER_DEBUG_FILE='$DEBUG_FILE' TMUX_SESSION_SIDEBAR_STATE_REFRESH_SECONDS=1 TMUX_SESSION_SIDEBAR_POLL_TIMEOUT=0.05 '$LAUNCHER' --sidebar"
@@ -101,8 +103,11 @@ for sample in $(seq 1 20); do
     gradient_samples=$((gradient_samples + 1))
 done
 
+# Both presenters log into DEBUG_FILE; only the attached live2 presenter is
+# under test here.  The detached live1 presenter repaints once after the
+# client leaves it, which is a handover artefact, not AI activity.
 activity_full_renders="$(tail -n "+$((debug_start_line + 1))" "$DEBUG_FILE" 2>/dev/null |
-    grep -c 'render_full start' || true)"
+    { grep "pane=$sidebar " || true; } | { grep -c 'render_full start' || true; })"
 [ "$activity_full_renders" -eq 0 ] ||
     fail_test "AI activity triggered $activity_full_renders full sidebar render(s)"
 

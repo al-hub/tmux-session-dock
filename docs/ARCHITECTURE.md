@@ -36,7 +36,7 @@ graph TD
 2. **Native `switch-client`**: Session switching executes pure native client switching without moving physical panes across windows.
 3. **0.75ms Fast-Path & In-Flight Handover**: In-place switching returns within 0.75ms with zero screen flicker.
 4. **Clean Shared History**: Session archive and restoration (`o`) preserves shell history with Zero Time-Travel Pollution.
-5. **24-Frame LUT Waveform Engine**: Real-time asynchronous background AI activity telemetry rendered at 30 FPS.
+5. **24-Phase Waveform Gradient**: Background AI activity observed once per second in every presenter; only the presenter with an attached client animates the wave, at 24 FPS (one cycle per second).
 
 ## 3. Subpane Pool Invariants
 

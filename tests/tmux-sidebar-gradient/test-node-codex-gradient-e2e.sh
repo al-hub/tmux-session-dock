@@ -28,7 +28,7 @@ fail_test() {
 tmuxc new-session -d -s node-codex -x 100 -y 30 "node '$FAKE_CODEX'"
 tmuxc set-option -q -t '=node-codex:' @dotfiles_sidebar_managed 1
 sidebar="$(tmuxc split-window -d -P -F '#{pane_id}' -t '=node-codex:' -h -b -l 35 \
-    "TMUX_SESSION_LAUNCHER_DEBUG=1 TMUX_SESSION_LAUNCHER_DEBUG_FILE='$DEBUG_FILE' TMUX_SESSION_SIDEBAR_STATE_REFRESH_SECONDS=1 TMUX_SESSION_SIDEBAR_POLL_TIMEOUT=0.05 '$LAUNCHER' --sidebar")"
+    "TMUX_SESSION_LAUNCHER_DEBUG=1 TMUX_SESSION_LAUNCHER_DEBUG_FILE='$DEBUG_FILE' TMUX_SESSION_SIDEBAR_STATE_REFRESH_SECONDS=1 TMUX_SESSION_SIDEBAR_ANIMATE_DETACHED=true TMUX_SESSION_SIDEBAR_POLL_TIMEOUT=0.05 '$LAUNCHER' --sidebar")"
 
 ai_pane="$(tmuxc list-panes -t '=node-codex:' -F '#{pane_id}|#{pane_current_command}' | awk -F'|' '$2 == "node" { print $1; exit }')"
 [ -n "$ai_pane" ] || fail_test 'Codex-like pane is not reported as node'

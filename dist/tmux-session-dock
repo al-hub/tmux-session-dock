@@ -2422,13 +2422,18 @@ SIDEBAR_WIDTH="${TMUX_SESSION_SIDEBAR_WIDTH:-35}"
 SIDEBAR_WIDTH_STATE_FILE="${TMUX_SESSION_SIDEBAR_WIDTH_STATE_FILE:-${XDG_STATE_HOME:-$HOME/.local/state}/dotfiles/tmux-sidebar-width}"
 SIDEBAR_BUSY_SECONDS="${TMUX_SESSION_SIDEBAR_BUSY_SECONDS:-10}"
 SIDEBAR_ANIMATION_ENABLED="${TMUX_SESSION_SIDEBAR_ANIMATION_ENABLED:-true}"
+# Animate the gradient in presenters whose session has no attached client too
+# (nobody sees those frames; only useful for headless captures such as tests).
+SIDEBAR_ANIMATE_DETACHED="${TMUX_SESSION_SIDEBAR_ANIMATE_DETACHED:-false}"
 SIDEBAR_POLL_TIMEOUT="${TMUX_SESSION_SIDEBAR_POLL_TIMEOUT:-0.15}"
 SIDEBAR_STATE_REFRESH_SECONDS="${TMUX_SESSION_SIDEBAR_STATE_REFRESH_SECONDS:-5}"
 SIDEBAR_AI_OBSERVATION_SECONDS="${TMUX_SESSION_SIDEBAR_AI_OBSERVATION_SECONDS:-1}"
 SIDEBAR_TRANSITION_RENDER_PENDING_GRACE_SECONDS="${TMUX_SESSION_SIDEBAR_TRANSITION_RENDER_PENDING_GRACE_SECONDS:-3}"
 SIDEBAR_FORCE_REFRESH_CHECK_SECONDS="${TMUX_SESSION_SIDEBAR_FORCE_REFRESH_CHECK_SECONDS:-1}"
 SIDEBAR_KEY_MAINTENANCE_COOLDOWN_MS="${TMUX_SESSION_SIDEBAR_KEY_MAINTENANCE_COOLDOWN_MS:-250}"
-SIDEBAR_ANIMATION_INTERVAL="${TMUX_SESSION_SIDEBAR_ANIMATION_INTERVAL:-0.033}"
+SIDEBAR_ANIMATION_INTERVAL="${TMUX_SESSION_SIDEBAR_ANIMATION_INTERVAL:-0.042}"
+# Frame clock in microseconds; 24 fps drives the 24-phase gradient once per second.
+SIDEBAR_ANIMATION_FRAME_US="${TMUX_SESSION_SIDEBAR_ANIMATION_FRAME_US:-41667}"
 SIDEBAR_IDLE_INTERVAL="${TMUX_SESSION_SIDEBAR_IDLE_INTERVAL:-$SIDEBAR_POLL_TIMEOUT}"
 SIDEBAR_ADAPTIVE_IDLE_READ="${TMUX_SESSION_SIDEBAR_ADAPTIVE_IDLE_READ:-true}"
 SIDEBAR_ADAPTIVE_IDLE_TIMEOUT="${TMUX_SESSION_SIDEBAR_ADAPTIVE_IDLE_TIMEOUT:-1.0}"
@@ -2516,6 +2521,7 @@ declare -A cached_pane_activity=()
 declare -A cached_pane_pid=()
 declare -A cached_pane_command=()
 declare -A previous_session_animate=()
+declare -A _session_name_fit_cache=()
 declare -a session_animate=()
 declare -a session_animation_seed=()
 declare -a session_animation_refresh_indexes=()
@@ -2595,6 +2601,7 @@ history_restore_in_progress=false
 restore_batch_mode=false
 animation_frame=0
 observer_post_handover_refresh=false
+animation_attached_override_until=0
 animation_tick_counter=0
 key_result=""
 key_raw=""
@@ -2873,6 +2880,12 @@ transition_context_begin()
     current_transition_source="$source_session"
     current_transition_target="$target_session"
     current_transition_target_window="$target_window"
+    # The client is leaving this presenter's session: stop animating now rather
+    # than at the next collect.  The target presenter takes the wave over.
+    if [ -n "${sidebar_session_cached:-}" ] && [ "$target_session" != "$sidebar_session_cached" ]; then
+        was_my_session_attached=false
+        animation_attached_override_until=0
+    fi
     tmux set-option -gq "$SIDEBAR_TRANSITION_OPTION" \
         "operation_id=$operation_id;source=$source_session;target=$target_session;result=running" 2>/dev/null || true
     local render_pending_window="${target_window:-}"
@@ -5957,6 +5970,13 @@ collect_sessions()
     current_session="$(sidebar_tmux_cmd display-message -p '#S' 2>/dev/null || true)"
     old_selected="$selected_session"
     debug_log "collect_sessions start force_scan=$force_scan current_session=$current_session old_selected=$old_selected"
+    local observer_sample_gap=false
+    if [ -n "${observer_last_sample_epoch:-}" ] &&
+        [ $((current_epoch_second - observer_last_sample_epoch)) -gt $((SIDEBAR_AI_OBSERVATION_SECONDS + 1)) ]; then
+        observer_sample_gap=true
+        trace_event "ai-observer.gap seconds=$((current_epoch_second - observer_last_sample_epoch))"
+    fi
+    observer_last_sample_epoch="$current_epoch_second"
     previous_session_animate=()
     for index in "${!session_names[@]}"; do
         previous_session_animate["${session_names[$index]}"]="${session_animate[$index]}"
@@ -6405,6 +6425,14 @@ EOF
         if [ "$session_switch_occurred" = "true" ] || [ "$resize_occurred" = "true" ] || [ "$client_switch_occurred" = "true" ]; then
             observer_observation="${_SIDEBAR_ACTIVITY_OBSERVATION[$name]:-$observer_observation}"
         fi
+        # Idle is "unchanged for SIDEBAR_BUSY_SECONDS of observation".  When the
+        # observer took no samples for a while (deferred behind transitions or
+        # a handover), its idle clock is stale: restart the grace from this
+        # sample rather than declaring a pane idle for a gap nobody observed.
+        if [ "$observer_sample_gap" = "true" ] &&
+            [ "${_SIDEBAR_ACTIVITY_LAST_CHANGED_AT[$name]+set}" = set ]; then
+            _SIDEBAR_ACTIVITY_LAST_CHANGED_AT["$name"]="$current_epoch_second"
+        fi
         sidebar_domain_activity_observe cli_state_value observer_state_changed \
             "$name" "$curr_pane_id" "$observer_pid" \
             "$observer_alive" "$observer_observation" "$current_epoch_second" "$SIDEBAR_BUSY_SECONDS"
@@ -6811,7 +6839,14 @@ format_session_name()
     [ "$width" -lt 0 ] && width=0
     local text=""
     local text_visual_width=0
-    if [ "$width" -gt 0 ]; then
+    # The fitted text and its cell width depend only on name and width.  The
+    # gradient renderer calls this per row per frame, so cache the result and
+    # keep the command-substitution forks below out of the frame path.
+    local fit_cache_key="${name}|${width}"
+    if [ "${_session_name_fit_cache[$fit_cache_key]+set}" = set ]; then
+        text="${_session_name_fit_cache[$fit_cache_key]%$'\x1f'*}"
+        text_visual_width="${_session_name_fit_cache[$fit_cache_key]##*$'\x1f'}"
+    elif [ "$width" -gt 0 ]; then
         local total_cell_width
         if declare -f sidebar_domain_animation_measure_cell_width >/dev/null 2>&1; then
             total_cell_width="$(sidebar_domain_animation_measure_cell_width "$name")"
@@ -6836,6 +6871,9 @@ format_session_name()
                 text_visual_width="${#text}"
             fi
         fi
+        _session_name_fit_cache["$fit_cache_key"]="${text}"$'\x1f'"${text_visual_width}"
+    else
+        _session_name_fit_cache["$fit_cache_key"]=$'\x1f'"0"
     fi
 
     local padding=$((width - text_visual_width))
@@ -7044,6 +7082,33 @@ render_transition_delta()
         return 0
     fi
     return 1
+}
+
+# Only the presenter whose session has an attached client animates.  A
+# detached window is not being watched, so redrawing its gradient at frame
+# rate (and holding the loop at the animation interval) only burns CPU.  Its
+# rows still carry the running state and animate again as soon as a client
+# switches to it: collect_sessions refreshes was_my_session_attached on every
+# observer tick and on every handover.
+# Refresh whether a client is attached to this presenter's session.  One
+# tmux fork; called once per second and on refresh signals so the animation
+# follows the client even while the AI observer is deferred or skipping.
+refresh_animation_attach_state()
+{
+    local my_session="${sidebar_session_cached:-}" clients
+    [ -n "$my_session" ] || return 0
+    clients="$(sidebar_tmux_cmd list-clients -F '#{?client_control_mode,,#{client_session}}' 2>/dev/null || true)"
+    case "|${clients//$'\n'/|}|" in
+        *"|$my_session|"*) was_my_session_attached=true ;;
+        *) was_my_session_attached=false ;;
+    esac
+}
+
+sidebar_animation_visible()
+{
+    [ "$SIDEBAR_ANIMATE_DETACHED" = "true" ] && return 0
+    [ "${was_my_session_attached:-false}" = "true" ] && return 0
+    [ "${EPOCHSECONDS:-$SECONDS}" -lt "${animation_attached_override_until:-0}" ]
 }
 
 render_animated_name_cells()
@@ -7351,6 +7416,11 @@ sidebar_consume_pending_target_marker()
     selection_coordinator_align_current "$target_session"
     current_session="$target_session"
     selected_session="$target_session"
+    # The client is switching to this presenter's session.  collect_sessions
+    # may still list it on the source session while the handover renders, and
+    # the observer stays in its post-handover grace afterwards, so treat this
+    # presenter as attached for that grace instead of waiting for a collect.
+    animation_attached_override_until=$(( ${EPOCHSECONDS:-$SECONDS} + SIDEBAR_TRANSITION_RENDER_PENDING_GRACE_SECONDS + 1 ))
     ensure_selection_visible
 
     # 5. Check if geometry or scroll offset shifted
@@ -9925,7 +9995,15 @@ run_tui()
     fi
 
     while true; do
-        sidebar_consume_pending_target_marker || true
+        # The handover marker is delivered by the USR2 refresh signal (consumed
+        # below on selection_sync_signal_tick) and re-checked on geometry
+        # signals.  Polling it here is only a fallback, so do it once per
+        # second: at animation rate it cost one or two tmux forks per frame.
+        marker_poll_epoch="${EPOCHSECONDS:-$SECONDS}"
+        if [ "$marker_poll_epoch" != "${last_marker_poll_epoch:-}" ]; then
+            last_marker_poll_epoch="$marker_poll_epoch"
+            sidebar_consume_pending_target_marker || true
+        fi
         if [ -n "$METRICS_FILE" ]; then
             maintenance_metrics_loops=$((maintenance_metrics_loops + 1))
             metrics_phase=read
@@ -9936,13 +10014,19 @@ run_tui()
         fi
         read_timeout="$SIDEBAR_IDLE_INTERVAL"
         has_animation=false
-        for index in "${!session_animate[@]}"; do
-            if [ "${session_animate[$index]}" = "true" ]; then
-                has_animation=true
-                read_timeout="$SIDEBAR_ANIMATION_INTERVAL"
-                break
-            fi
-        done
+        if sidebar_animation_visible; then
+            for index in "${!session_animate[@]}"; do
+                if [ "${session_animate[$index]}" = "true" ]; then
+                    has_animation=true
+                    read_timeout="$SIDEBAR_ANIMATION_INTERVAL"
+                    break
+                fi
+            done
+        fi
+        if [ "$has_animation" != "${last_has_animation:-}" ]; then
+            last_has_animation="$has_animation"
+            trace_event "animation.state animating=$has_animation attached=${was_my_session_attached:-unset} override_until=${animation_attached_override_until:-0} now=${EPOCHSECONDS:-$SECONDS}"
+        fi
         # Zero-Fork Event-Driven Timeout Calculation (No subshell forks in loop)
         if [ "$has_animation" = "true" ]; then
             read_timeout="$SIDEBAR_ANIMATION_INTERVAL"
@@ -10213,6 +10297,9 @@ run_tui()
             [ "$refresh_signal_tick" = "true" ] ||
             [ "$now" != "$last_tick" ]; then
             tick_signal_pending=false
+            if [ "$now" != "$last_tick" ] || [ "$refresh_signal_tick" = "true" ]; then
+                refresh_animation_attach_state
+            fi
             if [ "$now" != "$last_tick" ]; then
                 maintenance_tick=true
                 if [ -n "$key" ]; then
@@ -10324,13 +10411,14 @@ run_tui()
         fi
 
         if [ -z "$key" ] && [ "$view_mode" = "sessions" ] &&
-            [ "$SIDEBAR_ANIMATION_ENABLED" = "true" ]; then
+            [ "$SIDEBAR_ANIMATION_ENABLED" = "true" ] && sidebar_animation_visible; then
             animation_tick_counter=$((animation_tick_counter + 1))
             if [ "$animation_tick_counter" -ge 1 ]; then
                 animation_tick_counter=0
                 if [ -n "${EPOCHREALTIME:-}" ]; then
                     local now_us="${EPOCHREALTIME/./}"
-                    animation_frame=$(( (now_us / 33333) % 24 ))
+                    # 24 frames per second, one 24-phase wave cycle per second.
+                    animation_frame=$(( (now_us / SIDEBAR_ANIMATION_FRAME_US) % 24 ))
                 else
                     animation_frame=$(((animation_frame + 1) % 24))
                 fi

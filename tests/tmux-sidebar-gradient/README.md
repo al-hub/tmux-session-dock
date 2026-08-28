@@ -2,6 +2,8 @@
 
 이 테스트는 production launcher의 renderer, fingerprint, 상태 전이와 tmux lifecycle을 검증한다. 실제 AI CLI나 네트워크는 사용하지 않는다.
 
+애니메이션은 client 가 attach 된 presenter 에서만 돈다. client 없이 frame 을 capture 하는 테스트는 launcher 에 `TMUX_SESSION_SIDEBAR_ANIMATE_DETACHED=true` 를 준다. wave 주기는 정확히 1초(24fps × 24 phase)이므로 frame 변화를 1초 간격 두 샘플로만 비교하면 aliasing 된다.
+
 ## 실행
 
 ```sh
@@ -21,6 +23,7 @@ tmux socket 접근이 제한된 sandbox에서는 `test-lifecycle-e2e.sh` 실행�
 - `test-session-isolation.sh`: 여러 session의 animation 상태 독립성 검증
 - `test-lifecycle-e2e.sh`: 격리 tmux와 fake `codex`를 사용한 시작, 정지, 재시작, 종료 검증
 - `test-equal-size-enter-observer-continues-e2e.sh`: 같은 크기 window 간 Enter 전환 후 target presenter 의 AI 관측이 계속되는지(gradient 시작·종료) 검증. handover 가 남긴 `transition_render_pending` marker 뒤에서 observer 가 영구 정지하던 회귀
+- `test-detached-presenter-no-animation-e2e.sh`: client 가 붙은 presenter 만 gradient 를 애니메이션하고, detached presenter 는 정적 frame 을 유지하며, Enter 전환 시 애니메이션이 client 를 따라가는지 검증
 - `test-regressions.sh`: idle grace, spinner 재그리기 관측, pane 세대 초기화, session/client 전환과 resize 회귀 검증
 - `lib.sh`: launcher 함수 로딩, tmux snapshot stub, assertion 공통 helper. `run_test`는 test 본문을 errexit subshell로 실행하므로 모든 `assert_*` 실패가 FAIL이 된다
 

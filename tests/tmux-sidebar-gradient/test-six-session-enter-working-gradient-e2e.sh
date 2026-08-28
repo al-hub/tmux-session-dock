@@ -15,7 +15,8 @@ DEBUG_FILE="$TMP_DIR/debug.log"
 mkdir -p "$CONTROL_DIR" "$HEARTBEAT_DIR"
 cp "$(command -v bash)" "$TMP_DIR/codex"
 
-cleanup() { kill "${CLIENT_PID:-}" >/dev/null 2>&1 || true; tmux -L "$SOCKET" kill-server >/dev/null 2>&1 || true; rm -rf "$TMP_DIR"; }
+# Fake AI processes may still write heartbeats for a moment after kill-server; retry the cleanup.
+cleanup() { kill "${CLIENT_PID:-}" >/dev/null 2>&1 || true; tmux -L "$SOCKET" kill-server >/dev/null 2>&1 || true; rm -rf "$TMP_DIR" 2>/dev/null || { sleep 0.5; rm -rf "$TMP_DIR" 2>/dev/null || true; }; }
 trap cleanup EXIT INT TERM
 tmuxc() { tmux -L "$SOCKET" -f "$TEST_TMUX_CONF" "$@"; }
 client_session() { tmuxc list-clients -F '#{session_name}' | head -n 1; }
