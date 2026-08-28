@@ -85,6 +85,12 @@ SIDEBAR_ANIMATE_DETACHED="${TMUX_SESSION_SIDEBAR_ANIMATE_DETACHED:-false}"
 SIDEBAR_POLL_TIMEOUT="${TMUX_SESSION_SIDEBAR_POLL_TIMEOUT:-0.15}"
 SIDEBAR_STATE_REFRESH_SECONDS="${TMUX_SESSION_SIDEBAR_STATE_REFRESH_SECONDS:-5}"
 SIDEBAR_AI_OBSERVATION_SECONDS="${TMUX_SESSION_SIDEBAR_AI_OBSERVATION_SECONDS:-1}"
+# shared: one --observe process per tmux server samples every AI pane and
+# publishes a state file the presenters read; local: every presenter observes
+# on its own (the pre-v0.3.27 behaviour, kept as fallback).
+SIDEBAR_AI_OBSERVER_MODE="${TMUX_SESSION_SIDEBAR_AI_OBSERVER:-shared}"
+SIDEBAR_AI_OBSERVER_STALE_SECONDS="${TMUX_SESSION_SIDEBAR_AI_OBSERVER_STALE_SECONDS:-4}"
+SIDEBAR_AI_OBSERVER_IDLE_EXIT_SECONDS="${TMUX_SESSION_SIDEBAR_AI_OBSERVER_IDLE_EXIT_SECONDS:-30}"
 SIDEBAR_TRANSITION_RENDER_PENDING_GRACE_SECONDS="${TMUX_SESSION_SIDEBAR_TRANSITION_RENDER_PENDING_GRACE_SECONDS:-3}"
 SIDEBAR_FORCE_REFRESH_CHECK_SECONDS="${TMUX_SESSION_SIDEBAR_FORCE_REFRESH_CHECK_SECONDS:-1}"
 SIDEBAR_KEY_MAINTENANCE_COOLDOWN_MS="${TMUX_SESSION_SIDEBAR_KEY_MAINTENANCE_COOLDOWN_MS:-250}"
@@ -3628,6 +3634,7 @@ collect_sessions()
     current_session="$(sidebar_tmux_cmd display-message -p '#S' 2>/dev/null || true)"
     old_selected="$selected_session"
     debug_log "collect_sessions start force_scan=$force_scan current_session=$current_session old_selected=$old_selected"
+    ai_observer_sync "$current_epoch_second" || true
     local observer_sample_gap=false
     if [ -n "${observer_last_sample_epoch:-}" ] &&
         [ $((current_epoch_second - observer_last_sample_epoch)) -gt $((SIDEBAR_AI_OBSERVATION_SECONDS + 1)) ]; then
@@ -4020,99 +4027,105 @@ EOF
         ai_fingerprint_value=""
         previous_ai_fingerprint_value="${session_ai_fingerprint[$name]:-}"
 
-        # Every known AI pane follows the same observation path, whether its
-        # session is selected or not.  Selection is presenter state, not AI
-        # activity state.
-        if [ "$fast_path_active" != "true" ] && {
-            [ "$force_scan" = "true" ] ||
-            [ "$name" = "$requested_scan_session" ] ||
-            [ -n "${session_ai_direct_pane_id[$name]:-}" ] ||
-            [ "$pane_generation_changed" = "true" ] ||
-            [ -z "${cached_session_cli_state[$name]:-}" ]; }; then
-            if [ -n "$metrics_start" ]; then
-                metrics_ai_refreshes=$((metrics_ai_refreshes + 1))
-            fi
-            probe_processes=false
-            capture_fingerprint=true
-            if [ "$force_scan" = "true" ] ||
-                [ -n "${session_ai_direct_pane_id[$name]:-}" ] ||
+        if [ "$shared_ai_fresh" = true ]; then
+            # The shared observer already sampled this session; presenters only
+            # consume its verdict (no capture, no probe, no terminal-sync).
+            ai_observer_apply_shared "$name"
+        else
+            # Every known AI pane follows the same observation path, whether its
+            # session is selected or not.  Selection is presenter state, not AI
+            # activity state.
+            if [ "$fast_path_active" != "true" ] && {
+                [ "$force_scan" = "true" ] ||
                 [ "$name" = "$requested_scan_session" ] ||
-                [ -z "${cached_session_cli_state[$name]:-}" ]; then
-                probe_processes=true
+                [ -n "${session_ai_direct_pane_id[$name]:-}" ] ||
+                [ "$pane_generation_changed" = "true" ] ||
+                [ -z "${cached_session_cli_state[$name]:-}" ]; }; then
+                if [ -n "$metrics_start" ]; then
+                    metrics_ai_refreshes=$((metrics_ai_refreshes + 1))
+                fi
+                probe_processes=false
+                capture_fingerprint=true
+                if [ "$force_scan" = "true" ] ||
+                    [ -n "${session_ai_direct_pane_id[$name]:-}" ] ||
+                    [ "$name" = "$requested_scan_session" ] ||
+                    [ -z "${cached_session_cli_state[$name]:-}" ]; then
+                    probe_processes=true
+                fi
+                direct_probe_pane="${session_ai_direct_pane_id[$name]:-${session_ai_probe_pane_ids[$name]:-}}"
+                allow_shell_child_probe=true
+                trace_event "collect.ai-probe.begin session=$name probe=$probe_processes fingerprint=$capture_fingerprint"
+                if [ -n "$metrics_start" ]; then
+                    metrics_phase_start="$(metrics_now_us)"
+                fi
+                session_cli_state_for_session "$name" "$probe_processes" "$capture_fingerprint" "$allow_shell_child_probe"
+                if [ -n "$metrics_start" ]; then
+                    metrics_ai_us=$((metrics_ai_us + $(metrics_now_us) - metrics_phase_start))
+                    metrics_ai_count=$((metrics_ai_count + 1))
+                fi
+                trace_event "collect.ai-probe.end session=$name"
+                cached_session_cli_state["$name"]="$session_cli_state_result"
+                cached_session_ai_fingerprint["$name"]="$session_ai_fingerprint_result"
+            elif [ -n "$metrics_start" ]; then
+                # Cached session: the observer below reuses the stored fingerprint.
+                metrics_ai_cache_hits=$((metrics_ai_cache_hits + 1))
             fi
-            direct_probe_pane="${session_ai_direct_pane_id[$name]:-${session_ai_probe_pane_ids[$name]:-}}"
-            allow_shell_child_probe=true
-            trace_event "collect.ai-probe.begin session=$name probe=$probe_processes fingerprint=$capture_fingerprint"
-            if [ -n "$metrics_start" ]; then
-                metrics_phase_start="$(metrics_now_us)"
-            fi
-            session_cli_state_for_session "$name" "$probe_processes" "$capture_fingerprint" "$allow_shell_child_probe"
-            if [ -n "$metrics_start" ]; then
-                metrics_ai_us=$((metrics_ai_us + $(metrics_now_us) - metrics_phase_start))
-                metrics_ai_count=$((metrics_ai_count + 1))
-            fi
-            trace_event "collect.ai-probe.end session=$name"
-            cached_session_cli_state["$name"]="$session_cli_state_result"
-            cached_session_ai_fingerprint["$name"]="$session_ai_fingerprint_result"
-        elif [ -n "$metrics_start" ]; then
-            # Cached session: the observer below reuses the stored fingerprint.
-            metrics_ai_cache_hits=$((metrics_ai_cache_hits + 1))
-        fi
 
-        if [ -z "${cached_session_cli_state[$name]:-}" ]; then
-            if [ "${session_has_busy_command[$name]:-false}" = "true" ]; then
-                cached_session_cli_state["$name"]="active"
-            else
-                cached_session_cli_state["$name"]="idle"
+            if [ -z "${cached_session_cli_state[$name]:-}" ]; then
+                if [ "${session_has_busy_command[$name]:-false}" = "true" ]; then
+                    cached_session_cli_state["$name"]="active"
+                else
+                    cached_session_cli_state["$name"]="idle"
+                fi
+                cached_session_ai_fingerprint["$name"]=""
             fi
-            cached_session_ai_fingerprint["$name"]=""
-        fi
 
-        ai_fingerprint_value="${cached_session_ai_fingerprint[$name]:-}"
-        curr_pane_id="${session_ai_direct_pane_id[$name]:-}"
-        observer_alive=false
-        observer_pid=""
-        if [ -n "$curr_pane_id" ]; then
-            observer_pid="${cached_pane_pid[$curr_pane_id]:-}"
-            [ -n "$ai_fingerprint_value" ] && observer_alive=true
-        fi
-        observer_observation="$ai_fingerprint_value"
-        # Focus, resize, and client/session switching can alter terminal
-        # capture presentation without indicating AI work.  Ignore that one
-        # adapter sample; the grace-period policy preserves the prior state.
-        if [ "$session_switch_occurred" = "true" ] || [ "$resize_occurred" = "true" ] || [ "$client_switch_occurred" = "true" ]; then
-            observer_observation="${_SIDEBAR_ACTIVITY_OBSERVATION[$name]:-$observer_observation}"
-        fi
-        # Idle is "unchanged for SIDEBAR_BUSY_SECONDS of observation".  When the
-        # observer took no samples for a while (deferred behind transitions or
-        # a handover), its idle clock is stale: restart the grace from this
-        # sample rather than declaring a pane idle for a gap nobody observed.
-        if [ "$observer_sample_gap" = "true" ] &&
-            [ "${_SIDEBAR_ACTIVITY_LAST_CHANGED_AT[$name]+set}" = set ]; then
-            _SIDEBAR_ACTIVITY_LAST_CHANGED_AT["$name"]="$current_epoch_second"
-        fi
-        sidebar_domain_activity_observe cli_state_value observer_state_changed \
-            "$name" "$curr_pane_id" "$observer_pid" \
-            "$observer_alive" "$observer_observation" "$current_epoch_second" "$SIDEBAR_BUSY_SECONDS"
-        # Presenters have independent observer clocks. Publish the fingerprint
-        # that reached a terminal state and honor it only when the local pane
-        # still has that exact fingerprint. A later AI redraw therefore cannot
-        # be suppressed by an older idle observation from another presenter.
-        activity_terminal_option="@dotfiles_sidebar_ai_terminal_${name}"
-        if [ "$cli_state_value" = idle ] || [ "$cli_state_value" = gone ]; then
-            activity_terminal_value="$cli_state_value:$ai_fingerprint_value"
-            previous_activity_terminal_value="$(tmux show-option -gqv "$activity_terminal_option" 2>/dev/null || true)"
-            if [ "$previous_activity_terminal_value" != "$activity_terminal_value" ]; then
-                tmux set-option -gq "$activity_terminal_option" "$activity_terminal_value" 2>/dev/null || true
-                signal_managed_sidebar_refresh_batch
-                trace_event "ai-observer.terminal-sync session=$name state=$cli_state_value result=published"
-            else
-                trace_event "ai-observer.terminal-sync session=$name state=$cli_state_value result=unchanged"
+            ai_fingerprint_value="${cached_session_ai_fingerprint[$name]:-}"
+            curr_pane_id="${session_ai_direct_pane_id[$name]:-}"
+            observer_alive=false
+            observer_pid=""
+            if [ -n "$curr_pane_id" ]; then
+                observer_pid="${cached_pane_pid[$curr_pane_id]:-}"
+                [ -n "$ai_fingerprint_value" ] && observer_alive=true
             fi
-        elif [ "$cli_state_value" = running ] && [ -n "$ai_fingerprint_value" ] &&
-            [ "$(tmux show-option -gqv "$activity_terminal_option" 2>/dev/null || true)" = "idle:$ai_fingerprint_value" ]; then
-            cli_state_value=idle
-            observer_state_changed=true
+            observer_observation="$ai_fingerprint_value"
+            # Focus, resize, and client/session switching can alter terminal
+            # capture presentation without indicating AI work.  Ignore that one
+            # adapter sample; the grace-period policy preserves the prior state.
+            if [ "$session_switch_occurred" = "true" ] || [ "$resize_occurred" = "true" ] || [ "$client_switch_occurred" = "true" ]; then
+                observer_observation="${_SIDEBAR_ACTIVITY_OBSERVATION[$name]:-$observer_observation}"
+            fi
+            # Idle is "unchanged for SIDEBAR_BUSY_SECONDS of observation".  When the
+            # observer took no samples for a while (deferred behind transitions or
+            # a handover), its idle clock is stale: restart the grace from this
+            # sample rather than declaring a pane idle for a gap nobody observed.
+            if [ "$observer_sample_gap" = "true" ] &&
+                [ "${_SIDEBAR_ACTIVITY_LAST_CHANGED_AT[$name]+set}" = set ]; then
+                _SIDEBAR_ACTIVITY_LAST_CHANGED_AT["$name"]="$current_epoch_second"
+            fi
+            sidebar_domain_activity_observe cli_state_value observer_state_changed \
+                "$name" "$curr_pane_id" "$observer_pid" \
+                "$observer_alive" "$observer_observation" "$current_epoch_second" "$SIDEBAR_BUSY_SECONDS"
+            # Presenters have independent observer clocks. Publish the fingerprint
+            # that reached a terminal state and honor it only when the local pane
+            # still has that exact fingerprint. A later AI redraw therefore cannot
+            # be suppressed by an older idle observation from another presenter.
+            activity_terminal_option="@dotfiles_sidebar_ai_terminal_${name}"
+            if [ "$cli_state_value" = idle ] || [ "$cli_state_value" = gone ]; then
+                activity_terminal_value="$cli_state_value:$ai_fingerprint_value"
+                previous_activity_terminal_value="$(tmux show-option -gqv "$activity_terminal_option" 2>/dev/null || true)"
+                if [ "$previous_activity_terminal_value" != "$activity_terminal_value" ]; then
+                    tmux set-option -gq "$activity_terminal_option" "$activity_terminal_value" 2>/dev/null || true
+                    signal_managed_sidebar_refresh_batch
+                    trace_event "ai-observer.terminal-sync session=$name state=$cli_state_value result=published"
+                else
+                    trace_event "ai-observer.terminal-sync session=$name state=$cli_state_value result=unchanged"
+                fi
+            elif [ "$cli_state_value" = running ] && [ -n "$ai_fingerprint_value" ] &&
+                [ "$(tmux show-option -gqv "$activity_terminal_option" 2>/dev/null || true)" = "idle:$ai_fingerprint_value" ]; then
+                cli_state_value=idle
+                observer_state_changed=true
+            fi
         fi
         animate_value=false
         [ "$cli_state_value" = running ] && animate_value=true
@@ -4828,6 +4841,253 @@ render_animated_name_cells()
     fi
 }
 
+# ---------------------------------------------------------------------------
+# Shared AI activity observer
+#
+# One `--observe` process per tmux server samples every AI pane once per
+# SIDEBAR_AI_OBSERVATION_SECONDS and publishes the result in a state file:
+#
+#   #ts <epoch> pid <pid> interval <seconds>
+#   <session>\t<state>\t<pane_id>\t<fingerprint>
+#
+# Presenters read that file with builtins (no fork) instead of capturing and
+# probing the panes themselves, so the observation cost no longer scales with
+# the number of presenters and every presenter shows the same state.
+# ---------------------------------------------------------------------------
+declare -gA shared_ai_state=()
+declare -gA shared_ai_fp=()
+declare -gA shared_ai_pane=()
+shared_ai_fresh=false
+shared_ai_last_spawn_epoch=0
+
+ai_observer_socket_tag()
+{
+    local socket_name
+    socket_name="$(tmux display-message -p '#{socket_path}' 2>/dev/null || printf '%s' "${TMUX%%,*}")"
+    socket_name="$(printf '%s' "$socket_name" | tr -c 'A-Za-z0-9_.-' '_')"
+    printf '%s\n' "${socket_name:-default}"
+}
+
+ai_observer_state_path()
+{
+    [ -n "${AI_OBSERVER_STATE_PATH_CACHED:-}" ] && { printf '%s\n' "$AI_OBSERVER_STATE_PATH_CACHED"; return 0; }
+    AI_OBSERVER_STATE_PATH_CACHED="${TMUX_SESSION_LAUNCHER_LOCK_ROOT:-/tmp}/dotfiles-sidebar-ai-$(ai_observer_socket_tag).state"
+    printf '%s\n' "$AI_OBSERVER_STATE_PATH_CACHED"
+}
+
+ai_observer_lock_dir()
+{
+    printf '%s.lock\n' "$(ai_observer_state_path)"
+}
+
+ai_observer_pid()
+{
+    local lock_dir pid
+    lock_dir="$(ai_observer_lock_dir)"
+    pid="$(cat "$lock_dir/pid" 2>/dev/null || true)"
+    case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+    kill -0 "$pid" 2>/dev/null || return 1
+    printf '%s\n' "$pid"
+}
+
+# Load the shared state file into shared_ai_*.  Returns 0 when the file is
+# fresh (written within SIDEBAR_AI_OBSERVER_STALE_SECONDS), 1 otherwise.
+ai_observer_state_load()
+{
+    local path now_epoch="${1:-${EPOCHSECONDS:-$SECONDS}}" line ts="" name state pane fp rest
+    path="$(ai_observer_state_path)"
+    shared_ai_state=()
+    shared_ai_fp=()
+    shared_ai_pane=()
+    [ -r "$path" ] || return 1
+    while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in
+            '#ts '*)
+                rest="${line#\#ts }"
+                ts="${rest%% *}"
+                continue
+                ;;
+            ''|'#'*) continue ;;
+        esac
+        IFS=$'\t' read -r name state pane fp <<< "$line"
+        [ -n "$name" ] || continue
+        shared_ai_state["$name"]="$state"
+        shared_ai_pane["$name"]="$pane"
+        shared_ai_fp["$name"]="$fp"
+    done < "$path"
+    case "$ts" in ''|*[!0-9]*) return 1 ;; esac
+    [ $((now_epoch - ts)) -le "$SIDEBAR_AI_OBSERVER_STALE_SECONDS" ]
+}
+
+# Start the shared observer when none is alive.  Throttled so a presenter that
+# keeps seeing a stale file does not fork a spawn attempt every tick.
+ensure_ai_observer()
+{
+    local now_epoch="${EPOCHSECONDS:-$SECONDS}"
+    [ "$SIDEBAR_AI_OBSERVER_MODE" = shared ] || return 1
+    ai_observer_pid >/dev/null 2>&1 && return 0
+    [ $((now_epoch - shared_ai_last_spawn_epoch)) -ge 5 ] || return 1
+    shared_ai_last_spawn_epoch="$now_epoch"
+    trace_event "ai-observer.spawn path=$(ai_observer_state_path)"
+    # run-shell starts the observer under the tmux server's environment; hand
+    # it this presenter's observation settings explicitly so a configured
+    # grace, interval or lock root applies to the shared verdict as well.
+    local spawn_env
+    printf -v spawn_env 'TMUX_SESSION_SIDEBAR_BUSY_SECONDS=%q TMUX_SESSION_SIDEBAR_AI_OBSERVATION_SECONDS=%q TMUX_SESSION_SIDEBAR_STATE_REFRESH_SECONDS=%q TMUX_SESSION_SIDEBAR_AI_OBSERVER_IDLE_EXIT_SECONDS=%q TMUX_SESSION_LAUNCHER_LOCK_ROOT=%q TMUX_SESSION_LAUNCHER_TRACE=%q TMUX_SESSION_LAUNCHER_TRACE_FILE=%q TMUX_SESSION_LAUNCHER_DEBUG=%q TMUX_SESSION_LAUNCHER_DEBUG_FILE=%q' \
+        "$SIDEBAR_BUSY_SECONDS" "$SIDEBAR_AI_OBSERVATION_SECONDS" "$SIDEBAR_STATE_REFRESH_SECONDS" "$SIDEBAR_AI_OBSERVER_IDLE_EXIT_SECONDS" \
+        "${TMUX_SESSION_LAUNCHER_LOCK_ROOT:-/tmp}" "${TMUX_SESSION_LAUNCHER_TRACE:-0}" "${TMUX_SESSION_LAUNCHER_TRACE_FILE:-}" \
+        "${TMUX_SESSION_LAUNCHER_DEBUG:-0}" "${TMUX_SESSION_LAUNCHER_DEBUG_FILE:-}"
+    sidebar_tmux_cmd run-shell -b "env $spawn_env '$SCRIPT_PATH' --observe >/dev/null 2>&1" 2>/dev/null || true
+}
+
+# Refresh shared_ai_* for this collect.  Sets shared_ai_fresh.
+ai_observer_sync()
+{
+    local now_epoch="${1:-${EPOCHSECONDS:-$SECONDS}}"
+    shared_ai_fresh=false
+    [ "$SIDEBAR_AI_OBSERVER_MODE" = shared ] || return 1
+    if ai_observer_state_load "$now_epoch"; then
+        shared_ai_fresh=true
+        return 0
+    fi
+    trace_event "ai-observer.state-stale path=$(ai_observer_state_path)"
+    ensure_ai_observer
+    return 1
+}
+
+# Apply the shared observation for one session inside collect_sessions.
+# Leaves cli_state_value, ai_fingerprint_value, observer_state_changed and
+# session_ai_direct_pane_id the way the local observation path would.
+ai_observer_apply_shared()
+{
+    local name="$1" previous_state
+    previous_state="${cached_session_cli_state[$name]:-}"
+    cli_state_value="${shared_ai_state[$name]:-gone}"
+    ai_fingerprint_value="${shared_ai_fp[$name]:-}"
+    if [ -n "${shared_ai_pane[$name]:-}" ]; then
+        session_ai_direct_pane_id["$name"]="${shared_ai_pane[$name]}"
+    else
+        unset 'session_ai_direct_pane_id[$name]'
+    fi
+    cached_session_ai_fingerprint["$name"]="$ai_fingerprint_value"
+    if [ "$previous_state" != "$cli_state_value" ]; then
+        observer_state_changed=true
+    else
+        observer_state_changed=false
+    fi
+}
+
+# The --observe process.  Exits when another observer holds the lock, when
+# the tmux server is gone, or when no sidebar pane has existed for
+# SIDEBAR_AI_OBSERVER_IDLE_EXIT_SECONDS.
+run_ai_observer()
+{
+    local state_path lock_dir tmp_path panes_snapshot now interval
+    local pane_session pane_id pane_title pane_command pane_activity pane_pid
+    local -A ai_pane_for_session=() observed_sessions=()
+    local -A probed_pane_pid=() probed_ai_pane=()
+    local name pane fp alive obs_state obs_changed body line idle_since="" shell_probe_epoch=0
+    state_path="$(ai_observer_state_path)"
+    lock_dir="${state_path}.lock"
+    interval="$SIDEBAR_AI_OBSERVATION_SECONDS"
+    case "$interval" in ''|*[!0-9]*) interval=1 ;; esac
+
+    if ! mkdir "$lock_dir" 2>/dev/null; then
+        if ai_observer_pid >/dev/null 2>&1; then
+            trace_event "ai-observer.duplicate holder=$(cat "$lock_dir/pid" 2>/dev/null || true)"
+            return 0
+        fi
+        rm -rf "$lock_dir" 2>/dev/null || true
+        mkdir "$lock_dir" 2>/dev/null || return 1
+    fi
+    printf '%s\n' "$$" > "$lock_dir/pid"
+    trap 'rm -rf "$lock_dir" 2>/dev/null; exit 0' EXIT INT TERM HUP
+    trace_event "ai-observer.start pid=$$ state=$state_path interval=$interval"
+
+    while true; do
+        now="${EPOCHSECONDS:-$(date +%s)}"
+        panes_snapshot="$(tmux list-panes -a -F '#{session_name}	#{pane_id}	#{pane_title}	#{pane_current_command}	#{pane_activity}:#{history_size}:#{cursor_y}:#{cursor_x}	#{pane_pid}' 2>/dev/null)" || {
+            trace_event "ai-observer.exit reason=no-server"
+            return 0
+        }
+        # Sidebar liveness: leave when no presenter has existed for a while.
+        if grep -Fq "	$SIDEBAR_TITLE	" <<< "$panes_snapshot"; then
+            idle_since=""
+        else
+            [ -n "$idle_since" ] || idle_since="$now"
+            if [ $((now - idle_since)) -ge "$SIDEBAR_AI_OBSERVER_IDLE_EXIT_SECONDS" ]; then
+                trace_event "ai-observer.exit reason=no-sidebars"
+                return 0
+            fi
+        fi
+
+        ai_pane_for_session=()
+        observed_sessions=()
+        cached_pane_activity=()
+        cached_pane_pid=()
+        cached_pane_command=()
+        local -a probe_candidates=()
+        while IFS=$'\t' read -r pane_session pane_id pane_title pane_command pane_activity pane_pid; do
+            [ -n "$pane_id" ] || continue
+            [ "$pane_title" != "$SIDEBAR_TITLE" ] || continue
+            observed_sessions["$pane_session"]=1
+            cached_pane_activity["$pane_id"]="$pane_activity"
+            cached_pane_pid["$pane_id"]="$pane_pid"
+            cached_pane_command["$pane_id"]="$pane_command"
+            if is_ai_cli_command "$pane_command"; then
+                ai_pane_for_session["$pane_session"]="$pane_id"
+            elif ! is_passive_command "$pane_command" || is_shell_command "$pane_command"; then
+                # node/python wrappers and shells may hide an AI CLI in their
+                # process tree (fake-codex-node.js, claude started from bash).
+                probe_candidates+=("${pane_session}"$'\t'"${pane_id}"$'\t'"${pane_pid}")
+            fi
+        done <<< "$panes_snapshot"
+
+        # The process-tree walk is the expensive probe: run it for a pane the
+        # first time it is seen (or when its pid changed), then only every
+        # SIDEBAR_STATE_REFRESH_SECONDS; in between reuse the last verdict.
+        local probe_all=false probe_entry probe_session probe_pane probe_pid
+        if [ $((now - shell_probe_epoch)) -ge "$SIDEBAR_STATE_REFRESH_SECONDS" ]; then
+            shell_probe_epoch="$now"
+            probe_all=true
+        fi
+        for probe_entry in "${probe_candidates[@]}"; do
+            IFS=$'\t' read -r probe_session probe_pane probe_pid <<< "$probe_entry"
+            [ -z "${ai_pane_for_session[$probe_session]:-}" ] || continue
+            if [ "$probe_all" = true ] || [ "${probed_pane_pid[$probe_pane]:-}" != "$probe_pid" ]; then
+                probed_pane_pid["$probe_pane"]="$probe_pid"
+                if pane_has_ai_cli_process "$probe_pane"; then
+                    probed_ai_pane["$probe_pane"]=1
+                else
+                    unset 'probed_ai_pane[$probe_pane]'
+                fi
+            fi
+            [ -n "${probed_ai_pane[$probe_pane]:-}" ] && ai_pane_for_session["$probe_session"]="$probe_pane"
+        done
+
+        body=""
+        for name in "${!observed_sessions[@]}"; do
+            pane="${ai_pane_for_session[$name]:-}"
+            fp=""
+            alive=false
+            if [ -n "$pane" ]; then
+                fp="$(session_ai_fingerprint_for_pane "$pane")"
+                [ -n "$fp" ] && alive=true
+            fi
+            # Output namerefs must not collide with the observer's own locals.
+            local pane_pid_value=""
+            [ -n "$pane" ] && pane_pid_value="${cached_pane_pid[$pane]:-}"
+            sidebar_domain_activity_observe obs_state obs_changed \
+                "$name" "$pane" "$pane_pid_value" "$alive" "$fp" "$now" "$SIDEBAR_BUSY_SECONDS"
+            [ "$obs_changed" = true ] && trace_event "ai-observer.state session=$name state=$obs_state pane=${pane:-none}"
+            body+="${name}"$'\t'"${obs_state}"$'\t'"${pane}"$'\t'"${fp}"$'\n'
+        done
+
+        tmp_path="${state_path}.tmp.$$"
+        printf '#ts %s pid %s interval %s\n%s' "$now" "$$" "$interval" "$body" > "$tmp_path" && mv -f "$tmp_path" "$state_path"
+        sleep "$interval"
+    done
+}
 refresh_sidebar_state_if_due()
 {
     # Session switching owns the layout/frame boundary.  An observer tick
@@ -4871,7 +5131,10 @@ refresh_sidebar_state_if_due()
             # With nothing tracked anywhere, rescan every
             # SIDEBAR_STATE_REFRESH_SECONDS so newly started AI CLIs are found.
             local selected_can_skip=false
-            if session_has_shell_pane "$selected_session"; then
+            if [ "$shared_ai_fresh" = true ]; then
+                # AI detection is the shared observer's job; nothing to probe here.
+                selected_can_skip=true
+            elif session_has_shell_pane "$selected_session"; then
                 # A selected shell only needs a cheap process-tree probe.  Do
                 # not rebuild the target snapshot when no AI child exists.
                 if ! session_has_shell_child_ai_process "$selected_session"; then
@@ -7682,6 +7945,7 @@ run_tui()
     last_tick="$(epoch_now)"
     sidebar_session_cached="$(sidebar_session_name || true)"
     [ -n "$sidebar_session_cached" ] || sidebar_session_cached="$current_session"
+    ensure_ai_observer || true
     last_force_refresh_check_epoch="$last_tick"
     post_operation_fast_read=true
     if [ "$SIDEBAR_SIGNAL_TIMER_ENABLED" = "true" ]; then
@@ -8153,6 +8417,10 @@ main()
     debug_log "main start args=$* current_session=$(tmux display-message -p '#S' 2>/dev/null || true)"
 
     case "${1:-}" in
+        --observe)
+            run_ai_observer
+            return 0
+            ;;
         --open-sidebar)
             open_sidebar
             return 0

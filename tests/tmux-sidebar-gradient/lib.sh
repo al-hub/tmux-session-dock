@@ -201,6 +201,9 @@ sidebar_tmux_cmd()
 
 load_launcher_functions()
 {
+    # Unit tests exercise the presenter's own (local) observation path with a
+    # stubbed tmux; the shared observer is covered by its own tests.
+    export TMUX_SESSION_SIDEBAR_AI_OBSERVER=local
     # Source all domain and presenter lib modules first
     local lib_dir="$REPO_ROOT/scripts/lib"
     local lib_file
@@ -248,6 +251,9 @@ load_launcher_functions()
     declare -gA cached_pane_command=()
     declare -gA previous_session_animate=()
     declare -gA _session_name_fit_cache=()
+    declare -gA shared_ai_state=()
+    declare -gA shared_ai_fp=()
+    declare -gA shared_ai_pane=()
     declare -ga session_animate=()
     declare -ga session_animation_seed=()
     declare -ga session_animation_refresh_indexes=()

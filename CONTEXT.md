@@ -29,8 +29,8 @@ The most recently accepted vertical size of each Subpane Slot, retained across l
 _Avoid_: Cached pane height, default height
 
 **AI Activity Observer**:
-The session-scoped observer that reports whether a tracked AI CLI is running, idle, or gone independently of Presenter Window selection.
-_Avoid_: Fingerprint tracker, gradient detector
+The single per-server process (`--observe`) that samples every session's tracked AI CLI once per second and publishes each session's AI Activity State for all presenters, independently of Presenter Window selection. Presenters consume the published state and fall back to observing locally only while no observer is alive.
+_Avoid_: Fingerprint tracker, gradient detector, per-presenter observer
 
 **AI Activity State**:
 The asynchronous running, idle, or gone status of a session's tracked AI CLI, consumed by the presenter to represent work in progress.

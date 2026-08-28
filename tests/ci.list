@@ -121,10 +121,12 @@ tmux-sidebar-gradient/test-six-session-enter-working-gradient-e2e.sh
 tmux-sidebar-gradient/test-lifecycle-e2e.sh
 tmux-sidebar-gradient/test-regressions.sh
 tmux-sidebar-gradient/test-hot-path.sh
+tmux-sidebar-gradient/test-ai-observer-state.sh
 tmux-sidebar-gradient/test-node-codex-gradient-e2e.sh
 tmux-sidebar-gradient/test-multi-sidebar-node-codex-gradient-e2e.sh
 tmux-sidebar-gradient/test-node-codex-enter-idle-recovery-e2e.sh
 tmux-sidebar-gradient/test-equal-size-enter-observer-continues-e2e.sh
 tmux-sidebar-gradient/test-detached-presenter-no-animation-e2e.sh
 tmux-sidebar-gradient/test-shell-session-presenter-tracks-others-e2e.sh
+tmux-sidebar-gradient/test-shared-observer-e2e.sh
 tmux-sidebar-gradient/test-launcher-lifecycle.sh
