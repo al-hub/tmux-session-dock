@@ -62,6 +62,185 @@ sidebar_domain_layout_body() {
         *) printf '%s\n' "$layout" ;;
     esac
 }
+
+# tmux layout checksum (layout_checksum in tmux/layout-custom.c): 16-bit
+# rotate-right-and-add over the bytes of the body. select-layout rejects a
+# body whose checksum is missing or wrong.
+sidebar_domain_layout_checksum() {
+    local body="$1"
+    local checksum=0 bytes byte
+    bytes="$(printf '%s' "$body" | od -An -tu1 -v)"
+    for byte in $bytes; do
+        checksum=$((((checksum >> 1) | ((checksum & 1) << 15))))
+        checksum=$(((checksum + byte) & 65535))
+    done
+    printf '%04x,%s\n' "$checksum" "$body"
+}
+
+# ------------------------------------------------------------------------------
+# Dock column geometry - pure functions.
+#
+# The dock column is the leftmost column of a window: the sidebar pane plus
+# N Subpane Slots stacked above it (position top) or below it (bottom).
+# Instead of joining slots with computed lengths and resizing afterwards, the
+# builder joins them in order (any size) and declares the whole window once
+# with `select-layout '<checksum>,<body>'`. tmux assigns leaves to panes in
+# pane-list order, so order is the builder's job; geometry is this file's.
+#
+# Border rule: with `pane-border-status top`, tmux draws the status row inside
+# the topmost cells - every leaf at y=0 renders one row shorter than its cell.
+# `bottom` charges the bottom-edge cell instead; `off` charges nothing. The
+# leaf on the charged edge is therefore written one row taller than the
+# height it must render. The caller passes that edge (top|bottom|none).
+# ------------------------------------------------------------------------------
+SIDEBAR_DOCK_MIN_SLOT_ROWS=4
+SIDEBAR_DOCK_MIN_SIDEBAR_ROWS=6
+
+sidebar_domain_dock_border_edge() {
+    case "${1:-}" in
+        top|TOP) printf 'top\n' ;;
+        bottom|BOTTOM) printf 'bottom\n' ;;
+        *) printf 'none\n' ;;
+    esac
+}
+
+# Which slot (1..N) carries the border charge, or 0 for none / the sidebar.
+_sidebar_dock_charged_slot() {   # <position> <edge> <count>
+    if [ "$1" = "top" ] && [ "$2" = "top" ]; then printf '1\n'
+    elif [ "$1" != "top" ] && [ "$2" = "bottom" ]; then printf '%s\n' "$3"
+    else printf '0\n'
+    fi
+}
+
+# 1 when the sidebar sits on the charged edge (it then needs one extra row).
+_sidebar_dock_sidebar_charged() {   # <position> <edge>
+    if { [ "$1" != "top" ] && [ "$2" = "top" ]; } || { [ "$1" = "top" ] && [ "$2" = "bottom" ]; }; then
+        printf '1\n'
+    else
+        printf '0\n'
+    fi
+}
+
+# Fit the requested slot heights into <rows>. Prints one height per line.
+# Policy: every slot >= SIDEBAR_DOCK_MIN_SLOT_ROWS; the sidebar keeps
+# SIDEBAR_DOCK_MIN_SIDEBAR_ROWS (+1 when it is on the charged edge). Short:
+# shrink slots from the last to the first, each down to the minimum. Still
+# short: let the sidebar go down to 2 rows. Below that: rc 2, nothing printed.
+sidebar_domain_dock_budget() {   # <rows> <position> <edge> <h1> [h2 ...]
+    local rows="$1" position="$2" edge="$3"
+    shift 3
+    local -a heights=("$@")
+    local count="${#heights[@]}"
+    [ "$count" -gt 0 ] || return 2
+    case "$rows" in ''|*[!0-9]*) return 2 ;; esac
+
+    local i h charged sidebar_charged sum need avail deficit
+    charged="$(_sidebar_dock_charged_slot "$position" "$edge" "$count")"
+    sidebar_charged="$(_sidebar_dock_sidebar_charged "$position" "$edge")"
+    for ((i = 0; i < count; i++)); do
+        h="${heights[$i]}"
+        case "$h" in ''|*[!0-9]*) h="$SIDEBAR_DOCK_MIN_SLOT_ROWS" ;; esac
+        [ "$h" -ge "$SIDEBAR_DOCK_MIN_SLOT_ROWS" ] || h="$SIDEBAR_DOCK_MIN_SLOT_ROWS"
+        heights[$i]="$h"
+    done
+
+    cells_sum() {
+        local total=0 k
+        for ((k = 0; k < count; k++)); do
+            total=$((total + heights[k]))
+        done
+        [ "$charged" -gt 0 ] && total=$((total + 1))
+        printf '%s\n' "$total"
+    }
+
+    need=$((SIDEBAR_DOCK_MIN_SIDEBAR_ROWS + sidebar_charged))
+    avail=$((rows - count - $(cells_sum)))
+    if [ "$avail" -lt "$need" ]; then
+        deficit=$((need - avail))
+        for ((i = count - 1; i >= 0 && deficit > 0; i--)); do
+            local room=$((heights[i] - SIDEBAR_DOCK_MIN_SLOT_ROWS))
+            [ "$room" -gt 0 ] || continue
+            if [ "$room" -ge "$deficit" ]; then
+                heights[$i]=$((heights[i] - deficit)); deficit=0
+            else
+                heights[$i]="$SIDEBAR_DOCK_MIN_SLOT_ROWS"; deficit=$((deficit - room))
+            fi
+        done
+        avail=$((rows - count - $(cells_sum)))
+        [ "$avail" -ge $((2 + sidebar_charged)) ] || return 2
+    fi
+    printf '%s\n' "${heights[@]}"
+}
+
+# Rewrite a window layout so that the dock column (first child of the root
+# left-to-right split, at x=0, <dock_width> wide) becomes
+# [sidebar, slots...] (bottom) or [slots..., sidebar] (top) with the given
+# rendered heights; the work subtree to its right is kept byte-verbatim.
+# Prints the body without checksum. rc 1: not a dock window; rc 2: budget.
+sidebar_domain_dock_layout() {   # <window_layout> <dock_width> <position> <edge> <h1> [h2 ...]
+    local layout="$1" dock_width="$2" position="$3" edge="$4"
+    shift 4
+    local body width rows inner tail rest
+    body="$(sidebar_domain_layout_body "$layout")"
+    [[ $body =~ ^([0-9]+)x([0-9]+),0,0\{(.*)\}$ ]] || return 1
+    width="${BASH_REMATCH[1]}"; rows="${BASH_REMATCH[2]}"; inner="${BASH_REMATCH[3]}"
+    [[ $inner =~ ^([0-9]+)x([0-9]+),0,0(.*)$ ]] || return 1
+    [ "${BASH_REMATCH[1]}" = "$dock_width" ] || return 1
+    [ "${BASH_REMATCH[2]}" = "$rows" ] || return 1
+    tail="${BASH_REMATCH[3]}"
+    case "$tail" in
+        ,*)
+            # The dock is a bare sidebar leaf: ",<id>,<siblings>"
+            [[ $tail =~ ^,[0-9]+,(.*)$ ]] || return 1
+            rest="${BASH_REMATCH[1]}"
+            ;;
+        \[*|\{*)
+            # The dock already has children: skip its balanced subtree.
+            local depth=0 pos=0 ch
+            while [ "$pos" -lt "${#tail}" ]; do
+                ch="${tail:$pos:1}"
+                case "$ch" in
+                    \[|\{) depth=$((depth + 1)) ;;
+                    \]|\}) depth=$((depth - 1)) ;;
+                esac
+                pos=$((pos + 1))
+                [ "$depth" -eq 0 ] && break
+            done
+            [ "$depth" -eq 0 ] || return 1
+            [ "${tail:$pos:1}" = "," ] || return 1
+            rest="${tail:$((pos + 1))}"
+            ;;
+        *) return 1 ;;
+    esac
+    [ -n "$rest" ] || return 1
+
+    local -a heights=()
+    mapfile -t heights < <(sidebar_domain_dock_budget "$rows" "$position" "$edge" "$@") || return 2
+    [ "${#heights[@]}" -gt 0 ] || return 2
+    local count="${#heights[@]}" charged cells_sum=0 i cell sidebar_cell y=0
+    local -a cells=() children=()
+    charged="$(_sidebar_dock_charged_slot "$position" "$edge" "$count")"
+    for ((i = 0; i < count; i++)); do
+        cell="${heights[$i]}"
+        [ "$((i + 1))" -eq "$charged" ] && cell=$((cell + 1))
+        cells[$i]="$cell"
+        cells_sum=$((cells_sum + cell))
+    done
+    sidebar_cell=$((rows - count - cells_sum))
+    [ "$sidebar_cell" -ge 1 ] || return 2
+
+    add_leaf() { children+=("${dock_width}x${1},0,${y},0"); y=$((y + $1 + 1)); }
+    if [ "$position" = "top" ]; then
+        for ((i = 0; i < count; i++)); do add_leaf "${cells[$i]}"; done
+        add_leaf "$sidebar_cell"
+    else
+        add_leaf "$sidebar_cell"
+        for ((i = 0; i < count; i++)); do add_leaf "${cells[$i]}"; done
+    fi
+    local joined
+    joined="$(IFS=,; printf '%s' "${children[*]}")"
+    printf '%sx%s,0,0{%sx%s,0,0[%s],%s}\n' "$width" "$rows" "$dock_width" "$rows" "$joined" "$rest"
+}
 SIDEBAR_SUBPANE_OPTION="@dotfiles_sidebar_subpane_enabled"
 SIDEBAR_SUBPANE_HEIGHT_OPTION="@dotfiles_sidebar_subpane_height"
 SIDEBAR_SUBPANE_POSITION_OPTION="@dotfiles_sidebar_subpane_position"
@@ -105,46 +284,6 @@ is_infrastructure_session() {
     case "$session" in
         dotfiles-subpane-hub) return 0 ;;
         *) return 1 ;;
-    esac
-}
-
-sidebar_subpane_calc_pos_flag() {
-    local pos="${1:-bottom}"
-    case "$pos" in
-        top|TOP) printf '%s\n' "-b" ;;
-        *) printf '%s\n' "" ;;
-    esac
-}
-
-sidebar_subpane_calc_join_length() {
-    local pos="${1:-bottom}" height="${2:-12}"
-    case "$height" in ''|*[!0-9]*) height=12 ;; esac
-    case "$pos" in
-        top|TOP) printf '%s\n' "$((height + 1))" ;;
-        *) printf '%s\n' "$height" ;;
-    esac
-}
-
-sidebar_subpane_calc_resize_length() {
-    local pos="${1:-bottom}" height="${2:-12}"
-    case "$height" in ''|*[!0-9]*) height=12 ;; esac
-    case "$pos" in
-        top|TOP)
-            local ver_raw ver
-            if declare -f sidebar_tmux_cmd >/dev/null 2>&1; then
-                ver_raw="$(sidebar_tmux_cmd -V 2>/dev/null || true)"
-            fi
-            if [ -z "$ver_raw" ]; then
-                ver_raw="$(tmux -V 2>/dev/null || true)"
-            fi
-            ver="$(printf '%s\n' "$ver_raw" | sed -n 's/^tmux [^0-9]*\([0-9]\+\.[0-9]\+\).*/\1/p')"
-            if [ -n "$ver" ] && awk -v v="$ver" 'BEGIN { exit !(v < 3.3) }'; then
-                printf '%s\n' "$((height + 1))"
-            else
-                printf '%s\n' "$height"
-            fi
-            ;;
-        *) printf '%s\n' "$height" ;;
     esac
 }
 # <<< MODULE: sidebar_domain.sh <<<
@@ -324,7 +463,12 @@ if ! declare -f sidebar_tmux_cmd >/dev/null 2>&1; then
             esac
         fi
         if [ -n "${TMUX_SESSION_LAUNCHER_SOCKET:-}" ]; then
-            command tmux -L "$TMUX_SESSION_LAUNCHER_SOCKET" "$@"
+            # A socket *path* (hooks and run-shell inherit TMUX=/path,pid,idx
+            # style values) needs -S; a bare name is a -L socket name.
+            case "$TMUX_SESSION_LAUNCHER_SOCKET" in
+                */*) command tmux -S "$TMUX_SESSION_LAUNCHER_SOCKET" "$@" ;;
+                *) command tmux -L "$TMUX_SESSION_LAUNCHER_SOCKET" "$@" ;;
+            esac
             return $?
         fi
         local tmux_socket="${TMUX:-}"
@@ -651,6 +795,31 @@ sidebar_subpane_set_position() {
     sidebar_tmux_cmd set-option -gq "$opt" "$pos" 2>/dev/null || true
 }
 
+# The one place the pane-border-status row enters the dock geometry.
+# SIDEBAR_DOCK_BORDER_EDGE (top|bottom|none) overrides the lookup - an escape
+# hatch for a tmux build that does not charge the y=0 row.
+sidebar_port_dock_border_edge() {   # <window>
+    local window="${1:-}" status=""
+    if [ -n "${SIDEBAR_DOCK_BORDER_EDGE:-}" ]; then
+        sidebar_domain_dock_border_edge "$SIDEBAR_DOCK_BORDER_EDGE"
+        return 0
+    fi
+    [ -n "$window" ] && status="$(sidebar_tmux_cmd show-options -wqv -t "$window" pane-border-status 2>/dev/null || true)"
+    [ -n "$status" ] || status="$(sidebar_tmux_cmd show-options -gwqv pane-border-status 2>/dev/null || true)"
+    sidebar_domain_dock_border_edge "$status"
+}
+
+# The hub builder lives in sidebar_subpane_hub.sh; callers that sourced only
+# this port (tests, ad-hoc shells) get it here. The bundled dist inlines it.
+_sidebar_port_ensure_hub() {
+    declare -f subpane_hub_atomic_migrate >/dev/null 2>&1 && return 0
+    local hub
+    hub="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/sidebar_subpane_hub.sh"
+    [ -r "$hub" ] || return 1
+    # shellcheck disable=SC1090
+    source "$hub"
+}
+
 sidebar_subpane_swap_position() {
     local window_id="${1:-}"
     [ -n "$window_id" ] || window_id="$(sidebar_tmux_cmd display-message -p '#{window_id}' 2>/dev/null || true)"
@@ -658,50 +827,12 @@ sidebar_subpane_swap_position() {
 
     remember_sidebar_subpane_height_for_window "$window_id"
 
-    if declare -f subpane_hub_swap_stack_position >/dev/null 2>&1; then
-        subpane_hub_swap_stack_position "$window_id"
-        if declare -f save_sidebar_layout >/dev/null 2>&1; then
-            save_sidebar_layout "$window_id" 2>/dev/null || true
-        fi
-        return 0
+    _sidebar_port_ensure_hub || return 1
+    subpane_hub_swap_stack_position "$window_id"
+    if declare -f save_sidebar_layout >/dev/null 2>&1; then
+        save_sidebar_layout "$window_id" 2>/dev/null || true
     fi
-
-    local cur_pos
-    cur_pos="$(sidebar_subpane_get_position)"
-    local new_pos="top"
-    if [ "$cur_pos" = "top" ]; then
-        new_pos="bottom"
-    fi
-    sidebar_subpane_set_position "$new_pos"
-
-    local launcher_pane sub_pane
-    launcher_pane="$(sidebar_window_pane "$window_id" 2>/dev/null || true)"
-    sub_pane="$(sidebar_window_subpane "$window_id" 2>/dev/null || true)"
-    if [ -n "$launcher_pane" ] && [ -n "$sub_pane" ]; then
-        local opt="${SIDEBAR_SUBPANE_HEIGHT_OPTION:-@dotfiles_sidebar_subpane_height}"
-        local target_h
-        target_h="$(sidebar_tmux_cmd show-option -gqv "$opt" 2>/dev/null || true)"
-        [ -n "$target_h" ] && [ "$target_h" -ge 4 ] 2>/dev/null || target_h=12
-
-        local resize_h
-        if declare -f sidebar_subpane_calc_resize_length >/dev/null 2>&1; then
-            resize_h="$(sidebar_subpane_calc_resize_length "$new_pos" "$target_h")"
-        elif declare -f sidebar_subpane_calc_join_length >/dev/null 2>&1; then
-            resize_h="$(sidebar_subpane_calc_join_length "$new_pos" "$target_h")"
-        elif [ "$new_pos" = "top" ]; then
-            resize_h="$((target_h + 1))"
-        else
-            resize_h="$target_h"
-        fi
-
-        sidebar_tmux_cmd swap-pane -d -s "$launcher_pane" -t "$sub_pane" \; resize-pane -t "$sub_pane" -y "$resize_h" 2>/dev/null || true
-        sidebar_tmux_cmd set-option -gq "$opt" "$target_h" 2>/dev/null || true
-        persist_sidebar_subpane_height "$target_h" 2>/dev/null || true
-
-        if declare -f save_sidebar_layout >/dev/null 2>&1; then
-            save_sidebar_layout "$window_id" 2>/dev/null || true
-        fi
-    fi
+    return 0
 }
 
 sync_sidebar_subpane_position_for_window() {
@@ -746,40 +877,10 @@ provision_sidebar_subpane() {
         fi
     fi
 
-    if declare -f subpane_hub_atomic_migrate >/dev/null 2>&1; then
-        subpane_hub_atomic_migrate "$launcher_pane" "$height"
-        return $?
-    elif declare -f subpane_hub_acquire_pane >/dev/null 2>&1; then
-        subpane_hub_acquire_pane "$launcher_pane" "$height"
-        return $?
-    fi
-
-    local sub_title="${SIDEBAR_SUBPANE_TITLE:-dotfiles-sidebar-subpane}"
-    local sub_pane
-    local pos_flag=""
-    if [ "$(sidebar_subpane_get_position)" = "top" ]; then
-        pos_flag="-b"
-    fi
-    local join_l="$height"
-    if [ "$pos_flag" = "-b" ]; then
-        join_l="$((height + 1))"
-    fi
-    sub_pane="$(sidebar_tmux_cmd split-window -P -F '#{pane_id}' -v $pos_flag -t "$launcher_pane" -l "$join_l" "${cmd:-/bin/bash}" 2>/dev/null || true)"
-    [ -n "$sub_pane" ] || return 1
-
-    local resize_l="$height"
-    if declare -f sidebar_subpane_calc_resize_length >/dev/null 2>&1; then
-        resize_l="$(sidebar_subpane_calc_resize_length "$(sidebar_subpane_get_position)" "$height")"
-    fi
-    if [ -n "$height" ] && [ "$height" -ge 4 ] 2>/dev/null; then
-        sidebar_tmux_cmd resize-pane -t "$sub_pane" -y "$resize_l" 2>/dev/null || true
-    fi
-
-    sidebar_tmux_cmd select-pane -t "$sub_pane" -T "$sub_title" 2>/dev/null || true
-    sidebar_tmux_cmd set-option -p -q -t "$sub_pane" @dotfiles_sidebar_subpane 1 2>/dev/null || true
-    sidebar_tmux_cmd select-pane -t "$launcher_pane" 2>/dev/null || true
-
-    printf '%s\n' "$sub_pane"
+    # The hub builder is the only stack builder (joins for order, one layout
+    # string for geometry); it prints the first slot pane like this did.
+    _sidebar_port_ensure_hub || return 1
+    subpane_hub_atomic_migrate "$launcher_pane" "$height"
 }
 
 destroy_sidebar_subpane() {
@@ -972,6 +1073,15 @@ SUBPANE_SLOT_PANE_OPTION_PREFIX="@dotfiles_subpane_slot_"
 # which the next rebuild then applies (measured: 4/4/4 became 11/5/4).  The
 # value is an epoch-second deadline so a crashed transaction cannot block
 # snapshots for good.
+# The dock builder declares its geometry with the pure functions in
+# sidebar_domain.sh. Callers that source this module alone (tests, ad-hoc
+# shells) get them here; the bundled dist inlines the domain first.
+if ! declare -f sidebar_domain_dock_layout >/dev/null 2>&1; then
+    _subpane_hub_domain="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/sidebar_domain.sh"
+    [ -r "$_subpane_hub_domain" ] && source "$_subpane_hub_domain"
+    unset _subpane_hub_domain
+fi
+
 SUBPANE_TRANSACTION_ENV="DOTFILES_SIDEBAR_SUBPANE_TRANSACTION"
 SUBPANE_TRANSACTION_TTL_SECONDS=5
 _subpane_hub_transaction_depth=0
@@ -1423,21 +1533,23 @@ subpane_hub_atomic_migrate_body() {
         [ -n "$height" ] || height=$((default_slot_h * max_count))
     fi
 
-    local resolved_panes=() resolved_heights=()
+    local resolved_panes=() resolved_heights=() resolved_defaulted=()
     local slot sp
     while IFS='|' read -r slot sp; do
         [ -n "$slot" ] && [ -n "$sp" ] || continue
 
         # Prefer session-scoped saved height; fall back to equal division.
-        local slot_h
+        local slot_h slot_defaulted=0
         slot_h="$(sidebar_tmux_cmd show-option -gqv "@dotfiles_subpane_slot_${slot}_height" 2>/dev/null || true)"
         if [ -z "$slot_h" ] || ! [ "$slot_h" -ge 2 ] 2>/dev/null; then
             slot_h="$((height / max_count))"
             [ "$slot_h" -ge 4 ] || slot_h=4
+            slot_defaulted=1
         fi
 
         resolved_panes+=("$sp")
         resolved_heights+=("$slot_h")
+        resolved_defaulted+=("$slot_defaulted")
     done <<< "$resolved"
 
     local total_slots="${#resolved_panes[@]}"
@@ -1451,91 +1563,95 @@ subpane_hub_atomic_migrate_body() {
             break
         fi
     done
-    if [ "$already_attached" -eq 1 ]; then
-        subpane_hub_acquire_lease "$target_win"
-        printf '%s\n' "${resolved_panes[0]}"
-        return 0
-    fi
+    # An already attached stack still gets its geometry re-declared below when
+    # it no longer matches (tmux scales a layout when a window built while
+    # detached is first shown on a client); only the joins are skipped.
 
     subpane_hub_transaction_begin
     if declare -f set_sidebar_layout_hook_guard >/dev/null 2>&1; then
         set_sidebar_layout_hook_guard 500
     fi
 
-    local last_attached="$target_launcher" first_pane=""
-    for ((idx=0; idx<total_slots; idx++)); do
-        local sp="${resolved_panes[$idx]}"
-        local slot_h="${resolved_heights[$idx]}"
-
-        # Cumulative join length reserves the nested boundaries created by
-        # attaching the remaining slots to the current stack.
-        local cum_h=0
-        for ((j=idx; j<total_slots; j++)); do
-            cum_h=$((cum_h + ${resolved_heights[$j]}))
-        done
-        local remaining_borders=$((total_slots - 1 - idx))
-        local join_l=$((cum_h + remaining_borders))
-
-        local slot_pos_flag=""
-        if [ "$idx" -eq 0 ] && [ "$sub_pos" = "top" ]; then
-            slot_pos_flag="-b"
-            # tmux accounts for the outer top border in the first join even
-            # for a stack; the cumulative length therefore needs the same
-            # top-position adjustment as a single subpane.
-            # A compact tmux 3.2 window needs the outer border explicitly for
-            # a 3+ slot stack; larger windows and 1/2-slot stacks get the
-            # correction from the final boundary pass below.
-            if [ "$total_slots" -lt 3 ] || [ "$target_rows" -lt 30 ]; then
-                if declare -f sidebar_subpane_calc_join_length >/dev/null 2>&1; then
-                    join_l="$(sidebar_subpane_calc_join_length "$sub_pos" "$join_l")"
-                else
-                    join_l=$((join_l + 1))
-                fi
-            fi
+    # Geometry is declared once for the whole window (sidebar_domain_dock_layout)
+    # and applied with a single select-layout; the joins below only fix pane
+    # order (tmux assigns layout leaves in pane-list order). The dock must be
+    # the head of the pane list for that assignment to hold; otherwise fall
+    # back to joins only and let tmux size the stack.
+    local head_pane layout dock_width edge body checksum_layout=""
+    head_pane="$(sidebar_tmux_cmd list-panes -t "$target_win" -F '#{pane_id}' 2>/dev/null | head -n 1)"
+    if [ "$head_pane" = "$target_launcher" ]; then
+        layout="$(sidebar_tmux_cmd display-message -p -t "$target_win" '#{window_layout}' 2>/dev/null || true)"
+        dock_width="$(sidebar_tmux_cmd display-message -p -t "$target_launcher" '#{pane_width}' 2>/dev/null || true)"
+        edge="none"
+        if declare -f sidebar_port_dock_border_edge >/dev/null 2>&1; then
+            edge="$(sidebar_port_dock_border_edge "$target_win")"
         fi
+        # The budget only shapes THIS window's layout. The slot intents keep
+        # their requested values: a window that is still detached (24 rows)
+        # must not shrink what the user asked for once it is shown at 40.
+        local -a budgeted=()
+        if mapfile -t budgeted < <(sidebar_domain_dock_budget "$target_rows" "$sub_pos" "$edge" "${resolved_heights[@]}") &&
+            [ "${#budgeted[@]}" -eq "$total_slots" ]; then
+            if body="$(sidebar_domain_dock_layout "$layout" "$dock_width" "$sub_pos" "$edge" "${budgeted[@]}")"; then
+                checksum_layout="$(sidebar_domain_layout_checksum "$body")"
+            elif declare -f trace_event >/dev/null 2>&1; then
+                trace_event "subpane.dock.layout.skip reason=not-a-dock-window window=$target_win layout=$layout"
+            fi
+        elif declare -f trace_event >/dev/null 2>&1; then
+            trace_event "subpane.dock.layout.skip reason=budget rows=$target_rows heights=${resolved_heights[*]}"
+        fi
+    elif declare -f trace_event >/dev/null 2>&1; then
+        trace_event "subpane.dock.layout.skip reason=pane-order head=$head_pane launcher=$target_launcher"
+    fi
 
+    # One compound tmux call: chained joins (slot 1 next to the launcher, -b
+    # above it for a top stack; slot k right after slot k-1), then the layout.
+    local -a cmd=()
+    local prev="$target_launcher" first_pane="" sp slot_h idx
+    for ((idx=0; idx<total_slots; idx++)); do
+        sp="${resolved_panes[$idx]}"
         current_win="$(sidebar_tmux_cmd display-message -p -t "$sp" '#{window_id}' 2>/dev/null || true)"
         if [ "$current_win" != "$target_win" ]; then
-            if ! sidebar_tmux_cmd join-pane -d $slot_pos_flag \
-                    -s "$sp" -t "$last_attached" -v -l "$join_l" 2>/dev/null; then
-                return 1
+            [ "${#cmd[@]}" -eq 0 ] || cmd+=(\;)
+            if [ "$idx" -eq 0 ] && [ "$sub_pos" = "top" ]; then
+                cmd+=(join-pane -d -b -v -s "$sp" -t "$prev")
+            else
+                cmd+=(join-pane -d -v -s "$sp" -t "$prev")
             fi
         fi
+        prev="$sp"
+        [ -z "$first_pane" ] && first_pane="$sp"
+    done
+    if [ -n "$checksum_layout" ]; then
+        # Skip the (redundant) relayout when nothing moves and the window
+        # already shows exactly this geometry.
+        if [ "${#cmd[@]}" -gt 0 ] || [ "$(sidebar_domain_layout_body "$layout")" != "$body" ]; then
+            [ "${#cmd[@]}" -eq 0 ] || cmd+=(\;)
+            cmd+=(select-layout -t "$target_win" "$checksum_layout")
+        fi
+    fi
+    if declare -f trace_event >/dev/null 2>&1; then
+        trace_event "subpane.dock.layout window=$target_win rows=$target_rows edge=${edge:-?} position=$sub_pos heights=${resolved_heights[*]} joins=$(( ${#cmd[@]} > 0 )) declared=$([ -n "$checksum_layout" ] && echo 1 || echo 0) body=${body:-none}"
+    fi
+    if [ "${#cmd[@]}" -gt 0 ]; then
+        sidebar_tmux_cmd "${cmd[@]}" 2>/dev/null || return 1
+    fi
 
+    for ((idx=0; idx<total_slots; idx++)); do
+        sp="${resolved_panes[$idx]}"
+        slot_h="${resolved_heights[$idx]}"
         sidebar_tmux_cmd set-option -p -q -t "$sp" allow-rename off 2>/dev/null || true
         sidebar_tmux_cmd select-pane -t "$sp" -T "$(subpane_hub_slot_title "$((idx + 1))" "$total_slots" "$sub_title")" 2>/dev/null || true
         sidebar_tmux_cmd set-option -p -q -t "$sp" @dotfiles_subpane_hub_pane 1 2>/dev/null || true
         sidebar_tmux_cmd set-option -p -q -t "$sp" @dotfiles_sidebar_subpane 1 2>/dev/null || true
         sidebar_tmux_cmd set-option -p -q -t "$sp" @dotfiles_subpane_slot "$((idx + 1))" 2>/dev/null || true
-        # Persist resolved height for this session
-        sidebar_tmux_cmd set-option -gq "@dotfiles_subpane_slot_$((idx + 1))_height" "$slot_h" 2>/dev/null || true
-
-        [ -z "$first_pane" ] && first_pane="$sp"
-        last_attached="$sp"
+        # Record an intent only where none existed (equal division of the
+        # total). Re-writing a saved intent here would let a no-op rebuild
+        # clobber a newer user height recorded while this call was running.
+        if [ "${resolved_defaulted[$idx]:-0}" = "1" ]; then
+            sidebar_tmux_cmd set-option -gq "@dotfiles_subpane_slot_$((idx + 1))_height" "$slot_h" 2>/dev/null || true
+        fi
     done
-
-    # Reassert the canonical boundaries from the outside inward for the
-    # one-/two-slot legacy geometry. Three-or-more stacks are already exact
-    # after the cumulative joins; resizing their nested panes independently
-    # would make tmux re-round the innermost boundary.
-    if [ "$total_slots" -le 2 ]; then
-        for ((idx=0; idx<total_slots; idx++)); do
-            local resize_l="${resolved_heights[$idx]}"
-            # A single-slot top stack has one additional outer border in the
-            # first resize target on tmux < 3.3; tmux 3.4 applies resize-pane
-            # -y verbatim (measured: tests/tools/tmux-geometry-probe.sh). Let
-            # the domain rule pick the correction per version. Two-slot stacks
-            # account for it through the join and use the user height verbatim.
-            if [ "$sub_pos" = "top" ] && [ "$idx" -eq 0 ] && [ "$total_slots" -eq 1 ]; then
-                if declare -f sidebar_subpane_calc_resize_length >/dev/null 2>&1; then
-                    resize_l="$(sidebar_subpane_calc_resize_length top "$resize_l")"
-                else
-                    resize_l=$((resize_l + 1))
-                fi
-            fi
-            sidebar_tmux_cmd resize-pane -t "${resolved_panes[$idx]}" -y "$resize_l" 2>/dev/null || return 1
-        done
-    fi
 
     subpane_hub_acquire_lease "$target_win"
     printf '%s\n' "${first_pane:-$target_launcher}"
@@ -1694,29 +1810,45 @@ sidebar_switch_execute_hot() {
 
     local target_spec="=$target_session:"
     if [ -n "$sub_pane" ] && [ -n "$sidebar_pane" ] && declare -f subpane_hub_atomic_migrate >/dev/null 2>&1; then
-        local sub_win
-        sub_win="$(sidebar_tmux_cmd display-message -p -t "$sub_pane" '#{window_id}' 2>/dev/null || true)"
-        if [ -n "$sub_win" ] && [ "$sub_win" != "$target_win" ]; then
-            # Land the client on the target first - sidebar and work panes
-            # already exist there - then let the one hub builder move the whole
-            # leased stack in slot order. The builder owns the lease, the
-            # per-slot heights and the geometry. (The switch path used to carry
-            # its own join arithmetic that joined every slot to the sidebar and
-            # reversed the stack at position bottom.)
+        if [ -n "$target_win" ]; then
+            # One hub builder moves the leased stack in slot order and declares
+            # its geometry (the switch path used to carry its own join
+            # arithmetic that joined every slot to the sidebar and reversed the
+            # stack at position bottom).
+            # Build BEFORE switching, in this process, exactly once. The
+            # presenter running this code belongs to the window the client is
+            # leaving and the active-window hooks recycle its pane right after
+            # switch-client, so nothing multi-step may run here afterwards.
+            # A window the client has never shown still has its detached size
+            # and tmux would scale the stack when it first shows it: give the
+            # target the client's current window size first (resize-window
+            # marks the window manual; unset that so it keeps following the
+            # client), then declare the geometry, then switch.
             if [ -n "$client_tty" ]; then
-                sidebar_tmux_cmd switch-client -c "$client_tty" -t "$target_spec" \; select-pane -t "$sidebar_pane" 2>/dev/null || return 1
-            else
-                sidebar_tmux_cmd select-pane -t "$sidebar_pane" 2>/dev/null || true
+                local client_size
+                client_size="$(sidebar_tmux_cmd list-clients -F '#{client_tty} #{window_width} #{window_height}' 2>/dev/null |
+                    awk -v tty="$client_tty" '$1 == tty { print $2 " " $3; exit }')"
+                if [[ $client_size =~ ^([0-9]+)\ ([0-9]+)$ ]]; then
+                    local target_size
+                    target_size="$(sidebar_tmux_cmd display-message -p -t "$target_win" '#{window_width} #{window_height}' 2>/dev/null || true)"
+                    if [ "$target_size" != "$client_size" ]; then
+                        sidebar_tmux_cmd resize-window -t "$target_win" -x "${BASH_REMATCH[1]}" -y "${BASH_REMATCH[2]}" 2>/dev/null || true
+                        sidebar_tmux_cmd set-option -wu -t "$target_win" window-size 2>/dev/null || true
+                    fi
+                fi
             fi
             if declare -f set_sidebar_layout_hook_guard >/dev/null 2>&1; then
                 set_sidebar_layout_hook_guard 500
             fi
-            # The client is already switched: a builder failure is traced, never
-            # reported to the caller as a refused switch.
             if ! subpane_hub_atomic_migrate "$sidebar_pane" "$sub_height" >/dev/null 2>&1; then
                 if declare -f trace_event >/dev/null 2>&1; then
                     trace_event "switch.subpane.migrate.failed window=$target_win sidebar=$sidebar_pane"
                 fi
+            fi
+            if [ -n "$client_tty" ]; then
+                sidebar_tmux_cmd switch-client -c "$client_tty" -t "$target_spec" \; select-pane -t "$sidebar_pane" 2>/dev/null || return 1
+            else
+                sidebar_tmux_cmd select-pane -t "$sidebar_pane" 2>/dev/null || true
             fi
             sidebar_tmux_cmd select-pane -t "$sidebar_pane" 2>/dev/null || true
             return 0
@@ -2231,17 +2363,9 @@ sidebar_archive_layout_body()
 
 sidebar_archive_layout_with_checksum()
 {
-    local body="$1"
-    local checksum=0
-    local bytes byte
-    bytes="$(printf '%s' "$body" | od -An -tu1 -v)"
-
-    for byte in $bytes; do
-        checksum=$((((checksum >> 1) | ((checksum & 1) << 15))))
-        checksum=$(((checksum + byte) & 65535))
-    done
-
-    printf '%04x,%s\n' "$checksum" "$body"
+    # The algorithm lives in sidebar_domain.sh (needed by the dock builder,
+    # which is inlined before this module); keep the archive name as an alias.
+    sidebar_domain_layout_checksum "$@"
 }
 
 sidebar_archive_layout_with_pane_ids()
@@ -3921,37 +4045,6 @@ snapshot_work_layout_transaction()
             subpane_hub_atomic_migrate "$sidebar_pane" >/dev/null 2>&1 || true
         fi
         subpane_hub_transaction_end
-    elif [ -n "$sub_pane" ] && [ -n "$sidebar_pane" ]; then
-        local sub_pos="bottom" pos_flag=""
-        if declare -f sidebar_subpane_get_position >/dev/null 2>&1; then
-            sub_pos="$(sidebar_subpane_get_position 2>/dev/null || echo bottom)"
-        fi
-        if declare -f sidebar_subpane_calc_pos_flag >/dev/null 2>&1; then
-            pos_flag="$(sidebar_subpane_calc_pos_flag "$sub_pos")"
-        elif [ "$sub_pos" = "top" ]; then
-            pos_flag="-b"
-        fi
-
-        local join_l="$sub_height"
-        if declare -f sidebar_subpane_calc_join_length >/dev/null 2>&1; then
-            join_l="$(sidebar_subpane_calc_join_length "$sub_pos" "$sub_height")"
-        elif [ "$pos_flag" = "-b" ]; then
-            join_l="$((sub_height + 1))"
-        fi
-        if ! tmux join-pane -d $pos_flag -s "$sub_pane" -t "$sidebar_pane" -v -l "$join_l" 2>/dev/null; then
-            tmux join-pane -d $pos_flag -s "$sub_pane" -t "$sidebar_pane" -v 2>/dev/null || true
-        fi
-        local resize_l="$sub_height"
-        if declare -f sidebar_subpane_calc_resize_length >/dev/null 2>&1; then
-            resize_l="$(sidebar_subpane_calc_resize_length "$sub_pos" "$sub_height")"
-        fi
-        if [ -n "$sub_height" ] && [ "$sub_height" -ge 4 ] 2>/dev/null; then
-            tmux resize-pane -t "$sub_pane" -y "$resize_l" 2>/dev/null || true
-        fi
-        tmux select-pane -t "$sub_pane" -T "${SIDEBAR_SUBPANE_TITLE:-dotfiles-sidebar-subpane}" 2>/dev/null || true
-        tmux set-option -p -q -t "$sub_pane" @dotfiles_sidebar_subpane 1 2>/dev/null || true
-    elif [ -n "$sub_pane" ]; then
-        tmux kill-pane -t "$sub_pane" 2>/dev/null || true
     fi
 
     trace_event "layout.snapshot.transaction window=$window_id holder=${holder_window:-none} panes=${work_pane_ids:-none} active=${active_work_pane:-none}"
@@ -5421,7 +5514,10 @@ switch_session()
         }
         trace_event "switch.sidebar-focus session=$session_name window=$target_window pane=$sidebar_pane"
     fi
-    if [ "$subpane_enabled" = "1" ] && [ -n "$target_window" ]; then
+    # With a leased stack the hot switch already scheduled the rebuild (a
+    # detached run-shell chained to switch-client); a second builder here
+    # would race it. Only a session that never opened a Subpane needs one.
+    if [ "$subpane_enabled" = "1" ] && [ -n "$target_window" ] && [ -z "$sub_pane" ]; then
         ensure_sidebar_subpane_window "$target_window" "$sidebar_pane"
     fi
     if ! wait_for_sidebar_input_ready "$target_window" "$sidebar_pane"; then
@@ -10459,6 +10555,11 @@ run_tui()
 {
     local action_generation=0
     trace_event "sidebar.process.begin pane=${TMUX_PANE:-none}"
+    # Keep the presenter's stderr (bash diagnostics) with the debug log; on
+    # the pane it is overwritten by the next redraw and lost.
+    if [ "${TMUX_SESSION_LAUNCHER_DEBUG:-0}" = "1" ] && [ -n "${TMUX_SESSION_LAUNCHER_DEBUG_FILE:-}" ]; then
+        exec 2>>"$TMUX_SESSION_LAUNCHER_DEBUG_FILE"
+    fi
     sidebar_env_purge_legacy
     setup_terminal
     if [ -n "${TMUX_PANE:-}" ]; then

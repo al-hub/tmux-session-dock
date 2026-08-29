@@ -13,7 +13,12 @@ if ! declare -f sidebar_tmux_cmd >/dev/null 2>&1; then
             esac
         fi
         if [ -n "${TMUX_SESSION_LAUNCHER_SOCKET:-}" ]; then
-            command tmux -L "$TMUX_SESSION_LAUNCHER_SOCKET" "$@"
+            # A socket *path* (hooks and run-shell inherit TMUX=/path,pid,idx
+            # style values) needs -S; a bare name is a -L socket name.
+            case "$TMUX_SESSION_LAUNCHER_SOCKET" in
+                */*) command tmux -S "$TMUX_SESSION_LAUNCHER_SOCKET" "$@" ;;
+                *) command tmux -L "$TMUX_SESSION_LAUNCHER_SOCKET" "$@" ;;
+            esac
             return $?
         fi
         local tmux_socket="${TMUX:-}"
@@ -340,6 +345,31 @@ sidebar_subpane_set_position() {
     sidebar_tmux_cmd set-option -gq "$opt" "$pos" 2>/dev/null || true
 }
 
+# The one place the pane-border-status row enters the dock geometry.
+# SIDEBAR_DOCK_BORDER_EDGE (top|bottom|none) overrides the lookup - an escape
+# hatch for a tmux build that does not charge the y=0 row.
+sidebar_port_dock_border_edge() {   # <window>
+    local window="${1:-}" status=""
+    if [ -n "${SIDEBAR_DOCK_BORDER_EDGE:-}" ]; then
+        sidebar_domain_dock_border_edge "$SIDEBAR_DOCK_BORDER_EDGE"
+        return 0
+    fi
+    [ -n "$window" ] && status="$(sidebar_tmux_cmd show-options -wqv -t "$window" pane-border-status 2>/dev/null || true)"
+    [ -n "$status" ] || status="$(sidebar_tmux_cmd show-options -gwqv pane-border-status 2>/dev/null || true)"
+    sidebar_domain_dock_border_edge "$status"
+}
+
+# The hub builder lives in sidebar_subpane_hub.sh; callers that sourced only
+# this port (tests, ad-hoc shells) get it here. The bundled dist inlines it.
+_sidebar_port_ensure_hub() {
+    declare -f subpane_hub_atomic_migrate >/dev/null 2>&1 && return 0
+    local hub
+    hub="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/sidebar_subpane_hub.sh"
+    [ -r "$hub" ] || return 1
+    # shellcheck disable=SC1090
+    source "$hub"
+}
+
 sidebar_subpane_swap_position() {
     local window_id="${1:-}"
     [ -n "$window_id" ] || window_id="$(sidebar_tmux_cmd display-message -p '#{window_id}' 2>/dev/null || true)"
@@ -347,50 +377,12 @@ sidebar_subpane_swap_position() {
 
     remember_sidebar_subpane_height_for_window "$window_id"
 
-    if declare -f subpane_hub_swap_stack_position >/dev/null 2>&1; then
-        subpane_hub_swap_stack_position "$window_id"
-        if declare -f save_sidebar_layout >/dev/null 2>&1; then
-            save_sidebar_layout "$window_id" 2>/dev/null || true
-        fi
-        return 0
+    _sidebar_port_ensure_hub || return 1
+    subpane_hub_swap_stack_position "$window_id"
+    if declare -f save_sidebar_layout >/dev/null 2>&1; then
+        save_sidebar_layout "$window_id" 2>/dev/null || true
     fi
-
-    local cur_pos
-    cur_pos="$(sidebar_subpane_get_position)"
-    local new_pos="top"
-    if [ "$cur_pos" = "top" ]; then
-        new_pos="bottom"
-    fi
-    sidebar_subpane_set_position "$new_pos"
-
-    local launcher_pane sub_pane
-    launcher_pane="$(sidebar_window_pane "$window_id" 2>/dev/null || true)"
-    sub_pane="$(sidebar_window_subpane "$window_id" 2>/dev/null || true)"
-    if [ -n "$launcher_pane" ] && [ -n "$sub_pane" ]; then
-        local opt="${SIDEBAR_SUBPANE_HEIGHT_OPTION:-@dotfiles_sidebar_subpane_height}"
-        local target_h
-        target_h="$(sidebar_tmux_cmd show-option -gqv "$opt" 2>/dev/null || true)"
-        [ -n "$target_h" ] && [ "$target_h" -ge 4 ] 2>/dev/null || target_h=12
-
-        local resize_h
-        if declare -f sidebar_subpane_calc_resize_length >/dev/null 2>&1; then
-            resize_h="$(sidebar_subpane_calc_resize_length "$new_pos" "$target_h")"
-        elif declare -f sidebar_subpane_calc_join_length >/dev/null 2>&1; then
-            resize_h="$(sidebar_subpane_calc_join_length "$new_pos" "$target_h")"
-        elif [ "$new_pos" = "top" ]; then
-            resize_h="$((target_h + 1))"
-        else
-            resize_h="$target_h"
-        fi
-
-        sidebar_tmux_cmd swap-pane -d -s "$launcher_pane" -t "$sub_pane" \; resize-pane -t "$sub_pane" -y "$resize_h" 2>/dev/null || true
-        sidebar_tmux_cmd set-option -gq "$opt" "$target_h" 2>/dev/null || true
-        persist_sidebar_subpane_height "$target_h" 2>/dev/null || true
-
-        if declare -f save_sidebar_layout >/dev/null 2>&1; then
-            save_sidebar_layout "$window_id" 2>/dev/null || true
-        fi
-    fi
+    return 0
 }
 
 sync_sidebar_subpane_position_for_window() {
@@ -435,40 +427,10 @@ provision_sidebar_subpane() {
         fi
     fi
 
-    if declare -f subpane_hub_atomic_migrate >/dev/null 2>&1; then
-        subpane_hub_atomic_migrate "$launcher_pane" "$height"
-        return $?
-    elif declare -f subpane_hub_acquire_pane >/dev/null 2>&1; then
-        subpane_hub_acquire_pane "$launcher_pane" "$height"
-        return $?
-    fi
-
-    local sub_title="${SIDEBAR_SUBPANE_TITLE:-dotfiles-sidebar-subpane}"
-    local sub_pane
-    local pos_flag=""
-    if [ "$(sidebar_subpane_get_position)" = "top" ]; then
-        pos_flag="-b"
-    fi
-    local join_l="$height"
-    if [ "$pos_flag" = "-b" ]; then
-        join_l="$((height + 1))"
-    fi
-    sub_pane="$(sidebar_tmux_cmd split-window -P -F '#{pane_id}' -v $pos_flag -t "$launcher_pane" -l "$join_l" "${cmd:-/bin/bash}" 2>/dev/null || true)"
-    [ -n "$sub_pane" ] || return 1
-
-    local resize_l="$height"
-    if declare -f sidebar_subpane_calc_resize_length >/dev/null 2>&1; then
-        resize_l="$(sidebar_subpane_calc_resize_length "$(sidebar_subpane_get_position)" "$height")"
-    fi
-    if [ -n "$height" ] && [ "$height" -ge 4 ] 2>/dev/null; then
-        sidebar_tmux_cmd resize-pane -t "$sub_pane" -y "$resize_l" 2>/dev/null || true
-    fi
-
-    sidebar_tmux_cmd select-pane -t "$sub_pane" -T "$sub_title" 2>/dev/null || true
-    sidebar_tmux_cmd set-option -p -q -t "$sub_pane" @dotfiles_sidebar_subpane 1 2>/dev/null || true
-    sidebar_tmux_cmd select-pane -t "$launcher_pane" 2>/dev/null || true
-
-    printf '%s\n' "$sub_pane"
+    # The hub builder is the only stack builder (joins for order, one layout
+    # string for geometry); it prints the first slot pane like this did.
+    _sidebar_port_ensure_hub || return 1
+    subpane_hub_atomic_migrate "$launcher_pane" "$height"
 }
 
 destroy_sidebar_subpane() {

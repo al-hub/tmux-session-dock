@@ -61,14 +61,17 @@ l_top_s2="$(tmux -L "$SOCKET" display-message -p -t "$sb_2" "#{pane_top}")"
 [ "$h_s2" -eq 24 ] || { echo "FAIL: height decayed from 24 to $h_s2 in sess_2"; exit 1; }
 
 # Step 5: In sess_2, user manually resizes subpane to 19
-tmux -L "$SOCKET" resize-pane -t "$sub_p" -y "$(sidebar_subpane_calc_resize_length "top" 19)"
+tmux -L "$SOCKET" resize-pane -t "$sub_p" -y 19
+# What the user sees after the drag is the intent (on tmux < 3.3 a top-edge
+# pane under pane-border-status renders one row short of the requested -y).
+manual_h="$(tmux -L "$SOCKET" display-message -p -t "$sub_p" "#{pane_height}")"
 
 # Step 6: User swaps position to bottom via P
 sidebar_subpane_swap_position "$win_2"
 h_bot="$(tmux -L "$SOCKET" display-message -p -t "$sub_p" "#{pane_height}")"
 pos_bot="$(sidebar_subpane_get_position)"
 [ "$pos_bot" = "bottom" ] || exit 1
-[ "$h_bot" -eq 19 ] || { echo "FAIL: manual resize 19 was destroyed to $h_bot"; exit 1; }
+[ "$h_bot" -eq "$manual_h" ] || { echo "FAIL: manual resize $manual_h was destroyed to $h_bot"; exit 1; }
 
 # Step 7: Immediately switch back to sess_1 (Enter)
 h_opt2="$(tmux -L "$SOCKET" show-option -gqv @dotfiles_sidebar_subpane_height)"
@@ -77,6 +80,6 @@ h_s1_final="$(tmux -L "$SOCKET" display-message -p -t "$sub_p" "#{pane_height}")
 s_top_s1_final="$(tmux -L "$SOCKET" display-message -p -t "$sub_p" "#{pane_top}")"
 l_top_s1_final="$(tmux -L "$SOCKET" display-message -p -t "$sb_1" "#{pane_top}")"
 [ "$s_top_s1_final" -gt "$l_top_s1_final" ] || exit 1
-[ "$h_s1_final" -eq 19 ] || { echo "FAIL: height decayed from 19 to $h_s1_final in sess_1"; exit 1; }
+[ "$h_s1_final" -eq "$manual_h" ] || { echo "FAIL: height decayed from $manual_h to $h_s1_final in sess_1"; exit 1; }
 
 echo "PASS: Manual resize followed by position swap and session switches maintains 100% height fidelity with ZERO decay!"

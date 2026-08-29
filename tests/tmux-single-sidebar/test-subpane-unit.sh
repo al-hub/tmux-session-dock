@@ -12,8 +12,5 @@ is_sidebar_subpane "dotfiles-sidebar-subpane" || { echo "FAIL is_sidebar_subpane
 
 [ "$(sidebar_subpane_default_height 60)" = "18" ] || { echo "FAIL height 60"; exit 1; }
 [ "$(sidebar_subpane_default_height 20)" = "8" ] || { echo "FAIL height 20 min"; exit 1; }
-[ "$(sidebar_subpane_calc_join_length bottom 12)" = "12" ] || { echo "FAIL bottom join length"; exit 1; }
-[ "$(sidebar_subpane_calc_join_length top 12)" = "13" ] || { echo "FAIL top join border correction"; exit 1; }
-[ "$(sidebar_subpane_calc_join_length top invalid)" = "13" ] || { echo "FAIL default top join length"; exit 1; }
 
 echo "PASS: subpane unit tests"

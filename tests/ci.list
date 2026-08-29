@@ -13,6 +13,7 @@ tmux-single-sidebar/test-coordinator-unit.sh
 tmux-single-sidebar/test-archive-unit.sh
 tmux-single-sidebar/test-topology-unit.sh
 tmux-single-sidebar/test-subpane-unit.sh
+tmux-single-sidebar/test-subpane-dock-layout-unit.sh
 tmux-single-sidebar/test-subpane-hub-unit.sh
 tmux-single-sidebar/test-switch-unit.sh
 tmux-single-sidebar/test-port-tmux-unit.sh

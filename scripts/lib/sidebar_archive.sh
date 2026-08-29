@@ -80,17 +80,9 @@ sidebar_archive_layout_body()
 
 sidebar_archive_layout_with_checksum()
 {
-    local body="$1"
-    local checksum=0
-    local bytes byte
-    bytes="$(printf '%s' "$body" | od -An -tu1 -v)"
-
-    for byte in $bytes; do
-        checksum=$((((checksum >> 1) | ((checksum & 1) << 15))))
-        checksum=$(((checksum + byte) & 65535))
-    done
-
-    printf '%04x,%s\n' "$checksum" "$body"
+    # The algorithm lives in sidebar_domain.sh (needed by the dock builder,
+    # which is inlined before this module); keep the archive name as an alias.
+    sidebar_domain_layout_checksum "$@"
 }
 
 sidebar_archive_layout_with_pane_ids()

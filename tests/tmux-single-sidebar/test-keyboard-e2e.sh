@@ -551,13 +551,20 @@ run_subpane_multi_slot_enter_reproduction()
 
     anchor_window="$(client_window_id)"
     sidebar_pane="$(sidebar_pane_id)"
-    # Resize bottom-up: tmux takes the rows for a taller pane from the pane
-    # below it, so resizing the last slot first keeps earlier slots intact.
-    while IFS='|' read -r pane slot; do
-        [ -n "$pane" ] || continue
-        tmuxc resize-pane -t "$pane" -y "${requested_heights[$slot]}"
-    done < <(tmuxc list-panes -t "$anchor_window" -F '#{pane_id}|#{@dotfiles_subpane_slot}' |
-        awk -F '|' -v n="$slot_total" '$2 >= 1 && $2 <= n { print }' | sort -t '|' -k2,2nr)
+    # Place the requested heights exactly with one layout string (the same pure
+    # geometry the product uses, verified by test-subpane-dock-layout-unit);
+    # sequential resize-pane calls steal rows from neighbouring slots and never
+    # settle on distinct intents in a compact window.
+    source "$REPO_ROOT/scripts/lib/sidebar_domain.sh"
+    local fixture_layout fixture_body fixture_edge
+    fixture_edge="$(tmuxc show-options -gqv pane-border-status 2>/dev/null || true)"
+    fixture_layout="$(tmuxc display-message -p -t "$anchor_window" '#{window_layout}')"
+    fixture_body="$(sidebar_domain_dock_layout "$fixture_layout" "$(tmuxc display-message -p -t "$sidebar_pane" '#{pane_width}')" bottom \
+        "$(sidebar_domain_dock_border_edge "$fixture_edge")" "${requested_heights[@]:1}")" || {
+        printf 'FAIL: could not build the fixture layout from %s\n' "$fixture_layout" >&2
+        return 1
+    }
+    tmuxc select-layout -t "$anchor_window" "$(sidebar_domain_layout_checksum "$fixture_body")"
     # The user's intent is whatever the live layout settled on; it only has
     # to be distinct per slot so the oracle can tell the slots apart.
     while IFS='|' read -r pane slot; do
@@ -570,6 +577,12 @@ run_subpane_multi_slot_enter_reproduction()
         printf 'FAIL: slot heights must be distinct for this scenario, got %s\n' "${expected_heights[*]}" >&2
         return 1
     }
+    for slot in "${slots[@]}"; do
+        [ "${expected_heights[$slot]}" -ge 4 ] || {
+            printf 'FAIL: slot %s settled below the 4-row minimum (%s); the scenario window is too small\n' "$slot" "${expected_heights[$slot]}" >&2
+            return 1
+        }
+    done
 
     [ "${#expected_heights[@]}" -eq "$slot_total" ] || {
         printf 'FAIL: expected %s resized Subpane Slots, got %s\n' "$slot_total" "${#expected_heights[@]}" >&2
@@ -679,6 +692,22 @@ run_subpane_multi_slot_enter_reproduction()
     wait_until 'multi-slot Enter target lease' "$slot_total" count_subpanes
 
     target_window="$(client_window_id)"
+    # The stack in a window the client had never shown is rebuilt by a
+    # detached run-shell once the window has taken the client's size; give it
+    # the same bounded wait every other transition gets.
+    slot_heights_csv()
+    {
+        local window="$1" csv="" slot
+        for slot in "${slots[@]}"; do
+            csv="$csv,$(tmuxc list-panes -t "$window" -F '#{@dotfiles_subpane_slot}|#{pane_height}' |
+                awk -F '|' -v wanted="$slot" '!done && $1 == wanted { print $2; done = 1 }')"
+        done
+        printf '%s\n' "${csv#,}"
+    }
+    expected_csv=""
+    for slot in "${slots[@]}"; do expected_csv="$expected_csv,${expected_heights[$slot]}"; done
+    expected_csv="${expected_csv#,}"
+    wait_until 'multi-slot Enter target stack geometry' "$expected_csv" slot_heights_csv "$target_window"
     for slot in "${slots[@]}"; do
         actual="$(tmuxc list-panes -t "$target_window" -F '#{@dotfiles_subpane_slot}|#{pane_height}' |
             awk -F '|' -v wanted="$slot" '!done && $1 == wanted { print $2; done = 1 }')"
@@ -712,6 +741,7 @@ run_subpane_multi_slot_enter_reproduction()
     wait_until 'multi-slot Enter anchor lease' "$slot_total" count_subpanes
 
     anchor_window="$(client_window_id)"
+    wait_until 'multi-slot Enter anchor stack geometry' "$expected_csv" slot_heights_csv "$anchor_window"
     for slot in "${slots[@]}"; do
         actual="$(tmuxc list-panes -t "$anchor_window" -F '#{@dotfiles_subpane_slot}|#{pane_height}' |
             awk -F '|' -v wanted="$slot" '!done && $1 == wanted { print $2; done = 1 }')"

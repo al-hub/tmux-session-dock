@@ -39,7 +39,6 @@ source "$REPO_ROOT/scripts/lib/sidebar_subpane_hub.sh"
 sub_p="$(provision_sidebar_subpane "$win_id" "$launcher_p" 12 "")"
 sleep 0.3
 echo "  after provision (bottom):"; panes "$win_id"
-echo "  calc_resize_length top 12 -> $(sidebar_subpane_calc_resize_length top 12 2>/dev/null)  bottom 12 -> $(sidebar_subpane_calc_resize_length bottom 12 2>/dev/null)"
 sidebar_subpane_swap_position "$win_id"
 sleep 0.5
 echo "  after swap to top:"; panes "$win_id"

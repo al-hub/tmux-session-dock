@@ -1614,37 +1614,6 @@ snapshot_work_layout_transaction()
             subpane_hub_atomic_migrate "$sidebar_pane" >/dev/null 2>&1 || true
         fi
         subpane_hub_transaction_end
-    elif [ -n "$sub_pane" ] && [ -n "$sidebar_pane" ]; then
-        local sub_pos="bottom" pos_flag=""
-        if declare -f sidebar_subpane_get_position >/dev/null 2>&1; then
-            sub_pos="$(sidebar_subpane_get_position 2>/dev/null || echo bottom)"
-        fi
-        if declare -f sidebar_subpane_calc_pos_flag >/dev/null 2>&1; then
-            pos_flag="$(sidebar_subpane_calc_pos_flag "$sub_pos")"
-        elif [ "$sub_pos" = "top" ]; then
-            pos_flag="-b"
-        fi
-
-        local join_l="$sub_height"
-        if declare -f sidebar_subpane_calc_join_length >/dev/null 2>&1; then
-            join_l="$(sidebar_subpane_calc_join_length "$sub_pos" "$sub_height")"
-        elif [ "$pos_flag" = "-b" ]; then
-            join_l="$((sub_height + 1))"
-        fi
-        if ! tmux join-pane -d $pos_flag -s "$sub_pane" -t "$sidebar_pane" -v -l "$join_l" 2>/dev/null; then
-            tmux join-pane -d $pos_flag -s "$sub_pane" -t "$sidebar_pane" -v 2>/dev/null || true
-        fi
-        local resize_l="$sub_height"
-        if declare -f sidebar_subpane_calc_resize_length >/dev/null 2>&1; then
-            resize_l="$(sidebar_subpane_calc_resize_length "$sub_pos" "$sub_height")"
-        fi
-        if [ -n "$sub_height" ] && [ "$sub_height" -ge 4 ] 2>/dev/null; then
-            tmux resize-pane -t "$sub_pane" -y "$resize_l" 2>/dev/null || true
-        fi
-        tmux select-pane -t "$sub_pane" -T "${SIDEBAR_SUBPANE_TITLE:-dotfiles-sidebar-subpane}" 2>/dev/null || true
-        tmux set-option -p -q -t "$sub_pane" @dotfiles_sidebar_subpane 1 2>/dev/null || true
-    elif [ -n "$sub_pane" ]; then
-        tmux kill-pane -t "$sub_pane" 2>/dev/null || true
     fi
 
     trace_event "layout.snapshot.transaction window=$window_id holder=${holder_window:-none} panes=${work_pane_ids:-none} active=${active_work_pane:-none}"
@@ -3114,7 +3083,10 @@ switch_session()
         }
         trace_event "switch.sidebar-focus session=$session_name window=$target_window pane=$sidebar_pane"
     fi
-    if [ "$subpane_enabled" = "1" ] && [ -n "$target_window" ]; then
+    # With a leased stack the hot switch already scheduled the rebuild (a
+    # detached run-shell chained to switch-client); a second builder here
+    # would race it. Only a session that never opened a Subpane needs one.
+    if [ "$subpane_enabled" = "1" ] && [ -n "$target_window" ] && [ -z "$sub_pane" ]; then
         ensure_sidebar_subpane_window "$target_window" "$sidebar_pane"
     fi
     if ! wait_for_sidebar_input_ready "$target_window" "$sidebar_pane"; then
@@ -8152,6 +8124,11 @@ run_tui()
 {
     local action_generation=0
     trace_event "sidebar.process.begin pane=${TMUX_PANE:-none}"
+    # Keep the presenter's stderr (bash diagnostics) with the debug log; on
+    # the pane it is overwritten by the next redraw and lost.
+    if [ "${TMUX_SESSION_LAUNCHER_DEBUG:-0}" = "1" ] && [ -n "${TMUX_SESSION_LAUNCHER_DEBUG_FILE:-}" ]; then
+        exec 2>>"$TMUX_SESSION_LAUNCHER_DEBUG_FILE"
+    fi
     sidebar_env_purge_legacy
     setup_terminal
     if [ -n "${TMUX_PANE:-}" ]; then
