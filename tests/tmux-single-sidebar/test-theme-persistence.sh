@@ -31,6 +31,9 @@ else
     exit 1
 fi
 tmux -L "$SOCKET" kill-server >/dev/null 2>&1 || true
+# A client that reconnects while the old server is still shutting down gets
+# "server exited unexpectedly"; wait until the socket really is gone.
+for _ in $(seq 1 100); do tmux -L "$SOCKET" list-sessions >/dev/null 2>&1 || break; sleep 0.05; done
 
 echo "=== [2/3] Verifying fallback to @session-dock-theme option ==="
 rm -f "$TMP_XDG/tmux/theme.conf"
@@ -48,6 +51,9 @@ else
     exit 1
 fi
 tmux -L "$SOCKET" kill-server >/dev/null 2>&1 || true
+# A client that reconnects while the old server is still shutting down gets
+# "server exited unexpectedly"; wait until the socket really is gone.
+for _ in $(seq 1 100); do tmux -L "$SOCKET" list-sessions >/dev/null 2>&1 || break; sleep 0.05; done
 
 echo "=== [3/3] Verifying theme.conf takes priority over @session-dock-theme ==="
 cp "$SCRIPT_DIR/themes/open-tokyonight.conf" "$TMP_XDG/tmux/theme.conf"

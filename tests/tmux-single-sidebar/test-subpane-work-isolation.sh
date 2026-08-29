@@ -11,6 +11,9 @@ cleanup() {
     rm -rf "$STATE_DIR"
 }
 trap cleanup EXIT
+# Under `set -e` a failing command exits silently; name it so a CI log
+# shows more than "rc=1" (seen once on ubuntu-24.04 with no output at all).
+trap 'printf "FAIL: line %s: %s\n" "$LINENO" "$BASH_COMMAND" >&2; tmux -L "$SOCKET" list-panes -a -F "#{session_name}|#{window_id}|#{pane_id}|#{pane_title}|#{pane_height}" >&2 2>/dev/null || true' ERR
 
 export TMUX="$SOCKET"
 export TMUX_SESSION_LAUNCHER_SOCKET="$SOCKET"
