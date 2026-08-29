@@ -28,6 +28,7 @@ tmux-single-sidebar/test-topology-contract.sh
 tmux-single-sidebar/test-marker-handover-contract.sh
 tmux-single-sidebar/test-archive-deterministic-naming-contract.sh
 tmux-single-sidebar/test-cold-provisioning-contract.sh
+tmux-single-sidebar/test-concurrent-provision-contract.sh
 tmux-single-sidebar/test-window-ready-options.sh
 tmux-single-sidebar/test-width-restart-contract.sh
 tmux-single-sidebar/test-width-restore-contract.sh

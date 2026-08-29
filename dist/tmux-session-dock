@@ -4394,13 +4394,16 @@ reconcile_sidebar_window()
         fi
         return 0
     fi
+    # Two provisioners can reconcile the same window at once (an explicit
+    # --ensure-sidebar-window and the after-new-session hook).  The canonical
+    # pane must therefore be a pure function of the panes present — the lowest
+    # pane id, i.e. the oldest sidebar — so both reach the same verdict.  A
+    # choice that depended on list order or on the window option one of them
+    # had just written made them kill each other's pane and leave the window
+    # with no sidebar at all (measured: canonical=%12 removed=%13, then
+    # canonical=%13 removed=%12 a tenth of a second later).
     canonical_pane="$(tmux list-panes -t "$window_id" -F '#{pane_id}|#{pane_title}' 2>/dev/null |
-        awk -F '|' -v title="$SIDEBAR_TITLE" '$2 == title { print $1; exit }')"
-    existing_pane="$(tmux show-option -wqv -t "$window_id" "$SIDEBAR_WINDOW_PANE_OPTION" 2>/dev/null || true)"
-    if [ -n "$existing_pane" ] && tmux list-panes -t "$window_id" -F '#{pane_id}|#{pane_title}' 2>/dev/null |
-        awk -F '|' -v pane="$existing_pane" -v title="$SIDEBAR_TITLE" '$1 == pane && $2 == title { found=1 } END { exit found ? 0 : 1 }'; then
-        canonical_pane="$existing_pane"
-    fi
+        awk -F '|' -v title="$SIDEBAR_TITLE" '$2 == title { id = substr($1, 2) + 0; if (!found || id < min) { min = id; found = 1 } } END { if (found) print "%" min }')"
     [ -n "$canonical_pane" ] || return 0
     while IFS='|' read -r duplicate_pane _; do
         [ -n "$duplicate_pane" ] || continue
@@ -4455,12 +4458,37 @@ provision_sidebar_window()
         return 1
     }
     pane_path="$(target_pane_path "$work_pane")"
+    # One creator per window: a second provisioner that arrives while the
+    # first is splitting waits for that pane instead of creating a duplicate
+    # that reconciliation then has to kill.
+    local provision_lock waited
+    provision_lock="${TMUX_SESSION_LAUNCHER_LOCK_ROOT:-/tmp}/dotfiles-sidebar-provision-$(ai_observer_socket_tag)-${window_id//[^A-Za-z0-9]/_}.lock"
+    if ! mkdir "$provision_lock" 2>/dev/null; then
+        if [ -n "$(find "$provision_lock" -maxdepth 0 -mmin +1 2>/dev/null)" ]; then
+            rm -rf "$provision_lock" 2>/dev/null || true
+            mkdir "$provision_lock" 2>/dev/null || true
+        else
+            for waited in $(seq 1 60); do
+                existing_pane="$(sidebar_window_pane "$window_id" || true)"
+                [ -n "$existing_pane" ] && break
+                [ -d "$provision_lock" ] || break
+                sleep 0.05
+            done
+            existing_pane="$(sidebar_window_pane "$window_id" || true)"
+            if [ -n "$existing_pane" ]; then
+                trace_event "sidebar.window.provision.raced window=$window_id created=none canonical=$existing_pane reason=lock"
+                return 0
+            fi
+            mkdir "$provision_lock" 2>/dev/null || true
+        fi
+    fi
     tmux set-option -wq -t "$window_id" "$SIDEBAR_WINDOW_READY_OPTION" 0 2>/dev/null || true
     trace_event "sidebar.window.provision.begin window=$window_id width=$width"
     set_sidebar_layout_hook_guard 1000
     pane_id="$(tmux split-window -P -F '#{pane_id}' -d -t "$work_pane" -h -f -b -l "$width" \
         -c "$pane_path" "$SCRIPT_PATH --sidebar" 2>/dev/null || true)"
     if [ -z "$pane_id" ]; then
+        rm -rf "$provision_lock" 2>/dev/null || true
         trace_event "sidebar.window.provision.abort window=$window_id reason=split"
         return 1
     fi
@@ -4477,10 +4505,12 @@ provision_sidebar_window()
     reconcile_sidebar_window "$window_id"
     existing_pane="$(sidebar_window_pane "$window_id" || true)"
     if [ -n "$existing_pane" ] && [ "$existing_pane" != "$pane_id" ]; then
+        rm -rf "$provision_lock" 2>/dev/null || true
         trace_event "sidebar.window.provision.raced window=$window_id created=$pane_id canonical=$existing_pane"
         return 0
     fi
     tmux set-option -wq -t "$window_id" "$SIDEBAR_WINDOW_PANE_OPTION" "$pane_id" 2>/dev/null || true
+    rm -rf "$provision_lock" 2>/dev/null || true
     if [ "$subpane_enabled" = "0" ]; then
         :
     elif [ "$subpane_enabled" = "1" ] || [ "$(sidebar_subpane_get_enabled)" = "1" ]; then
