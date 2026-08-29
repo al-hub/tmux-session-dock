@@ -1126,6 +1126,9 @@ install_sidebar_hooks()
     tmux set-hook -g after-swap-pane "run-shell -b '$quoted_script --sync-sidebar-layout #{window_id} swap-pane'" 2>/dev/null || true
     tmux set-hook -g window-resized "run-shell -b '$quoted_script --sync-sidebar-layout #{window_id} window-resized'" 2>/dev/null || true
     tmux set-hook -g window-pane-changed "run-shell -b '$quoted_script --sync-sidebar-focus #{window_id}'" 2>/dev/null || true
+    # Opt-in IME hook (@session-dock-ime): sidebar focus switches the OS input
+    # method to English so letter shortcuts are not eaten by a CJK IME.
+    declare -f sidebar_ime_apply >/dev/null 2>&1 && sidebar_ime_apply || true
     tmux set-option -gq "@sidebar_hooks_installed" 1 2>/dev/null || true
     _sidebar_hooks_installed=true
 }
@@ -2422,7 +2425,6 @@ smart_navigate_pane()
 
 focus_or_toggle_sidebar()
 {
-    declare -f sidebar_ime_switch_to_english >/dev/null 2>&1 && sidebar_ime_switch_to_english "sidebar" || true
     local target_arg="${1:-}"
     local target_win=""
     if [ -n "$target_arg" ]; then
@@ -2458,7 +2460,6 @@ focus_or_toggle_sidebar()
 
 toggle_current_sidebar()
 {
-    declare -f sidebar_ime_switch_to_english >/dev/null 2>&1 && sidebar_ime_switch_to_english "sidebar" || true
     local target_arg="${1:-}"
     local existing_count owner_client current_client
     owner_client="$(sidebar_owner_client)"
@@ -8113,7 +8114,6 @@ handle_mouse_select()
 run_tui()
 {
     local action_generation=0
-    declare -f sidebar_ime_switch_to_english >/dev/null 2>&1 && sidebar_ime_switch_to_english "sidebar" || true
     trace_event "sidebar.process.begin pane=${TMUX_PANE:-none}"
     sidebar_env_purge_legacy
     setup_terminal
@@ -8760,6 +8760,22 @@ main()
         --restore-archive)
             restore_archive "${2:-}" "${3:-}" "${4:-false}"
             return $?
+            ;;
+        --apply-ime-hook)
+            declare -f sidebar_ime_apply >/dev/null 2>&1 && sidebar_ime_apply || true
+            return 0
+            ;;
+        --ime-set)
+            declare -f sidebar_ime_set_setting >/dev/null 2>&1 && sidebar_ime_set_setting "${2:-off}" || true
+            return 0
+            ;;
+        --ime-status)
+            if declare -f sidebar_ime_status >/dev/null 2>&1; then
+                sidebar_ime_status
+            else
+                echo "setting=off backend=none hook=absent"
+            fi
+            return 0
             ;;
         --source-only)
             return 0

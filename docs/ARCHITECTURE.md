@@ -38,6 +38,8 @@ graph TD
 4. **Clean Shared History**: Session archive and restoration (`o`) preserves shell history with Zero Time-Travel Pollution.
 5. **24-Phase Waveform Gradient**: One shared AI Activity Observer per tmux server samples every AI pane once per second and publishes a state file (per-session state plus a topology hash and the attached-client list); presenters read it with builtins and collect only when that summary changed, so an idle presenter issues no tmux commands. Presenters write a heartbeat before every read; the observer's watchdog logs a presenter whose heartbeat stalls while its process is alive (`TMUX_SESSION_SIDEBAR_WATCHDOG=log`, default) and can send Escape to unblock it (`recover`), never while a prompt is open. Only the presenter with an attached client animates the wave, at 24 FPS (one cycle per second).
 
+6. **IME Follows Sidebar Focus (opt-in)**: With `@session-dock-ime on`, one `pane-focus-in` hook switches the OS input method to English when the sidebar pane gains focus, by any route (key, mouse, hook, session switch). The pane-title compare runs inside tmux (`if-shell -F`), so a focus change elsewhere costs no process; only a sidebar focus forks the one-shot helper (`~/.local/bin/imemode.exe en` on WSL2 — built locally from `bin/win/imemode.cs`, it flips the IME conversion mode that layout switchers like im-select cannot see; `fcitx5-remote -c` / `fcitx-remote -c` / `ibus engine xkb:us::eng` / `im-select` on Linux/macOS). Nothing is restored on focus-out. The hook needs an attached focused client, so headless servers (tests, CI) never touch an IME.
+
 ## 3. Subpane Pool Invariants
 
 1. **Stable Slot Identity**: Each configured Subpane Slot has exactly one canonical tmux pane identity for the lifetime of the tmux server.

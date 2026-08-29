@@ -132,18 +132,33 @@ do_test() {
 }
 
 ensure_ime_support() {
-    # Check if WSL2 environment without im-select.exe
-    if grep -qi "microsoft" /proc/version 2>/dev/null || [ -n "${WSL_DISTRO_NAME:-}" ]; then
-        if ! command -v im-select.exe >/dev/null 2>&1 && [ ! -x "$BIN_DIR/im-select.exe" ]; then
-            log_info "WSL2 environment detected: downloading lightweight im-select.exe helper..."
-            mkdir -p "$BIN_DIR"
-            if curl -fsSL "https://raw.githubusercontent.com/daipeihost/im-select/master/win/im-select.exe" -o "$BIN_DIR/im-select.exe" 2>/dev/null; then
-                chmod +x "$BIN_DIR/im-select.exe" 2>/dev/null || true
-                log_ok "im-select.exe installed in $BIN_DIR (enables 0ms auto-IME switching)"
-            else
-                log_info "Skipping im-select.exe download (pure fallback mode active)"
-            fi
-        fi
+    # WSL2 only: build the tiny Windows helper that flips the IME conversion
+    # mode (한/영) of the foreground window. Source ships as bin/win/imemode.cs and
+    # is compiled locally with csc.exe, part of the .NET Framework 4.x that every
+    # Windows 10/11 already has. No download, no third-party binary.
+    grep -qi "microsoft" /proc/version 2>/dev/null || [ -n "${WSL_DISTRO_NAME:-}" ] || return 0
+    local src="$SCRIPT_DIR/bin/win/imemode.cs" out="$BIN_DIR/imemode.exe" csc=""
+    [ -r "$src" ] || return 0
+    if [ -x "$out" ] && [ ! "$src" -nt "$out" ]; then
+        return 0
+    fi
+    for csc in /mnt/c/Windows/Microsoft.NET/Framework64/v4.0.30319/csc.exe \
+               /mnt/c/Windows/Microsoft.NET/Framework/v4.0.30319/csc.exe; do
+        [ -x "$csc" ] && break
+        csc=""
+    done
+    if [ -z "$csc" ] || ! command -v wslpath >/dev/null 2>&1; then
+        log_info "WSL2: csc.exe not found; sidebar IME auto-English stays unavailable"
+        return 0
+    fi
+    mkdir -p "$BIN_DIR"
+    log_info "WSL2: building IME helper from bin/win/imemode.cs..."
+    if "$csc" /nologo /optimize /target:exe "/out:$(wslpath -w "$out")" "$(wslpath -w "$src")" >/dev/null 2>&1 \
+        && chmod +x "$out" 2>/dev/null; then
+        log_ok "IME helper built: $out  (enable: set -g @session-dock-ime on, or the S popup)"
+    else
+        rm -f "$out" 2>/dev/null || true
+        log_info "IME helper build failed; sidebar IME auto-English stays unavailable"
     fi
 }
 
@@ -191,18 +206,15 @@ do_status() {
         echo -e "  tmux Server:  ${RED}NOT DETECTED${NC}"
     fi
 
-    # Check IME Auto-Switch Backend
-    local ime_backend="none"
-    if [ -r "$SCRIPT_DIR/scripts/lib/sidebar_ime.sh" ]; then
-        # shellcheck disable=SC1091
-        source "$SCRIPT_DIR/scripts/lib/sidebar_ime.sh"
-        ime_backend="$(sidebar_ime_detect_backend)"
+    # Sidebar IME focus hook (opt-in)
+    local ime_status="setting=off backend=none hook=absent"
+    if [ -x "$SCRIPT_DIR/dist/tmux-session-dock" ]; then
+        ime_status="$("$SCRIPT_DIR/dist/tmux-session-dock" --ime-status 2>/dev/null || echo "$ime_status")"
     fi
-    case "$ime_backend" in
-        wsl*)   echo -e "  IME Switcher: ${GREEN}ACTIVE (WSL2 im-select.exe)${NC}" ;;
-        mac*)   echo -e "  IME Switcher: ${GREEN}ACTIVE (macOS im-select)${NC}" ;;
-        linux*) echo -e "  IME Switcher: ${GREEN}ACTIVE (Linux $ime_backend)${NC}" ;;
-        *)      echo -e "  IME Switcher: ${CYAN}PASSIVE (Pure Fallback Ready)${NC}" ;;
+    case "$ime_status" in
+        *backend=none*) echo -e "  IME Hook:     ${CYAN}UNAVAILABLE${NC} (no helper: imemode.exe / fcitx5 / fcitx / ibus / im-select)" ;;
+        *setting=on*)   echo -e "  IME Hook:     ${GREEN}ON${NC} ($ime_status)" ;;
+        *)              echo -e "  IME Hook:     ${YELLOW}OFF${NC} ($ime_status; enable: set -g @session-dock-ime on)" ;;
     esac
 
     # Check ~/.tmux.conf configuration

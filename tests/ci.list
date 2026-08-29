@@ -45,6 +45,7 @@ tmux-single-sidebar/test-restore-history-no-pollution.sh
 tmux-single-sidebar/test-help-viewer.sh
 tmux-single-sidebar/test-theme-persistence.sh
 tmux-single-sidebar/test-quick-jump.sh
+tmux-single-sidebar/test-ime-hook-e2e.sh
 tmux-single-sidebar/test-presenter-handover-e2e.sh
 tmux-single-sidebar/test-settled-presenter-content-regression.sh
 tmux-single-sidebar/test-smart-pane.sh

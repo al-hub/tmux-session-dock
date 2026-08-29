@@ -53,6 +53,7 @@ set -g @session-dock-key 's'              # Toggle sidebar key (Prefix + s)
 set -g @session-dock-width '34'           # Sidebar column width
 set -g @session-dock-theme 'open-tokyonight' # Default theme
 set -g @session-dock-dotfiles-mode 'on'   # [Optional] Enable full ergonomics preset (Ctrl+a, path border, Alt-Nav)
+set -g @session-dock-ime 'on'             # [Optional] Switch the OS IME to English whenever the sidebar gains focus (WSL2/Linux/macOS)
 
 run '~/.tmux/plugins/tpm/tpm'
 ```

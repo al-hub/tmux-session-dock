@@ -77,7 +77,7 @@ tmux bind-key -n -N "⚡ Quick Jump to Session Dock" "$QUICK_JUMP_KEY" run-shell
 
 tmux bind-key -N "🗂️ Toggle Session Dock" "$TOGGLE_KEY" run-shell "$BIN_PATH --toggle-sidebar" 2>/dev/null || tmux bind-key "$TOGGLE_KEY" run-shell "$BIN_PATH --toggle-sidebar" 2>/dev/null || true
 
-tmux bind-key -N "⚙️ Subpane Stack Configurator" "S" display-popup -E -w 70% -h 60% "$CURRENT_DIR/scripts/tmux-subpane-picker" 2>/dev/null || tmux bind-key "S" display-popup -E -w 70% -h 60% "$CURRENT_DIR/scripts/tmux-subpane-picker" 2>/dev/null || true
+tmux bind-key -N "⚙️ Session Dock Settings (Subpane Stack · IME)" "S" display-popup -E -w 70% -h 60% "$CURRENT_DIR/scripts/tmux-subpane-picker" 2>/dev/null || tmux bind-key "S" display-popup -E -w 70% -h 60% "$CURRENT_DIR/scripts/tmux-subpane-picker" 2>/dev/null || true
 
 tmux bind-key -N "🎨 Session Dock Theme Picker" "$THEME_KEY" display-popup -E -w 75% -h 65% "$CURRENT_DIR/scripts/tmux-theme-picker" 2>/dev/null || tmux bind-key "$THEME_KEY" display-popup -E -w 75% -h 65% "$CURRENT_DIR/scripts/tmux-theme-picker" 2>/dev/null || true
 
@@ -99,3 +99,7 @@ tmux bind-key -n -N "🧭 Smart Focus Left" 'M-Left' run-shell "$BIN_PATH --smar
 tmux bind-key -n -N "🧭 Smart Focus Right" 'M-Right' run-shell "$BIN_PATH --smart-pane R" 2>/dev/null || true
 tmux bind-key -n -N "🧭 Smart Focus Up" 'M-Up' run-shell "$BIN_PATH --smart-pane U" 2>/dev/null || true
 tmux bind-key -n -N "🧭 Smart Focus Down" 'M-Down' run-shell "$BIN_PATH --smart-pane D" 2>/dev/null || true
+
+# 5. IME focus hook (opt-in: set -g @session-dock-ime on). Reconciled on every
+# config load so a tmux.conf change or the S popup takes effect immediately.
+"$BIN_PATH" --apply-ime-hook >/dev/null 2>&1 || true
