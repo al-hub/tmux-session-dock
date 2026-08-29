@@ -207,14 +207,15 @@ do_status() {
     fi
 
     # Sidebar IME focus hook (opt-in)
-    local ime_status="setting=off backend=none hook=absent"
+    local ime_status="setting=off trigger=any backend=none hook_in=absent hook_out=absent"
     if [ -x "$SCRIPT_DIR/dist/tmux-session-dock" ]; then
         ime_status="$("$SCRIPT_DIR/dist/tmux-session-dock" --ime-status 2>/dev/null || echo "$ime_status")"
     fi
     case "$ime_status" in
-        *backend=none*) echo -e "  IME Hook:     ${CYAN}UNAVAILABLE${NC} (no helper: imemode.exe / fcitx5 / fcitx / ibus / im-select)" ;;
-        *setting=on*)   echo -e "  IME Hook:     ${GREEN}ON${NC} ($ime_status)" ;;
-        *)              echo -e "  IME Hook:     ${YELLOW}OFF${NC} ($ime_status; enable: set -g @session-dock-ime on)" ;;
+        *backend=none*)    echo -e "  IME Hook:     ${CYAN}UNAVAILABLE${NC} (no helper: imemode.exe / fcitx5 / fcitx / ibus / im-select)" ;;
+        *setting=restore*) echo -e "  IME Hook:     ${GREEN}RESTORE${NC} ($ime_status)" ;;
+        *setting=on*)      echo -e "  IME Hook:     ${GREEN}ON${NC} ($ime_status)" ;;
+        *)                 echo -e "  IME Hook:     ${YELLOW}OFF${NC} ($ime_status; enable: set -g @session-dock-ime on|restore)" ;;
     esac
 
     # Check ~/.tmux.conf configuration
@@ -256,6 +257,7 @@ do_install() {
     ln -sf "$SCRIPT_DIR/scripts/tmux-subpane-picker" "$BIN_DIR/tmux-subpane-picker"
     ln -sf "$SCRIPT_DIR/scripts/tmux-command-palette" "$BIN_DIR/tmux-command-palette"
     ln -sf "$SCRIPT_DIR/scripts/tmux-help-viewer" "$BIN_DIR/tmux-help-viewer"
+    ln -sf "$SCRIPT_DIR/scripts/tmux-session-dock-ime" "$BIN_DIR/tmux-session-dock-ime"
     log_ok "Symlinks registered in $BIN_DIR"
 
     # 3. Setup themes directory
@@ -307,6 +309,7 @@ do_update() {
     ln -sf "$SCRIPT_DIR/scripts/tmux-subpane-picker" "$BIN_DIR/tmux-subpane-picker"
     ln -sf "$SCRIPT_DIR/scripts/tmux-command-palette" "$BIN_DIR/tmux-command-palette"
     ln -sf "$SCRIPT_DIR/scripts/tmux-help-viewer" "$BIN_DIR/tmux-help-viewer"
+    ln -sf "$SCRIPT_DIR/scripts/tmux-session-dock-ime" "$BIN_DIR/tmux-session-dock-ime"
     log_ok "Symlinks updated in $BIN_DIR"
 
     local user_theme_dir="${XDG_CONFIG_HOME:-$HOME/.config}/tmux/themes"
@@ -329,7 +332,9 @@ do_uninstall() {
           "$BIN_DIR/tmux-sidebar-tmux-adapter" \
           "$BIN_DIR/tmux-theme-picker" \
           "$BIN_DIR/tmux-command-palette" \
-          "$BIN_DIR/tmux-help-viewer"
+          "$BIN_DIR/tmux-help-viewer" \
+          "$BIN_DIR/tmux-session-dock-ime" \
+          "$BIN_DIR/imemode.exe"
     log_ok "Symlinks removed from $BIN_DIR"
 
     # 2. Clean ~/.tmux.conf

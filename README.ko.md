@@ -46,7 +46,8 @@ set -g @session-dock-key 's'              # 사이드바 토글 키 (기본: Pre
 set -g @session-dock-width '34'           # 사이드바 너비
 set -g @session-dock-theme 'open-tokyonight' # 기본 테마
 set -g @session-dock-dotfiles-mode 'on'   # [옵션] Ctrl+a, 상단 경로 보더, Alt+화살표 인체공학 프리셋 활성화
-set -g @session-dock-ime 'on'             # [옵션] 사이드바 포커스 시 IME 영문 전환 (한글 상태에서도 j/k/d 등 단축키 동작; Prefix+S 팝업에서도 토글)
+set -g @session-dock-ime 'restore'        # [옵션] 사이드바 진입 시 IME 영문 전환: off | on | restore (restore = 나갈 때 원래 한/영 복원). Prefix+S 팝업에서도 토글
+set -g @session-dock-ime-trigger 'any'    # [옵션] any = 마우스·키·세션 전환 등 모든 진입 | keybind = Alt+s / Prefix+s / Alt+화살표만
 
 run '~/.tmux/plugins/tpm/tpm'
 ```

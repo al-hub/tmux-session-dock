@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# tmux-session-dock-ime — one-shot IME helper run by the sidebar focus hooks
+#
+#   tmux-session-dock-ime backend   -> imemode | fcitx5 | fcitx | ibus | im-select | macism | none
+#   tmux-session-dock-ime get       -> current state (backend-specific token)
+#   tmux-session-dock-ime en        -> switch to English / alphanumeric
+#   tmux-session-dock-ime push      -> remember the current state, then switch to English
+#   tmux-session-dock-ime pop       -> restore the remembered state (if any)
+#
+# WSL2 delegates to imemode.exe, which also owns push/pop (it checks that the
+# same Windows window is still in the foreground). The other backends keep the
+# remembered state in a small file; a push while one is pending keeps the
+# older value, so a re-entered sidebar never overwrites the user's real mode.
+# ==============================================================================
+set -uo pipefail
+
+STATE_FILE="${TMUX_SESSION_DOCK_IME_STATE:-${XDG_RUNTIME_DIR:-/tmp}/tmux-session-dock-ime.$(id -u).state}"
+
+backend()
+{
+    if [ -x "$HOME/.local/bin/imemode.exe" ] || command -v imemode.exe >/dev/null 2>&1; then echo imemode
+    elif command -v fcitx5-remote >/dev/null 2>&1; then echo fcitx5
+    elif command -v fcitx-remote >/dev/null 2>&1; then echo fcitx
+    elif command -v ibus >/dev/null 2>&1; then echo ibus
+    elif command -v im-select >/dev/null 2>&1; then echo im-select
+    elif command -v macism >/dev/null 2>&1; then echo macism
+    else echo none
+    fi
+}
+
+imemode_bin()
+{
+    if [ -x "$HOME/.local/bin/imemode.exe" ]; then echo "$HOME/.local/bin/imemode.exe"; else echo imemode.exe; fi
+}
+
+get_state()
+{
+    case "$1" in
+        fcitx5) fcitx5-remote 2>/dev/null ;;            # 1 inactive, 2 active
+        fcitx) fcitx-remote 2>/dev/null ;;
+        ibus) ibus engine 2>/dev/null ;;
+        im-select) im-select 2>/dev/null ;;
+        macism) macism 2>/dev/null ;;
+    esac
+}
+
+set_english()
+{
+    case "$1" in
+        fcitx5) fcitx5-remote -c >/dev/null 2>&1 ;;
+        fcitx) fcitx-remote -c >/dev/null 2>&1 ;;
+        ibus) ibus engine xkb:us::eng >/dev/null 2>&1 ;;
+        im-select) im-select com.apple.keylayout.ABC >/dev/null 2>&1 ;;
+        macism) macism com.apple.keylayout.ABC >/dev/null 2>&1 ;;
+    esac
+}
+
+set_state()
+{
+    case "$1" in
+        fcitx5) [ "$2" = "2" ] && fcitx5-remote -o >/dev/null 2>&1 || fcitx5-remote -c >/dev/null 2>&1 ;;
+        fcitx) [ "$2" = "2" ] && fcitx-remote -o >/dev/null 2>&1 || fcitx-remote -c >/dev/null 2>&1 ;;
+        ibus) ibus engine "$2" >/dev/null 2>&1 ;;
+        im-select) im-select "$2" >/dev/null 2>&1 ;;
+        macism) macism "$2" >/dev/null 2>&1 ;;
+    esac
+}
+
+verb="${1:-get}"
+
+# push/pop are fired by two different hooks in quick succession (enter, leave).
+# Serialize them so a slow helper start (first .NET launch ~0.8 s) cannot let
+# the pop overtake the push that should precede it.
+LOCK_FILE="${TMUX_SESSION_DOCK_IME_LOCK:-${XDG_RUNTIME_DIR:-/tmp}/tmux-session-dock-ime.$(id -u).lock}"
+case "$verb" in
+    push|pop|en)
+        if [ -z "${TMUX_SESSION_DOCK_IME_LOCKED:-}" ] && command -v flock >/dev/null 2>&1; then
+            export TMUX_SESSION_DOCK_IME_LOCKED=1
+            exec flock -w 3 "$LOCK_FILE" "$0" "$@"
+        fi
+        ;;
+esac
+
+be="$(backend)"
+
+if [ "$verb" = "backend" ]; then echo "$be"; exit 0; fi
+[ "$be" != "none" ] || exit 0
+
+if [ "$be" = "imemode" ]; then
+    exec "$(imemode_bin)" "$verb"
+fi
+
+case "$verb" in
+    get) get_state "$be" ;;
+    en) set_english "$be" ;;
+    push)
+        if [ ! -s "$STATE_FILE" ]; then
+            get_state "$be" > "$STATE_FILE" 2>/dev/null || rm -f "$STATE_FILE"
+        fi
+        set_english "$be"
+        ;;
+    pop)
+        if [ -s "$STATE_FILE" ]; then
+            saved="$(cat "$STATE_FILE" 2>/dev/null)"
+            rm -f "$STATE_FILE"
+            [ -n "$saved" ] && set_state "$be" "$saved"
+        fi
+        ;;
+    *) echo "usage: tmux-session-dock-ime [backend|get|en|push|pop]" >&2; exit 1 ;;
+esac
+exit 0

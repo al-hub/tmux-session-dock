@@ -26,6 +26,7 @@ lint:
 	@bash -n scripts/tmux-theme-picker
 	@bash -n scripts/tmux-command-palette
 	@bash -n scripts/tmux-help-viewer
+	@bash -n scripts/tmux-session-dock-ime
 	@for f in scripts/lib/*.sh; do bash -n "$$f"; done
 	@echo "✅ Syntax check passed."
 
