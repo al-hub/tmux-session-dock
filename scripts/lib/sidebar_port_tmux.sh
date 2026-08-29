@@ -7,7 +7,9 @@ if ! declare -f sidebar_tmux_cmd >/dev/null 2>&1; then
         if [ "${TMUX_SESSION_LAUNCHER_TRACE:-0}" = "1" ] && declare -f trace_event >/dev/null 2>&1; then
             case "${1:-}" in
                 set-option|set-window-option|set|setw|set-environment|setenv|select-pane|select-window|select-layout|resize-pane|resize-window|rename-window|rename-session|set-hook|refresh-client|switch-client|join-pane|break-pane|swap-pane|kill-pane|split-window|respawn-pane|send-keys)
-                    trace_event "tmux.write caller=${FUNCNAME[1]:-main} args=$*" ;;
+                    local tmux_write_caller="${FUNCNAME[1]:-main}"
+                    [ "$tmux_write_caller" = tmux ] && tmux_write_caller="${FUNCNAME[2]:-main}"
+                    trace_event "tmux.write caller=$tmux_write_caller args=$*" ;;
             esac
         fi
         if [ -n "${TMUX_SESSION_LAUNCHER_SOCKET:-}" ]; then
