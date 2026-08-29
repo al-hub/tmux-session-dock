@@ -21,11 +21,11 @@ fail_test() {
 }
 
 sidebar="$(tmux list-panes -t "=$TARGET_SESSION:" -F '#{pane_id}|#{pane_title}' |
-    awk -F'|' '$2 == "dotfiles-session-sidebar" { print $1; exit }')"
+    awk -F'|' '!done && $2 == "dotfiles-session-sidebar" { print $1; done = 1 }')"
 [ -n "$sidebar" ] || fail_test "no sidebar pane in session $TARGET_SESSION"
 
 ai_pane="$(tmux list-panes -t "=$TARGET_SESSION:" -F '#{pane_id}|#{pane_current_command}|#{pane_title}' |
-    awk -F'|' '$2 == "node" && $3 != "dotfiles-session-sidebar" { print $1; exit }')"
+    awk -F'|' '!done && $2 == "node" && $3 != "dotfiles-session-sidebar" { print $1; done = 1 }')"
 [ -n "$ai_pane" ] || fail_test "no node-based Codex pane in session $TARGET_SESSION"
 
 deadline=$(( $(date +%s) + SAMPLE_SECONDS ))
@@ -39,7 +39,7 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
     previous_screen="$screen"
 
     frame="$(tmux capture-pane -e -p -t "$sidebar")"
-    session_row="$(printf '%s\n' "$frame" | awk -v session="$TARGET_SESSION" '$0 ~ session { print; exit }')"
+    session_row="$(printf '%s\n' "$frame" | awk -v session="$TARGET_SESSION" '!done && $0 ~ session { print; done = 1 }')"
     if [ -n "$session_row" ]; then
         session_row_seen=true
         if printf '%s' "$session_row" | grep -Fq '38;5;'; then

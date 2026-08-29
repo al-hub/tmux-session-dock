@@ -22,10 +22,10 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 tmuxc() { tmux -L "$SOCKET" -f "$TEST_TMUX_CONF" "$@"; }
-client_session() { tmuxc list-clients -F '#{session_name}' | head -n 1; }
+client_session() { tmuxc list-clients -F '#{session_name}' | sed -n 1p; }
 sidebar_for() {
     tmuxc list-panes -t "=$1:" -F '#{pane_id}|#{pane_title}' |
-        awk -F'|' '$2 == "dotfiles-session-sidebar" { print $1; exit }'
+        awk -F'|' '!done && $2 == "dotfiles-session-sidebar" { print $1; done = 1 }'
 }
 strip_ansi() { sed -E $'s/\x1B\[[0-9;?]*[ -\\/]*[@-~]//g'; }
 fail_test() {

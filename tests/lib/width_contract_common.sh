@@ -7,7 +7,7 @@ tmuxc() { HOME="$HOME_DIR" TMUX_SESSION_HISTORY_DIR="$HISTORY_DIR" "${TMUX[@]}" 
 
 sidebar_pane_for() {
     tmuxc list-panes -t "=$1:" -F '#{pane_id}|#{pane_title}' |
-        awk -F '|' '$2 == "dotfiles-session-sidebar" { print $1; exit }'
+        awk -F '|' '!done && $2 == "dotfiles-session-sidebar" { print $1; done = 1 }'
 }
 
 # Poll until the pane shows the expected width. Timeout is a FAIL.

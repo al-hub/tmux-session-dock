@@ -71,7 +71,7 @@ if [ "$discovered_lines" -ne 1 ]; then
     exit 1
 fi
 
-sidebar_pane="$(printf '%s\n' "$discovered" | head -n 1)"
+sidebar_pane="$(printf '%s\n' "$discovered" | sed -n 1p)"
 sidebar_window="$(tmuxc display-message -p -t "$sidebar_pane" '#{window_id}' 2>/dev/null || true)"
 for attempt in $(seq 1 100); do
     if tmuxc capture-pane -p -t "$sidebar_pane" 2>/dev/null |
@@ -98,7 +98,7 @@ printf '%s\n' "$selection_capture" |
     }
 tmuxc send-keys -t "$sidebar_pane" Enter
 for attempt in $(seq 1 100); do
-    client_session="$(tmuxc list-clients -F '#{session_name}' 2>/dev/null | head -n 1 || true)"
+    client_session="$(tmuxc list-clients -F '#{session_name}' 2>/dev/null | sed -n 1p || true)"
     owner_session="$(tmuxc display-message -p -t "$sidebar_pane" '#{session_name}' 2>/dev/null || true)"
     [ "$client_session" = bbbbbbbbbbbbbbbbbb ] &&
         [ "$owner_session" = aaaaaaaaaaaaaaaaaaa ] && break

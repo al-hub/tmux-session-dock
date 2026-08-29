@@ -37,7 +37,7 @@ win_id="$("${TMUX[@]}" display-message -p -t '=legacy-app:' '#{window_id}')"
 # Archive session
 "${TMUX[@]}" run-shell "TMUX_SESSION_HISTORY_DIR='$HISTORY_DIR' $LAUNCHER --archive-session 'legacy-app' false"
 
-ARCHIVE_FILE="$(find "$HISTORY_DIR" -type f -name '*legacy-app*.tsv' | head -n 1)"
+ARCHIVE_FILE="$(find "$HISTORY_DIR" -type f -name '*legacy-app*.tsv' | sed -n 1p)"
 [ -n "$ARCHIVE_FILE" ] && [ -f "$ARCHIVE_FILE" ] || { echo "FAIL: archive not created"; exit 1; }
 
 # Deliberately append legacy history lines into the archive file to simulate older archives

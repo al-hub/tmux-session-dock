@@ -43,7 +43,7 @@ tmuxc set-environment -g TMUX_SESSION_HISTORY_DIR "$HISTORY_DIR"
 echo "=== [1/3] Testing Split Restore with Subpane Active ==="
 # Create session split-subpane (120x50)
 tmuxc new-session -d -s split-subpane -x 120 -y 50 -c "$REPO_ROOT" 'sleep 300'
-win1="$(tmuxc list-windows -t '=split-subpane:' -F '#{window_id}' | head -n 1)"
+win1="$(tmuxc list-windows -t '=split-subpane:' -F '#{window_id}' | sed -n 1p)"
 tmuxc set-option -wq -t "$win1" @dotfiles_sidebar_managed 1
 tmuxc run-shell "$LAUNCHER --ensure-sidebar-window '$win1' 35"
 
@@ -53,7 +53,7 @@ tmuxc set-option -gq @dotfiles_sidebar_subpane_height 12
 tmuxc run-shell "$LAUNCHER --ensure-subpane-window '$win1'" 2>/dev/null || true
 
 # Find initial work pane
-p1="$(tmuxc list-panes -t "$win1" -F '#{pane_id}|#{pane_title}' | awk -F '|' '$2 != "dotfiles-session-sidebar" && $2 != "dotfiles-sidebar-subpane" { print $1; exit }')"
+p1="$(tmuxc list-panes -t "$win1" -F '#{pane_id}|#{pane_title}' | awk -F '|' '!done && $2 != "dotfiles-session-sidebar" && $2 != "dotfiles-sidebar-subpane" { print $1; done = 1 }')"
 [ -n "$p1" ] || { echo "FAIL: work pane 1 not found"; exit 1; }
 
 # Split horizontally (side-by-side) then vertically (top-bottom)
@@ -73,7 +73,7 @@ while tmuxc has-session -t '=split-subpane:' 2>/dev/null; do sleep 0.05; done
 tmuxc run-shell "$LAUNCHER --restore-archive '$HISTORY_DIR/split-subpane.tsv' op-split-subpane true"
 tmuxc has-session -t '=split-subpane:' || { echo "FAIL: session not restored"; exit 1; }
 
-restored_win1="$(tmuxc list-windows -t '=split-subpane:' -F '#{window_id}' | head -n 1)"
+restored_win1="$(tmuxc list-windows -t '=split-subpane:' -F '#{window_id}' | sed -n 1p)"
 tmuxc run-shell "$LAUNCHER --ensure-sidebar-window '$restored_win1' 35"
 
 restored_work_count="$(tmuxc list-panes -t "$restored_win1" -F '#{pane_title}' | grep -v "dotfiles-" | wc -l)"
@@ -82,11 +82,11 @@ echo "Restored work pane count with subpane: $restored_work_count"
 
 echo "=== [2/3] Testing Vertical Split Height Precision on Restore ==="
 tmuxc new-session -d -s split-height -x 120 -y 50 -c "$REPO_ROOT" 'sleep 300'
-win2="$(tmuxc list-windows -t '=split-height:' -F '#{window_id}' | head -n 1)"
+win2="$(tmuxc list-windows -t '=split-height:' -F '#{window_id}' | sed -n 1p)"
 tmuxc set-option -wq -t "$win2" @dotfiles_sidebar_managed 1
 tmuxc run-shell "$LAUNCHER --ensure-sidebar-window '$win2' 35"
 
-hp1="$(tmuxc list-panes -t "$win2" -F '#{pane_id}|#{pane_title}' | awk -F '|' '$2 != "dotfiles-session-sidebar" && $2 != "dotfiles-sidebar-subpane" { print $1; exit }')"
+hp1="$(tmuxc list-panes -t "$win2" -F '#{pane_id}|#{pane_title}' | awk -F '|' '!done && $2 != "dotfiles-session-sidebar" && $2 != "dotfiles-sidebar-subpane" { print $1; done = 1 }')"
 hp2="$(tmuxc split-window -v -P -F '#{pane_id}' -t "$hp1" -c "$REPO_ROOT" 'sleep 300')"
 tmuxc resize-pane -t "$hp1" -y 15
 
@@ -100,7 +100,7 @@ tmuxc kill-session -t '=split-height:'
 while tmuxc has-session -t '=split-height:' 2>/dev/null; do sleep 0.05; done
 tmuxc run-shell "$LAUNCHER --restore-archive '$HISTORY_DIR/split-height.tsv' op-height true"
 
-restored_win2="$(tmuxc list-windows -t '=split-height:' -F '#{window_id}' | head -n 1)"
+restored_win2="$(tmuxc list-windows -t '=split-height:' -F '#{window_id}' | sed -n 1p)"
 tmuxc run-shell "$LAUNCHER --ensure-sidebar-window '$restored_win2' 35"
 
 restored_h_list="$(tmuxc list-panes -t "$restored_win2" -F '#{pane_top}|#{pane_title}|#{pane_height}' | sort -n -k1,1 | awk -F '|' '$2 != "dotfiles-session-sidebar" && $2 != "dotfiles-sidebar-subpane" { print $3 }' | tr '\n' ' ' | xargs)"

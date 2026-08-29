@@ -78,7 +78,7 @@ export TMUX_SOCKET="$SOCKET"
 export TMUX_SESSION_LAUNCHER_DEBUG=1
 "${TMUX[@]}" run-shell "TMUX_SESSION_LAUNCHER_HISTORY_DIR='$RUN_DIR/history' $LAUNCHER --archive-session '$ARCH_SESS' false"
 
-archive_file="$(find "$RUN_DIR/history" "$HOME/.cache/dotfiles/tmux-session-history" -type f -name '*to-be-archived-1*.tsv' 2>/dev/null | head -n 1 || true)"
+archive_file="$(find "$RUN_DIR/history" "$HOME/.cache/dotfiles/tmux-session-history" -type f -name '*to-be-archived-1*.tsv' 2>/dev/null | sed -n 1p || true)"
 [ -n "$archive_file" ] && [ -f "$archive_file" ] || { echo "FAIL: archive file not created"; exit 1; }
 echo "Created archive: $archive_file"
 

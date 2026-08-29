@@ -24,11 +24,11 @@ fail_test() {
 }
 
 sidebar="$(tmux list-panes -t "=$PRESENTER_SESSION:" -F '#{pane_id}|#{pane_title}' |
-    awk -F'|' '$2 == "dotfiles-session-sidebar" { print $1; exit }')"
+    awk -F'|' '!done && $2 == "dotfiles-session-sidebar" { print $1; done = 1 }')"
 [ -n "$sidebar" ] || fail_test "no sidebar pane in presenter session $PRESENTER_SESSION"
 
 ai_pane="$(tmux list-panes -t "=$STALE_SESSION:" -F '#{pane_id}|#{pane_current_command}|#{pane_title}' |
-    awk -F'|' '$2 ~ /^(codex|claude|gemini|opencode|ollama|agy)$/ && $3 != "dotfiles-session-sidebar" { print $1; exit }')"
+    awk -F'|' '!done && $2 ~ /^(codex|claude|gemini|opencode|ollama|agy)$/ && $3 != "dotfiles-session-sidebar" { print $1; done = 1 }')"
 [ -n "$ai_pane" ] || fail_test "no AI CLI pane in stale session $STALE_SESSION"
 
 deadline=$(( $(date +%s) + SETTLE_SECONDS ))
@@ -48,7 +48,7 @@ done
 # pane has settled beyond that period, any remaining gradient is stale state.
 for sample in $(seq 1 "$VERIFY_SECONDS"); do
     frame="$(tmux capture-pane -e -p -t "$sidebar")"
-    stale_row="$(printf '%s\n' "$frame" | awk -v session="$STALE_SESSION" '$0 ~ session { print; exit }')"
+    stale_row="$(printf '%s\n' "$frame" | awk -v session="$STALE_SESSION" '!done && $0 ~ session { print; done = 1 }')"
     if printf '%s' "$stale_row" | grep -Fq '38;5;'; then
         fail_test "idle AI pane $ai_pane retained gradient after ${SETTLE_SECONDS}s idle grace"
     fi

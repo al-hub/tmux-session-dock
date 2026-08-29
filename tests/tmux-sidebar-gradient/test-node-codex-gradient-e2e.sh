@@ -35,7 +35,7 @@ sidebar="$(tmuxc split-window -d -P -F '#{pane_id}' -t '=node-codex:' -h -b -l 3
 ai_pane=""
 node_deadline=$(( $(date +%s) + 8 ))
 while [ "$(date +%s)" -lt "$node_deadline" ]; do
-    ai_pane="$(tmuxc list-panes -t '=node-codex:' -F '#{pane_id}|#{pane_current_command}' | awk -F'|' '$2 == "node" { print $1; exit }')"
+    ai_pane="$(tmuxc list-panes -t '=node-codex:' -F '#{pane_id}|#{pane_current_command}' | awk -F'|' '!done && $2 == "node" { print $1; done = 1 }')"
     [ -n "$ai_pane" ] && break
     sleep 0.1
 done
@@ -51,7 +51,7 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
     previous_screen="$screen"
 
     frame="$(tmuxc capture-pane -e -p -t "$sidebar")"
-    node_line="$(printf '%s\n' "$frame" | awk '/node-codex/ { print; exit }')"
+    node_line="$(printf '%s\n' "$frame" | awk '!done && /node-codex/ { print; done = 1 }')"
     if printf '%s' "$node_line" | grep -Fq '38;5;'; then
         gradient_seen=true
         break

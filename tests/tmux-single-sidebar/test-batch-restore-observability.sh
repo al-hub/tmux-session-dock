@@ -41,7 +41,7 @@ ARCHIVES=()
 for i in {1..6}; do
     sname="batch-sess-$i"
     tmuxc new-session -d -s "$sname" -x 120 -y 50 -c "$REPO_ROOT" 'sleep 300'
-    win="$(tmuxc list-windows -t "=$sname:" -F '#{window_id}' | head -n 1)"
+    win="$(tmuxc list-windows -t "=$sname:" -F '#{window_id}' | sed -n 1p)"
     tmuxc set-option -wq -t "$win" @dotfiles_sidebar_managed 1
     tmuxc run-shell "$LAUNCHER --ensure-sidebar-window '$win' 35"
     

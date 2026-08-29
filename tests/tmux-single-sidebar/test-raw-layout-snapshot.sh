@@ -21,7 +21,7 @@ for attempt in $(seq 1 50); do
     [ "$("${TMUX[@]}" list-panes -a -F '#{pane_title}' | awk '$0 == "dotfiles-session-sidebar" { count++ } END { print count + 0 }')" -eq 1 ] && break
     sleep 0.05
 done
-work_pane="$("${TMUX[@]}" list-panes -t '=raw-layout:' -F '#{pane_id}|#{pane_title}' | awk -F '|' '$2 != "dotfiles-session-sidebar" { print $1; exit }')"
+work_pane="$("${TMUX[@]}" list-panes -t '=raw-layout:' -F '#{pane_id}|#{pane_title}' | awk -F '|' '!done && $2 != "dotfiles-session-sidebar" { print $1; done = 1 }')"
 "${TMUX[@]}" split-window -d -t "$work_pane" -h -c "$REPO_ROOT" 'sleep 60'
 "${TMUX[@]}" run-shell -b "$REPO_ROOT/scripts/tmux-session-launcher --delete-session-after-archive raw-layout true"
 for attempt in $(seq 1 100); do
@@ -30,11 +30,11 @@ for attempt in $(seq 1 100); do
 done
 archive_path="$(find "$RUN_DIR/history" -type f -name '*.tsv' -print -quit 2>/dev/null || true)"
 [ -f "$archive_path" ]
-[ "$(awk -F '\t' '$1 == "version" { print $2; exit }' "$archive_path")" = 3 ]
-window_line="$(awk -F '\t' '$1 == "window" { print; exit }' "$archive_path")"
+[ "$(awk -F '\t' '!done && $1 == "version" { print $2; done = 1 }' "$archive_path")" = 3 ]
+window_line="$(awk -F '\t' '!done && $1 == "window" { print; done = 1 }' "$archive_path")"
 layout="$(printf '%s\n' "$window_line" | awk -F '\t' '{ print $5 }')"
-pane_records="$(awk '$1 == "window" { seen=1; next } seen && $1 == "pane" { count++ } seen && $1 == "endwindow" { print count + 0; exit }' "$archive_path")"
-v2_pane_fields="$(awk -F '\t' '$1 == "pane" { print NF; exit }' "$archive_path")"
+pane_records="$(awk '!done && $1 == "window" { seen=1; next } !done && seen && $1 == "pane" { count++ } !done && seen && $1 == "endwindow" { print count + 0; done = 1 }' "$archive_path")"
+v2_pane_fields="$(awk -F '\t' '!done && $1 == "pane" { print NF; done = 1 }' "$archive_path")"
 layout_records="$(printf '%s\n' "$layout" | awk '{ count=0; while (match($0, /[0-9]+x[0-9]+,[0-9]+,[0-9]+,[0-9]+/)) { count++; $0=substr($0, RSTART+RLENGTH) } print count }')"
 [ -n "$layout" ]
 [ "$pane_records" -gt 1 ]

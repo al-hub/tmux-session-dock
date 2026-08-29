@@ -25,7 +25,7 @@ wait_for_sidebar()
     local pane deadline=$(( $(date +%s) + 10 ))
     while [ "$(date +%s)" -lt "$deadline" ]; do
         pane="$(tmuxc list-panes -t '=lifecycle:' -F '#{pane_id}|#{pane_title}' 2>/dev/null |
-            awk -F '|' '$2 == "dotfiles-session-sidebar" { print $1; exit }')"
+            awk -F '|' '!done && $2 == "dotfiles-session-sidebar" { print $1; done = 1 }')"
         if [ -n "$pane" ] && tmuxc capture-pane -p -t "$pane" 2>/dev/null | grep -q '^sessions'; then
             printf '%s\n' "$pane"
             return 0
@@ -78,7 +78,7 @@ ensure_sidebar=""
 deadline=$(( $(date +%s) + 10 ))
 while [ "$(date +%s)" -lt "$deadline" ]; do
     ensure_sidebar="$(tmuxc list-panes -t '=ensure-target:' -F '#{pane_id}|#{pane_title}' 2>/dev/null |
-        awk -F '|' '$2 == "dotfiles-session-sidebar" { print $1; exit }')"
+        awk -F '|' '!done && $2 == "dotfiles-session-sidebar" { print $1; done = 1 }')"
     [ -n "$ensure_sidebar" ] && break
     sleep 0.05
 done

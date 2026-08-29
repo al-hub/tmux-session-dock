@@ -27,8 +27,8 @@ trap cleanup EXIT INT TERM
 tmux_raw new-session -d -s sess-a -c "$REPO_ROOT"
 tmux_raw new-session -d -s sess-b -c "$REPO_ROOT"
 
-win_a="$(tmux_raw list-windows -t =sess-a: -F '#{window_id}' | head -n 1)"
-win_b="$(tmux_raw list-windows -t =sess-b: -F '#{window_id}' | head -n 1)"
+win_a="$(tmux_raw list-windows -t =sess-a: -F '#{window_id}' | sed -n 1p)"
+win_b="$(tmux_raw list-windows -t =sess-b: -F '#{window_id}' | sed -n 1p)"
 
 # Add a dummy sidebar pane in sess-a
 sidebar_pane_a="$(tmux_raw split-window -d -t "$win_a" -h -b -l 30 -P -F '#{pane_id}')"

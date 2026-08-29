@@ -34,10 +34,10 @@ done
 sleep 0.3
 
 "${TMUX[@]}" set-environment -g TMUX_SESSION_LAUNCHER_FAIL_STEP move
-sidebar_before="$("${TMUX[@]}" list-panes -a -F '#{pane_id}|#{pane_title}' | awk -F '|' '$2 == "dotfiles-session-sidebar" { print $1; exit }')"
+sidebar_before="$("${TMUX[@]}" list-panes -a -F '#{pane_id}|#{pane_title}' | awk -F '|' '!done && $2 == "dotfiles-session-sidebar" { print $1; done = 1 }')"
 "${TMUX[@]}" select-window -t '=fault-a:1'
 sleep 0.4
-sidebar_after="$("${TMUX[@]}" list-panes -a -F '#{pane_id}|#{pane_title}' | awk -F '|' '$2 == "dotfiles-session-sidebar" { print $1; exit }')"
+sidebar_after="$("${TMUX[@]}" list-panes -a -F '#{pane_id}|#{pane_title}' | awk -F '|' '!done && $2 == "dotfiles-session-sidebar" { print $1; done = 1 }')"
 [ "$sidebar_before" = "$sidebar_after" ]
 [ "$("${TMUX[@]}" list-panes -t '=fault-a:0' -F '#{pane_title}' | awk '$0 == "dotfiles-session-sidebar" { count++ } END { print count + 0 }')" -eq 1 ]
 printf 'PASS: injected move failure preserves sidebar pane and source window\n'

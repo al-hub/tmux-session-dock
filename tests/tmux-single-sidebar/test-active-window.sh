@@ -34,10 +34,10 @@ for attempt in $(seq 1 50); do
 done
 sleep 0.5
 
-sidebar_before="$("${TMUX[@]}" list-panes -t '=hook-a:0' -F '#{pane_id}|#{pane_title}' | awk -F '|' '$2 == "dotfiles-session-sidebar" { print $1; exit }')"
+sidebar_before="$("${TMUX[@]}" list-panes -t '=hook-a:0' -F '#{pane_id}|#{pane_title}' | awk -F '|' '!done && $2 == "dotfiles-session-sidebar" { print $1; done = 1 }')"
 "${TMUX[@]}" select-window -t '=hook-a:1'
 for attempt in $(seq 1 50); do
-    sidebar_window="$("${TMUX[@]}" list-panes -t '=hook-a:1' -F '#{pane_id}|#{pane_title}' | awk -F '|' '$2 == "dotfiles-session-sidebar" { print $1; exit }')"
+    sidebar_window="$("${TMUX[@]}" list-panes -t '=hook-a:1' -F '#{pane_id}|#{pane_title}' | awk -F '|' '!done && $2 == "dotfiles-session-sidebar" { print $1; done = 1 }')"
     [ -n "$sidebar_window" ] && break
     sleep 0.05
 done

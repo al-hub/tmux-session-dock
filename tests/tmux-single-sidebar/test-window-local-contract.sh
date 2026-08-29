@@ -68,7 +68,7 @@ declare -A sidebar_pid_before=()
 while IFS= read -r window_id; do
   [ -n "$window_id" ] || continue
   pane_id="$(tmuxc list-panes -t "$window_id" -F '#{pane_id}|#{pane_title}' |
-    awk -F'|' '$2 == "dotfiles-session-sidebar" { print $1; exit }')"
+    awk -F'|' '!done && $2 == "dotfiles-session-sidebar" { print $1; done = 1 }')"
   [ -n "$pane_id" ] || fail "window $window_id has no sidebar"
   [ "$(tmuxc list-panes -t "$window_id" -F '#{pane_title}' |
     awk '$1 == "dotfiles-session-sidebar" { n++ } END { print n + 0 }')" = 1 ] ||

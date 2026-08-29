@@ -103,7 +103,7 @@ capture_observation()
 client_telemetry()
 {
     tmuxc list-clients -F 'control=#{client_control_mode} client=#{client_name} tty=#{client_tty} session=#{session_name} window=#{window_id} pane=#{pane_id} activity=#{client_activity} key_table=#{client_key_table} prefix=#{client_prefix}' 2>/dev/null |
-        awk '$1 !~ /^control=1$/ { print; exit }'
+        awk '!done && $1 !~ /^control=1$/ { print; done = 1 }'
 }
 
 observer_read_loop()
@@ -259,7 +259,7 @@ client_pane_id()
     client_tty="$(client_tty || true)"
     if [ -n "$client_tty" ]; then
         pane="$(tmuxc list-clients -F '#{client_tty}|#{pane_id}' 2>/dev/null |
-            awk -F '|' -v tty="$client_tty" '$1 == tty { print $2; exit }')"
+            awk -F '|' -v tty="$client_tty" '!done && $1 == tty { print $2; done = 1 }')"
         [ -n "$pane" ] || pane="$(tmuxc display-message -c "$client_tty" -p '#{pane_id}' 2>/dev/null || true)"
         [ -n "$pane" ] && {
             printf '%s\n' "$pane"
@@ -279,7 +279,7 @@ subpane_pane_id()
     local win_id
     win_id="$(client_window_id 2>/dev/null || true)"
     tmuxc list-panes -t "$win_id" -F '#{pane_id}|#{@dotfiles_sidebar_subpane}' 2>/dev/null |
-        awk -F '|' '$2 == "1" { print $1; exit }'
+        awk -F '|' '!done && $2 == "1" { print $1; done = 1 }'
 }
 
 focus_client_pane()
@@ -311,7 +311,7 @@ run_subpane_reproduction()
     # Test Subpane Hub process persistence across toggles
     local win_id sub_p capture_text persist_token="" persist_pid=""
     win_id="$(client_window_id 2>/dev/null || true)"
-    sub_p="$(tmuxc list-panes -t "$win_id" -F '#{pane_id}|#{@dotfiles_sidebar_subpane}' 2>/dev/null | awk -F '|' '$2 == "1" { print $1; exit }')"
+    sub_p="$(tmuxc list-panes -t "$win_id" -F '#{pane_id}|#{@dotfiles_sidebar_subpane}' 2>/dev/null | awk -F '|' '!done && $2 == "1" { print $1; done = 1 }')"
     if [ -n "$sub_p" ]; then
         # The subpane shell may still be starting (bash on a CI runner reads a
         # slow /etc/bash.bashrc and discards typeahead while readline
@@ -358,7 +358,7 @@ run_subpane_reproduction()
     send_keys 's'
     wait_until 'subpane reopened' 1 count_subpanes
 
-    sub_p="$(tmuxc list-panes -t "$win_id" -F '#{pane_id}|#{@dotfiles_sidebar_subpane}' 2>/dev/null | awk -F '|' '$2 == "1" { print $1; exit }')"
+    sub_p="$(tmuxc list-panes -t "$win_id" -F '#{pane_id}|#{@dotfiles_sidebar_subpane}' 2>/dev/null | awk -F '|' '!done && $2 == "1" { print $1; done = 1 }')"
     [ -n "$sub_p" ] || { printf 'ERROR: subpane not found on reopen\n' >&2; return 1; }
 
     if [ "$(tmuxc display-message -p -t "$sub_p" '#{pane_pid}')" != "${persist_pid:-}" ]; then
@@ -395,7 +395,7 @@ run_subpane_focus_priority_contract()
 
     sidebar_pane="$(sidebar_pane_id)"
     work_pane="$(tmuxc list-panes -t "$(client_window_id)" -F '#{pane_id}|#{pane_title}|#{@dotfiles_sidebar_subpane}' 2>/dev/null |
-        awk -F '|' '$2 != "dotfiles-session-sidebar" && $3 != "1" { print $1; exit }')"
+        awk -F '|' '!done && $2 != "dotfiles-session-sidebar" && $3 != "1" { print $1; done = 1 }')"
     [ -n "$sidebar_pane" ] && [ -n "$work_pane" ] || {
         printf 'ERROR: subpane focus contract could not identify sidebar and work panes\n' >&2
         return 1
@@ -477,7 +477,7 @@ run_subpane_entry_priority_contract()
 
     sidebar_pane="$(sidebar_pane_id)"
     work_pane="$(tmuxc list-panes -t "$(client_window_id)" -F '#{pane_id}|#{pane_title}|#{@dotfiles_sidebar_subpane}' 2>/dev/null |
-        awk -F '|' '$2 != "dotfiles-session-sidebar" && $3 != "1" { print $1; exit }')"
+        awk -F '|' '!done && $2 != "dotfiles-session-sidebar" && $3 != "1" { print $1; done = 1 }')"
     [ -n "$sidebar_pane" ] && [ -n "$work_pane" ] || {
         printf 'ERROR: subpane entry contract could not identify sidebar and work panes\n' >&2
         return 1
@@ -571,7 +571,7 @@ run_subpane_multi_slot_enter_reproduction()
         wait_until "multi-slot Sidebar ON lease $iteration" 3 count_subpanes
         for slot in "${slots[@]}"; do
             actual="$(tmuxc list-panes -t "$anchor_window" -F '#{@dotfiles_subpane_slot}|#{pane_height}' |
-                awk -F '|' -v wanted="$slot" '$1 == wanted { print $2; exit }')"
+                awk -F '|' -v wanted="$slot" '!done && $1 == wanted { print $2; done = 1 }')"
             [ "$actual" = "${expected_heights[$slot]}" ] || {
                 printf 'FAIL: slot %s height changed after Sidebar OFF/ON toggle %s (expected %s, got %s)\n' \
                     "$slot" "$iteration" "${expected_heights[$slot]}" "${actual:-missing}" >&2
@@ -585,9 +585,9 @@ run_subpane_multi_slot_enter_reproduction()
     {
         local window_id="$1" sidebar_top subpane_top
         sidebar_top="$(tmuxc list-panes -t "$window_id" -F '#{pane_id}|#{pane_title}|#{pane_top}' |
-            awk -F '|' '$2 == "dotfiles-session-sidebar" { print $3; exit }')"
+            awk -F '|' '!done && $2 == "dotfiles-session-sidebar" { print $3; done = 1 }')"
         subpane_top="$(tmuxc list-panes -t "$window_id" -F '#{@dotfiles_subpane_slot}|#{pane_top}' |
-            awk -F '|' '$1 == 1 { print $2; exit }')"
+            awk -F '|' '!done && $1 == 1 { print $2; done = 1 }')"
         if [ "$subpane_top" -lt "$sidebar_top" ]; then
             printf 'top\n'
         else
@@ -612,7 +612,7 @@ run_subpane_multi_slot_enter_reproduction()
         wait_until "multi-slot position swap $iteration" "$expected_position" multi_slot_position "$anchor_window"
         for slot in "${slots[@]}"; do
             actual="$(tmuxc list-panes -t "$anchor_window" -F '#{@dotfiles_subpane_slot}|#{pane_height}' |
-                awk -F '|' -v wanted="$slot" '$1 == wanted { print $2; exit }')"
+                awk -F '|' -v wanted="$slot" '!done && $1 == wanted { print $2; done = 1 }')"
             [ "$actual" = "${expected_heights[$slot]}" ] || {
                 printf 'FAIL: slot %s height changed after position swap %s (expected %s, got %s)\n' \
                     "$slot" "$iteration" "${expected_heights[$slot]}" "${actual:-missing}" >&2
@@ -649,7 +649,7 @@ run_subpane_multi_slot_enter_reproduction()
     target_window="$(client_window_id)"
     for slot in "${slots[@]}"; do
         actual="$(tmuxc list-panes -t "$target_window" -F '#{@dotfiles_subpane_slot}|#{pane_height}' |
-            awk -F '|' -v wanted="$slot" '$1 == wanted { print $2; exit }')"
+            awk -F '|' -v wanted="$slot" '!done && $1 == wanted { print $2; done = 1 }')"
         [ "$actual" = "${expected_heights[$slot]}" ] || {
             printf 'FAIL: slot %s height changed after real Enter switch (expected %s, got %s)\n' \
                 "$slot" "${expected_heights[$slot]}" "${actual:-missing}" >&2
@@ -681,7 +681,7 @@ run_subpane_multi_slot_enter_reproduction()
     anchor_window="$(client_window_id)"
     for slot in "${slots[@]}"; do
         actual="$(tmuxc list-panes -t "$anchor_window" -F '#{@dotfiles_subpane_slot}|#{pane_height}' |
-            awk -F '|' -v wanted="$slot" '$1 == wanted { print $2; exit }')"
+            awk -F '|' -v wanted="$slot" '!done && $1 == wanted { print $2; done = 1 }')"
         [ "$actual" = "${expected_heights[$slot]}" ] || {
             printf 'FAIL: slot %s height changed after Enter roundtrip (expected %s, got %s)\n' \
                 "$slot" "${expected_heights[$slot]}" "${actual:-missing}" >&2
@@ -911,7 +911,7 @@ hook_exit_recorded()
 hook_exit_status()
 {
     local name="$1"
-    awk -F '\t' -v name="$name" '$2 == name { print $3; exit }' \
+    awk -F '\t' -v name="$name" '!done && $2 == name { print $3; done = 1 }' \
         "$RUN_DIR/hook-exits.tsv" 2>/dev/null
 }
 
@@ -1081,7 +1081,7 @@ client_session()
 {
     local session
     session="$(tmuxc list-clients -F '#{client_control_mode}|#{session_name}' 2>/dev/null |
-        awk -F '|' '$1 != 1 { print $2; exit }')"
+        awk -F '|' '!done && $1 != 1 { print $2; done = 1 }')"
     if [ -z "$session" ]; then
         session="$(tmuxc display-message -p '#{session_name}' 2>/dev/null || true)"
     fi
@@ -1092,7 +1092,7 @@ client_tty()
 {
     local tty
     tty="$(tmuxc list-clients -F '#{client_control_mode}|#{client_tty}' 2>/dev/null |
-        awk -F '|' '$1 != 1 { print $2; exit }')"
+        awk -F '|' '!done && $1 != 1 { print $2; done = 1 }')"
     if [ -z "$tty" ]; then
         tty="$(tmuxc display-message -p '#{client_tty}' 2>/dev/null || true)"
     fi
@@ -1103,7 +1103,7 @@ client_window_id()
 {
     local win
     win="$(tmuxc list-clients -F '#{client_control_mode}|#{window_id}' 2>/dev/null |
-        awk -F '|' '$1 != 1 { print $2; exit }')"
+        awk -F '|' '!done && $1 != 1 { print $2; done = 1 }')"
     if [ -z "$win" ]; then
         win="$(tmuxc display-message -p '#{window_id}' 2>/dev/null || true)"
     fi
@@ -1116,10 +1116,10 @@ sidebar_is_active()
     client_tty="$(client_tty || true)"
     window_id="$(client_window_id)"
     sidebar_pane="$(tmuxc list-panes -t "$window_id" -F '#{pane_id}|#{pane_title}' 2>/dev/null |
-        awk -F '|' '$2 == "dotfiles-session-sidebar" { print $1; exit }')"
+        awk -F '|' '!done && $2 == "dotfiles-session-sidebar" { print $1; done = 1 }')"
     if [ -n "$client_tty" ]; then
         active_pane="$(tmuxc list-clients -F '#{client_tty}|#{pane_id}' 2>/dev/null |
-            awk -F '|' -v tty="$client_tty" '$1 == tty { print $2; exit }' || true)"
+            awk -F '|' -v tty="$client_tty" '!done && $1 == tty { print $2; done = 1 }' || true)"
         [ -n "$active_pane" ] || active_pane="$(tmuxc display-message -c "$client_tty" -p '#{pane_id}' 2>/dev/null || true)"
     fi
     if [ -z "$active_pane" ]; then
@@ -1138,14 +1138,14 @@ sidebar_pane_id()
     window_id="$(client_window_id || true)"
     if [ -n "$window_id" ]; then
         pane="$(tmuxc list-panes -t "$window_id" -F '#{pane_id}|#{pane_title}' 2>/dev/null |
-            awk -F '|' '$2 == "dotfiles-session-sidebar" { print $1; exit }')"
+            awk -F '|' '!done && $2 == "dotfiles-session-sidebar" { print $1; done = 1 }')"
         if [ -n "$pane" ]; then
             printf '%s\n' "$pane"
             return 0
         fi
     fi
     tmuxc list-panes -a -F '#{pane_id}|#{pane_title}' 2>/dev/null |
-        awk -F '|' '$2 == "dotfiles-session-sidebar" { print $1; exit }'
+        awk -F '|' '!done && $2 == "dotfiles-session-sidebar" { print $1; done = 1 }'
 }
 
 wait_until()
@@ -1322,7 +1322,7 @@ session_window_layout()
 session_sidebar_width()
 {
     tmuxc list-panes -t "=$1:" -F '#{pane_title}|#{pane_width}' 2>/dev/null |
-        awk -F '|' '$1 == "dotfiles-session-sidebar" { print $2; exit }'
+        awk -F '|' '!done && $1 == "dotfiles-session-sidebar" { print $2; done = 1 }'
 }
 
 session_work_geometry()
@@ -1409,7 +1409,7 @@ run_split_cycle_reproduction()
     # the raw tmux command path to reproduce a user invoking tmux directly.
     if [ "$SCENARIO" = direct-layout ]; then
         direct_work_pane="$(tmuxc list-panes -t '=split-cycle-1:' -F '#{pane_id}|#{pane_title}' |
-            awk -F '|' '$2 != "dotfiles-session-sidebar" { print $1; exit }')"
+            awk -F '|' '!done && $2 != "dotfiles-session-sidebar" { print $1; done = 1 }')"
         if [ "$SPLIT_DIRECTION" = vertical ]; then
             tmuxc split-window -t "$direct_work_pane" -v -c "$REPO_ROOT"
             tmuxc resize-pane -t "$direct_work_pane" -D 2
@@ -1529,17 +1529,12 @@ assert_archive_work_layout_metadata()
         printf 'ERROR: topology archive file was not found\n' >&2
         return 1
     }
-    window_line="$(awk -F '\t' '$1 == "window" { print; exit }' "$archive_file")"
+    window_line="$(awk -F '\t' '!done && $1 == "window" { print; done = 1 }' "$archive_file")"
     layout="$(printf '%s\n' "$window_line" | cut -f5)"
-    pane_count="$(awk -F '\t' '
-        $1 == "window" { in_window=1; next }
-        $1 == "endwindow" { exit }
-        in_window && $1 == "pane" { count++ }
-        END { print count + 0 }
-    ' "$archive_file")"
+    pane_count="$(awk -F '\t' '!done && $1 == "window" { in_window=1; next } !done && $1 == "endwindow" { done = 1 } !done && in_window && $1 == "pane" { count++ } END { print count + 0 }' "$archive_file")"
     geometry_count="$(printf '%s\n' "$window_line" | cut -f6 | tr ' ' '\n' | awk 'NF { count++ } END { print count + 0 }')"
     full_layout_count="$(awk -F '\t' '$1 == "sidebar_layout" { count++ } END { print count + 0 }' "$archive_file")"
-    sidebar_layout_count="$(awk -F '\t' '$1 == "sidebar_layout" { print $3; exit }' "$archive_file" | awk '{ count=0; while (match($0, /[0-9]+x[0-9]+,[0-9]+,[0-9]+,[0-9]+/)) { count++; $0=substr($0, RSTART+RLENGTH) } print count }')"
+    sidebar_layout_count="$(awk -F '\t' '!done && $1 == "sidebar_layout" { print $3; done = 1 }' "$archive_file" | awk '{ count=0; while (match($0, /[0-9]+x[0-9]+,[0-9]+,[0-9]+,[0-9]+/)) { count++; $0=substr($0, RSTART+RLENGTH) } print count }')"
     layout_count="$(printf '%s\n' "$layout" | awk '{ count=0; while (match($0, /[0-9]+x[0-9]+,[0-9]+,[0-9]+,[0-9]+/)) { count++; $0=substr($0, RSTART+RLENGTH) } print count }')"
     test_log "archive.metadata file=$archive_file layout_panes=$layout_count pane_records=$pane_count geometry_records=$geometry_count"
     [ "$layout_count" = "$pane_count" ] && [ "$geometry_count" = "$pane_count" ] || {
@@ -1584,7 +1579,7 @@ sidebar_selected_name()
 {
     tmuxc capture-pane -p -t "$(sidebar_pane_id)" 2>/dev/null |
         sed $'s/\033\\[[0-9;]*m//g' |
-        awk '$1 == ">*" { print $2; exit } $1 == ">" { if ($2 == "*") { print $3; exit } else { print $2; exit } }'
+        awk '!done && $1 == ">*" { print $2; done = 1 } !done && $1 == ">" { if ($2 == "*") { print $3; done = 1 } else { print $2; done = 1 } }'
 }
 
 wait_for_sidebar_row()
@@ -2076,7 +2071,7 @@ window_local_sidebar_for_session()
 {
     local session_name="$1"
     tmuxc list-panes -t "=$session_name:" -F '#{window_id}|#{pane_id}|#{pane_pid}|#{pane_title}' 2>/dev/null |
-        awk -F '|' '$4 == "dotfiles-session-sidebar" { print; exit }'
+        awk -F '|' '!done && $4 == "dotfiles-session-sidebar" { print; done = 1 }'
 }
 
 window_local_input_ready()
@@ -2545,7 +2540,7 @@ wait_until 'initial sidebar' "$expected_initial_sidebars" count_sidebars
 # second visible or hidden tmux client.
 if [ -n "$VISIBLE_CLIENT" ]; then
     tmuxc switch-client -c "$VISIBLE_CLIENT" -t "$ANCHOR_SESSION"
-    VISIBLE_PANE="$(tmuxc list-clients -F '#{client_tty}|#{pane_id}' | awk -F '|' -v tty="$VISIBLE_CLIENT" '$1 == tty { print $2; exit }')"
+    VISIBLE_PANE="$(tmuxc list-clients -F '#{client_tty}|#{pane_id}' | awk -F '|' -v tty="$VISIBLE_CLIENT" '!done && $1 == tty { print $2; done = 1 }')"
     [ -n "$VISIBLE_PANE" ] || { printf 'ERROR: visible client pane not found\n' >&2; exit 1; }
 elif [ "$TRANSPORT" = bridge ]; then
     coproc ATTACHED {

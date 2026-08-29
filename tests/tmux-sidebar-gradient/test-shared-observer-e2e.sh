@@ -28,10 +28,15 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 tmuxc() { tmux -L "$SOCKET" -f "$TEST_TMUX_CONF" "$@"; }
-client_session() { tmuxc list-clients -F '#{session_name}' | head -n 1; }
+# Every pipeline consumer below reads its producer to EOF: with pipefail, a
+# consumer that quits early (head -n 1, awk ... exit) leaves tmux writing
+# into a closed pipe, and the SIGPIPE surfaces as exit 141 (seen on CI and
+# locally, always in a polling helper).
+first_line() { sed -n 1p; }
+client_session() { tmuxc list-clients -F '#{session_name}' | first_line; }
 sidebar_for() {
     tmuxc list-panes -t "=$1:" -F '#{pane_id}|#{pane_title}' |
-        awk -F'|' '$2 == "dotfiles-session-sidebar" { print $1; exit }'
+        awk -F'|' '!found && $2 == "dotfiles-session-sidebar" { print $1; found = 1 }'
 }
 strip_ansi() { sed -E $'s/\x1B\[[0-9;?]*[ -\\/]*[@-~]//g'; }
 fail_test() {
@@ -54,8 +59,8 @@ observer_pids() {
     done
     return 0
 }
-state_file() { ls "$LOCK_ROOT"/dotfiles-sidebar-ai-*.state 2>/dev/null | head -n 1; }
-state_ts() { sed -n 's/^#ts \([0-9]*\).*/\1/p' "$(state_file)" 2>/dev/null | head -n 1; }
+state_file() { ls "$LOCK_ROOT"/dotfiles-sidebar-ai-*.state 2>/dev/null | first_line; }
+state_ts() { sed -n 's/^#ts \([0-9]*\).*/\1/p' "$(state_file)" 2>/dev/null | first_line; }
 row_gradient_count() {
     local session="$1" pane="$2" frame plain line_index
     frame="$(tmuxc capture-pane -e -p -t "$pane" 2>/dev/null || true)"
@@ -133,12 +138,12 @@ wait_for_gradient ai1 shell1 present 10 'shell1 presenter did not relight ai1'
 printf 'PASS: presenters follow the shared state through idle and resume\n'
 
 # Kill the observer: presenters respawn it and the gradient keeps working.
-old_pid="$(observer_pids | head -n 1)"
+old_pid="$(observer_pids | first_line)"
 kill "$old_pid"
 deadline=$(( $(date +%s) + 15 ))
 new_pid=""
 while [ "$(date +%s)" -lt "$deadline" ]; do
-    new_pid="$(observer_pids | head -n 1)"
+    new_pid="$(observer_pids | first_line)"
     [ -n "$new_pid" ] && [ "$new_pid" != "$old_pid" ] && break
     sleep 0.2
 done

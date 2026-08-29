@@ -41,7 +41,7 @@ test_log() {
 
 test_context_snapshot() {
   local client_state pane_state operation_state_value
-  client_state="$(tmuxc list-clients -F 'tty=#{client_tty}|session=#{session_name}|window=#{window_id}|pane=#{pane_id}|active=#{window_active}' 2>/dev/null | head -n 1 || true)"
+  client_state="$(tmuxc list-clients -F 'tty=#{client_tty}|session=#{session_name}|window=#{window_id}|pane=#{pane_id}|active=#{window_active}' 2>/dev/null | sed -n 1p || true)"
   pane_state="$(tmuxc list-panes -a -F 'session=#{session_name}|window=#{window_id}|pane=#{pane_id}|title=#{pane_title}|pid=#{pane_pid}|active=#{pane_active}|dead=#{pane_dead}' 2>/dev/null | tr '\n' ';' || true)"
   operation_state_value="$(tmuxc show-environment -gh DOTFILES_SIDEBAR_OPERATION 2>/dev/null | sed -n 's/^[^=]*=//p')"
   test_log "context client=[$client_state] operation=$operation_state_value panes=[$pane_state]"
@@ -115,22 +115,22 @@ client_session() {
     sess="$(tmuxc display-message -c "$CLIENT_TTY" -p '#{session_name}' 2>/dev/null || true)"
   fi
   if [ -z "$sess" ]; then
-    sess="$(tmuxc list-clients -F '#{client_control_mode}|#{client_tty}|#{session_name}' 2>/dev/null | awk -F'|' -v tty="${CLIENT_TTY:-}" '($1 != 1 && (tty == "" || $2 == tty)) {print $3; exit}')"
+    sess="$(tmuxc list-clients -F '#{client_control_mode}|#{client_tty}|#{session_name}' 2>/dev/null | awk -F'|' -v tty="${CLIENT_TTY:-}" '!done && ($1 != 1 && (tty == "" || $2 == tty)) {print $3; done = 1}')"
   fi
   if [ -z "$sess" ]; then
-    sess="$(tmuxc list-clients -F '#{client_control_mode}|#{session_name}' 2>/dev/null | awk -F'|' '$1 != 1 {print $2; exit}')"
+    sess="$(tmuxc list-clients -F '#{client_control_mode}|#{session_name}' 2>/dev/null | awk -F'|' '!done && $1 != 1 {print $2; done = 1}')"
   fi
   printf '%s\n' "$sess"
 }
-client_tty() { local tty; tty="$(tmuxc list-clients -F '#{client_control_mode}|#{client_tty}' 2>/dev/null | awk -F'|' '$1 != 1 && $2 != "" {print $2; exit}')"; if [ -n "$tty" ]; then printf '%s\n' "$tty"; else tmuxc list-clients -F '#{client_tty}' 2>/dev/null | grep -v '^[[:space:]]*$' | head -n 1; fi; }
-client_window_id() { local win; win="$(tmuxc list-clients -F '#{client_tty}|#{window_id}' 2>/dev/null | awk -F'|' -v tty="${CLIENT_TTY:-}" '$1 == tty && $2 != "" {print $2; exit}')"; if [ -n "$win" ]; then printf '%s\n' "$win"; else win="$(tmuxc list-clients -F '#{client_control_mode}|#{window_id}' 2>/dev/null | awk -F'|' '$1 != 1 && $2 != "" {print $2; exit}')"; if [ -n "$win" ]; then printf '%s\n' "$win"; else tmuxc list-windows -F '#{window_id}' 2>/dev/null | head -n 1; fi; fi; }
-sidebar_pane_id() { tmuxc list-panes -t "$(client_window_id)" -F '#{pane_id}|#{pane_title}' | awk -F'|' '$2=="dotfiles-session-sidebar"{print $1; exit}'; }
+client_tty() { local tty; tty="$(tmuxc list-clients -F '#{client_control_mode}|#{client_tty}' 2>/dev/null | awk -F'|' '!done && $1 != 1 && $2 != "" {print $2; done = 1}')"; if [ -n "$tty" ]; then printf '%s\n' "$tty"; else tmuxc list-clients -F '#{client_tty}' 2>/dev/null | grep -v '^[[:space:]]*$' | sed -n 1p; fi; }
+client_window_id() { local win; win="$(tmuxc list-clients -F '#{client_tty}|#{window_id}' 2>/dev/null | awk -F'|' -v tty="${CLIENT_TTY:-}" '!done && $1 == tty && $2 != "" {print $2; done = 1}')"; if [ -n "$win" ]; then printf '%s\n' "$win"; else win="$(tmuxc list-clients -F '#{client_control_mode}|#{window_id}' 2>/dev/null | awk -F'|' '!done && $1 != 1 && $2 != "" {print $2; done = 1}')"; if [ -n "$win" ]; then printf '%s\n' "$win"; else tmuxc list-windows -F '#{window_id}' 2>/dev/null | sed -n 1p; fi; fi; }
+sidebar_pane_id() { tmuxc list-panes -t "$(client_window_id)" -F '#{pane_id}|#{pane_title}' | awk -F'|' '!done && $2=="dotfiles-session-sidebar"{print $1; done = 1}'; }
 count_sidebars() { tmuxc list-panes -a -F '#{pane_title}' | awk '$1=="dotfiles-session-sidebar"{n++} END{print n+0}'; }
 count_sessions() { tmuxc list-sessions -F '#{session_name}' | wc -l | tr -d ' '; }
 window_sidebar_pane_id() {
   local window_id="$1"
   tmuxc list-panes -t "$window_id" -F '#{pane_id}|#{pane_title}' |
-    awk -F'|' '$2=="dotfiles-session-sidebar"{print $1; exit}'
+    awk -F'|' '!done && $2=="dotfiles-session-sidebar"{print $1; done = 1}'
 }
 window_sidebar_count() {
   local window_id="$1"
@@ -176,10 +176,10 @@ wait_trace() { [ -f "$TRACE_FILE" ] && grep -Fq "$1" "$TRACE_FILE"; }
 wait_trace_regex() { [ -f "$TRACE_FILE" ] && grep -Eq "$1" "$TRACE_FILE"; }
 wait_sidebar_stable() {
   local first second
-  first="$(tmuxc list-panes -a -F '#{pane_id}|#{pane_left}|#{pane_top}|#{pane_width}|#{pane_height}' | awk -F'|' -v id="$(sidebar_pane_id)" '$1 == id {print; exit}')" || return 1
+  first="$(tmuxc list-panes -a -F '#{pane_id}|#{pane_left}|#{pane_top}|#{pane_width}|#{pane_height}' | awk -F'|' -v id="$(sidebar_pane_id)" '!done && $1 == id {print; done = 1}')" || return 1
   [ -n "$first" ] || return 1
   sleep 0.1
-  second="$(tmuxc list-panes -a -F '#{pane_id}|#{pane_left}|#{pane_top}|#{pane_width}|#{pane_height}' | awk -F'|' -v id="$(sidebar_pane_id)" '$1 == id {print; exit}')" || return 1
+  second="$(tmuxc list-panes -a -F '#{pane_id}|#{pane_left}|#{pane_top}|#{pane_width}|#{pane_height}' | awk -F'|' -v id="$(sidebar_pane_id)" '!done && $1 == id {print; done = 1}')" || return 1
   [ "$first" = "$second" ]
 }
 pane_count_at_least() { [ "$(tmuxc list-panes -t "=$1:" | wc -l)" -ge "$2" ]; }
@@ -205,17 +205,13 @@ wait_prompt() {
 
 sidebar_row_for() {
   local name="$1"
-  tmuxc capture-pane -p -t "$(sidebar_pane_id)" | sed $'s/\033\\[[0-9;]*m//g' | nl -ba | awk -v n="$name" 'index($0,n)>0 {print $1; exit}'
+  tmuxc capture-pane -p -t "$(sidebar_pane_id)" | sed $'s/\033\\[[0-9;]*m//g' | nl -ba | awk -v n="$name" '!done && index($0,n)>0 {print $1; done = 1}'
 }
 
 sidebar_selected_name() {
   tmuxc capture-pane -p -t "$(sidebar_pane_id)" 2>/dev/null |
     sed $'s/\033\\[[0-9;]*m//g' |
-    awk '
-      $1 == ">*" { print $2; exit }
-      $1 == ">" && $2 == "*" { print $3; exit }
-      $1 == ">" { print $2; exit }
-    '
+    awk '!done && $1 == ">*" { print $2; done = 1 } !done && $1 == ">" && $2 == "*" { print $3; done = 1 } !done && $1 == ">" { print $2; done = 1 }'
 }
 
 sidebar_marker_invariant() {

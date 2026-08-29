@@ -22,8 +22,8 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 tmuxc() { tmux -L "$SOCKET" -f "$TEST_TMUX_CONF" "$@"; }
-client_session() { tmuxc list-clients -F '#{session_name}' | head -n 1; }
-sidebar_for() { tmuxc list-panes -t "=$1:" -F '#{pane_id}|#{pane_title}' | awk -F'|' '$2 == "dotfiles-session-sidebar" { print $1; exit }'; }
+client_session() { tmuxc list-clients -F '#{session_name}' | sed -n 1p; }
+sidebar_for() { tmuxc list-panes -t "=$1:" -F '#{pane_id}|#{pane_title}' | awk -F'|' '!done && $2 == "dotfiles-session-sidebar" { print $1; done = 1 }'; }
 strip_ansi() { sed -E $'s/\x1B\\[[0-9;?]*[ -\\/]*[@-~]//g'; }
 fail_test() { printf 'FAIL: %s\n' "$1" >&2; [ -f "$DEBUG_FILE" ] && tail -n 80 "$DEBUG_FILE" >&2 || true; exit 1; }
 
@@ -51,7 +51,7 @@ done
 [ "${ready:-0}" -eq 1 ] || fail_test 'fullscreen-redraw sidebar did not become ready'
 
 for session in "${sessions[@]}"; do
-    ai_pane="$(tmuxc list-panes -t "=$session:" -F '#{pane_id}|#{pane_current_command}' | awk -F'|' '$2 == "codex" { print $1; exit }')"
+    ai_pane="$(tmuxc list-panes -t "=$session:" -F '#{pane_id}|#{pane_current_command}' | awk -F'|' '!done && $2 == "codex" { print $1; done = 1 }')"
     [ -n "$ai_pane" ] || fail_test "$session AI pane was not detected"
     before="$(tmuxc capture-pane -p -J -t "$ai_pane" -S -4 | cksum | awk '{print $1}')"
     changed=0

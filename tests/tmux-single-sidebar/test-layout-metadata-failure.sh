@@ -29,7 +29,7 @@ source_sidebar="$(${TMUX[@]} list-panes -t '=metadata-source:' -F '#{pane_title}
 target_sidebar="$(${TMUX[@]} list-panes -t '=metadata-target:' -F '#{pane_title}' | awk '$0 == "dotfiles-session-sidebar" { count++ } END { print count + 0 }')"
 [ "$source_sidebar" -eq 1 ]
 [ "$target_sidebar" -eq 1 ]
-source_pane="$(${TMUX[@]} list-panes -t '=metadata-source:' -F '#{pane_id}|#{pane_title}' | awk -F '|' '$2 == "dotfiles-session-sidebar" { print $1; exit }')"
-target_pane="$(${TMUX[@]} list-panes -t '=metadata-target:' -F '#{pane_id}|#{pane_title}' | awk -F '|' '$2 == "dotfiles-session-sidebar" { print $1; exit }')"
+source_pane="$(${TMUX[@]} list-panes -t '=metadata-source:' -F '#{pane_id}|#{pane_title}' | awk -F '|' '!done && $2 == "dotfiles-session-sidebar" { print $1; done = 1 }')"
+target_pane="$(${TMUX[@]} list-panes -t '=metadata-target:' -F '#{pane_id}|#{pane_title}' | awk -F '|' '!done && $2 == "dotfiles-session-sidebar" { print $1; done = 1 }')"
 [ "$source_pane" != "$target_pane" ]
 printf 'PASS: multi-pane window-local sidebars remain distinct after target ensure\n'

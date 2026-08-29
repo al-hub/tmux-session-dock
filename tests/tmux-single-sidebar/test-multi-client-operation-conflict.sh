@@ -32,7 +32,7 @@ wait_for_external_client()
     local excluded="${1:-}" result="" deadline=$(( $(date +%s) + 10 ))
     while [ "$(date +%s)" -lt "$deadline" ]; do
         result="$(${TMUX[@]} list-clients -F '#{client_control_mode}|#{client_tty}|#{session_name}' 2>/dev/null |
-            awk -F '|' -v excluded="$excluded" '$1 != 1 && $3 != "owner" && $2 != excluded {print $2; exit}')"
+            awk -F '|' -v excluded="$excluded" '!done && $1 != 1 && $3 != "owner" && $2 != excluded {print $2; done = 1}')"
         [ -n "$result" ] && {
             printf '%s\n' "$result"
             return 0
@@ -68,7 +68,7 @@ owner_state()
     local owner
     owner="$("${TMUX[@]}" show-option -gqv @dotfiles_sidebar_owner_client 2>/dev/null || true)"
     "${TMUX[@]}" list-clients -F '#{client_control_mode}|#{client_tty}|#{session_name}|#{window_id}' 2>/dev/null |
-        awk -F '|' -v owner="$owner" '$1 != 1 && $2 == owner { print $2 "|" $3 "|" $4; exit }'
+        awk -F '|' -v owner="$owner" '!done && $1 != 1 && $2 == owner { print $2 "|" $3 "|" $4; done = 1 }'
 }
 
 start_sidebar()
@@ -89,7 +89,7 @@ start_sidebar()
     script -qefc "TERM=xterm-256color ${TMUX[*]} attach-session -t owner" "$RUN_DIR/owner.log" >/dev/null 2>&1 &
     CLIENT_PID=$!
     for attempt in $(seq 1 80); do
-        owner_tty="$("${TMUX[@]}" list-clients -F '#{client_control_mode}|#{client_tty}' 2>/dev/null | awk -F '|' '$1 != 1 { print $2; exit }')"
+        owner_tty="$("${TMUX[@]}" list-clients -F '#{client_control_mode}|#{client_tty}' 2>/dev/null | awk -F '|' '!done && $1 != 1 { print $2; done = 1 }')"
         [ -n "$owner_tty" ] && break
         sleep 0.05
     done

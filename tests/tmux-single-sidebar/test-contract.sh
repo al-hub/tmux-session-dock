@@ -50,7 +50,7 @@ done
 
 [ "$(count_sidebars)" -eq 1 ]
 sidebar_before="$(${TMUX[@]} list-panes -t '=contract-a:' -F '#{pane_id}|#{pane_title}' |
-    awk -F '|' '$2 == "dotfiles-session-sidebar" { print $1; exit }')"
+    awk -F '|' '!done && $2 == "dotfiles-session-sidebar" { print $1; done = 1 }')"
 pid_before="$(${TMUX[@]} display-message -p -t "$sidebar_before" '#{pane_pid}')"
 [ -n "$sidebar_before" ]
 [ -n "$pid_before" ]
@@ -62,7 +62,7 @@ wait_for_sidebar_count 2
 
 [ "$(count_sidebars)" -eq 2 ]
 sidebar_after="$(${TMUX[@]} list-panes -a -F '#{pane_id}|#{pane_title}' |
-    awk -F '|' '$2 == "dotfiles-session-sidebar" { print $1; exit }')"
+    awk -F '|' '!done && $2 == "dotfiles-session-sidebar" { print $1; done = 1 }')"
 pid_after="$(${TMUX[@]} display-message -p -t "$sidebar_after" '#{pane_pid}')"
 [ "$sidebar_before" = "$sidebar_after" ]
 [ "$pid_before" = "$pid_after" ]
@@ -82,7 +82,7 @@ done
 [ "$(sed -n '1p' "$STATE_FILE" 2>/dev/null || true)" = 45 ]
 "${TMUX[@]}" run-shell "$LAUNCHER --ensure-sidebar-session contract-b"
 contract_b_sidebar="$(${TMUX[@]} list-panes -t '=contract-b:' -F '#{pane_id}|#{pane_title}' |
-    awk -F '|' '$2 == "dotfiles-session-sidebar" { print $1; exit }')"
+    awk -F '|' '!done && $2 == "dotfiles-session-sidebar" { print $1; done = 1 }')"
 [ "$(${TMUX[@]} display-message -p -t "$contract_b_sidebar" '#{pane_width}')" = 45 ]
 printf 'PASS: manual sidebar resize is saved as the global width\n'
 printf 'PASS: manual sidebar resize is persisted outside the tmux server\n'
@@ -90,13 +90,13 @@ printf 'PASS: newly ensured session reuses the last global sidebar width\n'
 
 # A stale window option must not prevent the normal provision path from
 # creating/identifying the real sidebar pane.
-stale_contract_a_sidebar="$(${TMUX[@]} list-panes -t '=contract-a:' -F '#{pane_id}|#{pane_title}' | awk -F '|' '$2 == "dotfiles-session-sidebar" { print $1; exit }')"
+stale_contract_a_sidebar="$(${TMUX[@]} list-panes -t '=contract-a:' -F '#{pane_id}|#{pane_title}' | awk -F '|' '!done && $2 == "dotfiles-session-sidebar" { print $1; done = 1 }')"
 "${TMUX[@]}" kill-pane -t "$stale_contract_a_sidebar"
 "${TMUX[@]}" set-option -wq -t @0 @dotfiles_sidebar_pane_id %stale-pane
 "${TMUX[@]}" set-option -wq -t @0 @dotfiles_sidebar_ready 1
 "${TMUX[@]}" run-shell "$LAUNCHER --ensure-sidebar-session contract-a" || true
 wait_for_sidebar_count 2
-actual_contract_a_sidebar="$(${TMUX[@]} list-panes -t '=contract-a:' -F '#{pane_id}|#{pane_title}' | awk -F '|' '$2 == "dotfiles-session-sidebar" { print $1; exit }')"
+actual_contract_a_sidebar="$(${TMUX[@]} list-panes -t '=contract-a:' -F '#{pane_id}|#{pane_title}' | awk -F '|' '!done && $2 == "dotfiles-session-sidebar" { print $1; done = 1 }')"
 [ "$(${TMUX[@]} show-options -wqv -t @0 @dotfiles_sidebar_pane_id)" = "$actual_contract_a_sidebar" ]
 [ "$(${TMUX[@]} show-options -wqv -t @0 @dotfiles_sidebar_ready)" = 1 ]
 printf 'PASS: stale sidebar metadata is invalidated and repaired\n'

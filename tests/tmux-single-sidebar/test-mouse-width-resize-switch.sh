@@ -22,7 +22,7 @@ setup_interactive_test
 wait_until "anchor sidebar ready" sidebar_ready
 
 anchor_win="$(tmuxc display-message -p -t '=interactive-anchor:' '#{window_id}')"
-anchor_sb="$(tmuxc list-panes -t "$anchor_win" -F '#{pane_id}|#{pane_title}' | awk -F '|' '$2 == "dotfiles-session-sidebar" { print $1; exit }')"
+anchor_sb="$(tmuxc list-panes -t "$anchor_win" -F '#{pane_id}|#{pane_title}' | awk -F '|' '!done && $2 == "dotfiles-session-sidebar" { print $1; done = 1 }')"
 initial_width="$(tmuxc display-message -p -t "$anchor_sb" '#{pane_width}')"
 echo "Anchor sidebar ($anchor_sb) initial width: $initial_width"
 
@@ -32,7 +32,7 @@ peer_win="$(tmuxc display-message -p -t '=peer-mouse-test:' '#{window_id}')"
 tmuxc set-option -wq -t "$peer_win" @dotfiles_sidebar_managed 1
 tmuxc run-shell "$LAUNCHER --ensure-sidebar-window '$peer_win' $initial_width"
 
-peer_sb="$(tmuxc list-panes -t "$peer_win" -F '#{pane_id}|#{pane_title}' | awk -F '|' '$2 == "dotfiles-session-sidebar" { print $1; exit }')"
+peer_sb="$(tmuxc list-panes -t "$peer_win" -F '#{pane_id}|#{pane_title}' | awk -F '|' '!done && $2 == "dotfiles-session-sidebar" { print $1; done = 1 }')"
 [ -n "$peer_sb" ] || { echo "FAIL: peer sidebar missing"; exit 1; }
 wait_until "peer sidebar ready" "tmuxc show-options -wqv -t '$peer_win' @dotfiles_sidebar_ready | grep -Fq 1"
 wait_until "peer-mouse-test visible" "[ -n \"\$(sidebar_row_for 'peer-mouse-test')\" ]"

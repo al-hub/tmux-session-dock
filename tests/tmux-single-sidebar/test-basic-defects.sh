@@ -22,7 +22,7 @@ tmuxc new-session -d -s 0 -n zsh -c "$REPO_ROOT" 'sleep 300'
 setsid script -qefc "TERM=xterm-256color tmux -L $SOCKET attach-session -t 0" /tmp/test-basic-client.log >/dev/null 2>&1 &
 sleep 1
 
-CLIENT_TTY="$(tmuxc list-clients -F '#{client_tty}' | head -n 1)"
+CLIENT_TTY="$(tmuxc list-clients -F '#{client_tty}' | sed -n 1p)"
 [ -n "$CLIENT_TTY" ] || { echo "FAIL: Client attachment failed"; exit 1; }
 
 # Test 1: Issue 1 - open_sidebar (--open-sidebar) must keep sidebar alive
@@ -40,7 +40,7 @@ fi
 # Test 2: Issue 3 - Deleting numeric session 0 from session test_target targets session 0
 echo "Testing Issue 3: Deleting numeric session 0..."
 tmuxc new-session -d -s test_target -c "$REPO_ROOT" 'sleep 300'
-target_win="$(tmuxc list-windows -t test_target -F '#{window_id}' | head -n 1)"
+target_win="$(tmuxc list-windows -t test_target -F '#{window_id}' | sed -n 1p)"
 tmuxc set-option -w -t "$target_win" @dotfiles_sidebar_managed 1
 tmuxc run-shell "$LAUNCHER --ensure-sidebar-window $target_win"
 tmuxc switch-client -c "$CLIENT_TTY" -t test_target
@@ -50,7 +50,7 @@ tmuxc select-pane -t "$sidebar_pane"
 sleep 0.2
 
 # Move selection to 0
-cur_sel="$(tmuxc capture-pane -p -t "$sidebar_pane" | sed $'s/\033\\[[0-9;]*m//g' | awk '$1==">*"{print $2; exit} $1==">"{print $2; exit}')"
+cur_sel="$(tmuxc capture-pane -p -t "$sidebar_pane" | sed $'s/\033\\[[0-9;]*m//g' | awk '!done && $1==">*"{print $2; done = 1} !done && $1==">"{print $2; done = 1}')"
 if [ "$cur_sel" = "test_target" ]; then
     tmuxc send-keys -t "$sidebar_pane" Up
     sleep 0.5
@@ -83,7 +83,7 @@ echo "Testing Issue 2: Session switch aligns cursor..."
 sleep 0.5
 tmuxc select-pane -t "$sidebar_pane"
 sleep 0.2
-cur_sel="$(tmuxc capture-pane -p -t "$sidebar_pane" | sed $'s/\033\\[[0-9;]*m//g' | awk '$1==">*"{print $2; exit} $1==">"{print $2; exit}')"
+cur_sel="$(tmuxc capture-pane -p -t "$sidebar_pane" | sed $'s/\033\\[[0-9;]*m//g' | awk '!done && $1==">*"{print $2; done = 1} !done && $1==">"{print $2; done = 1}')"
 if [ "$cur_sel" = "test_target" ]; then
     tmuxc send-keys -t "$sidebar_pane" Up
     sleep 0.5

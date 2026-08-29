@@ -35,22 +35,22 @@ tmuxc new-session -d -s dummy -x 120 -y 50 -c "$REPO_ROOT" 'sleep 300'
 # 2. Session 1 (sess1, 120x50): Provision sidebar (width 35). Split work pane vertically (-h) into 2 panes.
 #    Resize first work pane to width 25 (second pane becomes width 58).
 tmuxc new-session -d -s sess1 -x 120 -y 50 -c "$REPO_ROOT" 'sleep 300'
-sess1_win="$(tmuxc list-windows -t '=sess1:' -F '#{window_id}' | head -n 1)"
+sess1_win="$(tmuxc list-windows -t '=sess1:' -F '#{window_id}' | sed -n 1p)"
 tmuxc set-option -wq -t "$sess1_win" @dotfiles_sidebar_managed 1
 tmuxc run-shell "$LAUNCHER --ensure-sidebar-window '$sess1_win' 35"
 
-sess1_work_pane1="$(tmuxc list-panes -t "$sess1_win" -F '#{pane_id}|#{pane_title}' | awk -F '|' '$2 != "dotfiles-session-sidebar" && $2 != "dotfiles-sidebar-subpane" { print $1; exit }')"
+sess1_work_pane1="$(tmuxc list-panes -t "$sess1_win" -F '#{pane_id}|#{pane_title}' | awk -F '|' '!done && $2 != "dotfiles-session-sidebar" && $2 != "dotfiles-sidebar-subpane" { print $1; done = 1 }')"
 [ -n "$sess1_work_pane1" ] || fail "sess1 work pane 1 not found"
 sess1_work_pane2="$(tmuxc split-window -h -P -F '#{pane_id}' -t "$sess1_work_pane1" -c "$REPO_ROOT" 'sleep 300')"
 tmuxc resize-pane -t "$sess1_work_pane1" -x 25
 
 # 3. Session 2 (sess2, 120x50): Identically, provision sidebar (width 35). Split work pane vertically into 2 panes (widths 25 and 58).
 tmuxc new-session -d -s sess2 -x 120 -y 50 -c "$REPO_ROOT" 'sleep 300'
-sess2_win="$(tmuxc list-windows -t '=sess2:' -F '#{window_id}' | head -n 1)"
+sess2_win="$(tmuxc list-windows -t '=sess2:' -F '#{window_id}' | sed -n 1p)"
 tmuxc set-option -wq -t "$sess2_win" @dotfiles_sidebar_managed 1
 tmuxc run-shell "$LAUNCHER --ensure-sidebar-window '$sess2_win' 35"
 
-sess2_work_pane1="$(tmuxc list-panes -t "$sess2_win" -F '#{pane_id}|#{pane_title}' | awk -F '|' '$2 != "dotfiles-session-sidebar" && $2 != "dotfiles-sidebar-subpane" { print $1; exit }')"
+sess2_work_pane1="$(tmuxc list-panes -t "$sess2_win" -F '#{pane_id}|#{pane_title}' | awk -F '|' '!done && $2 != "dotfiles-session-sidebar" && $2 != "dotfiles-sidebar-subpane" { print $1; done = 1 }')"
 [ -n "$sess2_work_pane1" ] || fail "sess2 work pane 1 not found"
 sess2_work_pane2="$(tmuxc split-window -h -P -F '#{pane_id}' -t "$sess2_work_pane1" -c "$REPO_ROOT" 'sleep 300')"
 tmuxc resize-pane -t "$sess2_work_pane1" -x 25
@@ -84,8 +84,8 @@ tmuxc set-option -g @dotfiles_sidebar_restore_topology 0 2>/dev/null || true
 tmuxc set-option -g @tmux_batch_busy 0 2>/dev/null || true
 tmuxc set-option -g @dotfiles_sidebar_enabled 1 2>/dev/null || true
 
-sess1_restored_win="$(tmuxc list-windows -t '=sess1:' -F '#{window_id}' | head -n 1)"
-sess2_restored_win="$(tmuxc list-windows -t '=sess2:' -F '#{window_id}' | head -n 1)"
+sess1_restored_win="$(tmuxc list-windows -t '=sess1:' -F '#{window_id}' | sed -n 1p)"
+sess2_restored_win="$(tmuxc list-windows -t '=sess2:' -F '#{window_id}' | sed -n 1p)"
 
 tmuxc run-shell "$LAUNCHER --ensure-sidebar-window '$sess1_restored_win' 35" || fail "failed to ensure sidebar window sess1"
 tmuxc run-shell "$LAUNCHER --ensure-sidebar-window '$sess2_restored_win' 35" || fail "failed to ensure sidebar window sess2"

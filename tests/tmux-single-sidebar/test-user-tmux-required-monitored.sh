@@ -28,7 +28,7 @@ fi
 tmuxc() { tmux -L default "$@"; }
 CLIENT_TTY=""
 for _ in $(seq 1 50); do
-    CLIENT_TTY="${TMUX_USER_LIVE_CLIENT:-$(tmuxc list-clients -F '#{client_control_mode}|#{client_tty}' 2>/dev/null | awk -F '|' '$1 != 1 {print $2; exit}')}"
+    CLIENT_TTY="${TMUX_USER_LIVE_CLIENT:-$(tmuxc list-clients -F '#{client_control_mode}|#{client_tty}' 2>/dev/null | awk -F '|' '!done && $1 != 1 {print $2; done = 1}')}"
     [ -n "$CLIENT_TTY" ] && break
     sleep 0.1
 done
@@ -76,9 +76,9 @@ trace_transition_full_render_counts() {
             END { printf "%d|%d\n", non_geometry+0, geometry+0 }
         '
 }
-client_field() { tmuxc list-clients -F "#{client_tty}|#{${1}}" 2>/dev/null | awk -F '|' -v tty="$CLIENT_TTY" '$1 == tty {print $2; exit}'; }
-refresh_sidebar() { SIDEBAR_PANE="$(tmuxc list-panes -t "$(client_field window_id)" -F '#{pane_id}|#{pane_title}' 2>/dev/null | awk -F '|' '$2 == "dotfiles-session-sidebar" {print $1; exit}')"; [ -n "$SIDEBAR_PANE" ]; }
-session_sidebar_pane() { tmuxc list-panes -t "=$1:" -F '#{pane_id}|#{pane_title}' 2>/dev/null | awk -F '|' '$2 == "dotfiles-session-sidebar" {print $1; exit}'; }
+client_field() { tmuxc list-clients -F "#{client_tty}|#{${1}}" 2>/dev/null | awk -F '|' -v tty="$CLIENT_TTY" '!done && $1 == tty {print $2; done = 1}'; }
+refresh_sidebar() { SIDEBAR_PANE="$(tmuxc list-panes -t "$(client_field window_id)" -F '#{pane_id}|#{pane_title}' 2>/dev/null | awk -F '|' '!done && $2 == "dotfiles-session-sidebar" {print $1; done = 1}')"; [ -n "$SIDEBAR_PANE" ]; }
+session_sidebar_pane() { tmuxc list-panes -t "=$1:" -F '#{pane_id}|#{pane_title}' 2>/dev/null | awk -F '|' '!done && $2 == "dotfiles-session-sidebar" {print $1; done = 1}'; }
 session_sidebar_count() { tmuxc list-panes -t "=$1:" -F '#{pane_title}' 2>/dev/null | awk '$1 == "dotfiles-session-sidebar" {n++} END {print n+0}'; }
 snapshot() { local n="$EVENT_SEQUENCE"; log "event=snapshot session=$(client_field session_name || true) window=$(client_field window_id || true) pane=$(client_field pane_id || true) owner=$(tmuxc show-options -gqv @dotfiles_sidebar_owner_client 2>/dev/null || true)"; tmuxc list-clients -F 'control=#{client_control_mode}|tty=#{client_tty}|session=#{session_name}|window=#{window_id}|pane=#{pane_id}|prefix=#{client_prefix}' > "$RUN_DIR/clients-$n.tsv" 2>/dev/null || true; tmuxc list-panes -a -F 'session=#{session_name}|window=#{window_id}|pane=#{pane_id}|title=#{pane_title}|pid=#{pane_pid}|active=#{pane_active}|geometry=#{pane_left},#{pane_top},#{pane_width},#{pane_height}' > "$RUN_DIR/panes-$n.tsv" 2>/dev/null || true; }
 capture() { local label="$1"; refresh_sidebar || return 0; tmuxc capture-pane -e -p -J -t "$SIDEBAR_PANE" > "$RUN_DIR/capture-$label.log" 2>/dev/null || true; tmuxc list-panes -t "$(client_field window_id)" -F '#{pane_id}|#{pane_title}|#{pane_left},#{pane_top},#{pane_width},#{pane_height}|#{pane_pid}|#{pane_active}' > "$RUN_DIR/layout-$label.tsv" 2>/dev/null || true; log "event=observation label=$label sidebar=$SIDEBAR_PANE"; }
@@ -134,7 +134,7 @@ scan_client_stream() {
 }
 event_field() {
     local key="$1" line="$2"
-    awk -v key="$key" '{ for (i = 1; i <= NF; i++) if (index($i, key) == 1) { sub("^[^=]*=", "", $i); print $i; exit } }' <<< "$line"
+    awk -v key="$key" '!done { for (i = 1; i <= NF; i++) if (index($i, key) == 1) { sub("^[^=]*=", "", $i); print $i; done = 1; break } }' <<< "$line"
 }
 build_user_switch_manifest() {
     local index=0 line target actual result duration before_sidebar after_sidebar operation_id phases begin_line first_target max_interval full_count hook_count failure_class
@@ -182,7 +182,7 @@ sample_user_transition() {
         fi
         previous_sample_ms="$now"
         state_line="$(user_batched_state)"
-        client_line="$(printf '%s\n' "$state_line" | awk -F '|' -v tty="$CLIENT_TTY" '$1 == "CLIENT" && $2 == tty {print; exit}')"
+        client_line="$(printf '%s\n' "$state_line" | awk -F '|' -v tty="$CLIENT_TTY" '!done && $1 == "CLIENT" && $2 == tty {print; done = 1}')"
         IFS='|' read -r _ _ current client_window _ <<< "$client_line"
         pane_line=""
         while IFS='|' read -r kind pane_id pane_title pane_session pane_window pid pane_geometry; do
@@ -247,7 +247,7 @@ selected_name() {
     refresh_sidebar || return 1
     tmuxc capture-pane -p -t "$SIDEBAR_PANE" 2>/dev/null |
         sed $'s/\033\\[[0-9;]*m//g' |
-        awk '$1 == ">*" { print $2; exit } $1 == ">" { if ($2 == "*") print $3; else print $2; exit }'
+        awk '!done && $1 == ">*" { print $2; done = 1 } !done && $1 == ">" { if ($2 == "*") print $3; else print $2; done = 1 }'
 }
 marker_invariant() {
     local expected_session="$1" marker_state star_count selected_count star_session selected_value actual_current
@@ -269,7 +269,7 @@ marker_invariant() {
     fi
     log "event=marker.invariant result=PASS expected=$expected_session current=$actual_current selected=$selected_value stars=$star_count selected_count=$selected_count"
 }
-row_for() { local name="$1"; refresh_sidebar || return 1; tmuxc capture-pane -p -t "$SIDEBAR_PANE" 2>/dev/null | sed $'s/\033\\[[0-9;]*m//g' | nl -ba | awk -v n="$name" 'index($0,n)>0 {print $1; exit}'; }
+row_for() { local name="$1"; refresh_sidebar || return 1; tmuxc capture-pane -p -t "$SIDEBAR_PANE" 2>/dev/null | sed $'s/\033\\[[0-9;]*m//g' | nl -ba | awk -v n="$name" '!done && index($0,n)>0 {print $1; done = 1}'; }
 send_tui() { local payload="$1"; refresh_sidebar || return 1; INPUT_SEQUENCE=$((INPUT_SEQUENCE + 1)); log "event=input.begin bytes=$(printf '%b' "$payload" | od -An -tx1 | tr -d ' \n') pane=$SIDEBAR_PANE"; case "$payload" in $'\033[B') tmuxc send-keys -t "$SIDEBAR_PANE" Down;; $'\033[A') tmuxc send-keys -t "$SIDEBAR_PANE" Up;; $'\r') tmuxc send-keys -t "$SIDEBAR_PANE" Enter;; *$'\r') tmuxc send-keys -t "$SIDEBAR_PANE" -l "${payload%$'\r'}"; tmuxc send-keys -t "$SIDEBAR_PANE" Enter;; *) tmuxc send-keys -t "$SIDEBAR_PANE" -l "$(printf '%b' "$payload")";; esac; log "event=input.end pane=$SIDEBAR_PANE"; scan_live_panes "input-$INPUT_SEQUENCE" || true; scan_client_stream "input-$INPUT_SEQUENCE" || true; }
 move_selection_to() { local target="$1" current i; for i in $(seq 1 30); do current="$(selected_name || true)"; [ "$current" = "$target" ] && return 0; send_tui $'\033[B' || return 1; wait_for "selection-step-$target-$i" selected_name || return 1; done; log "event=selection.end target=$target result=FAIL selected=$(selected_name || true)"; return 1; }
 create_session() { local name="$1" start="$(now_ms)" prompt enter ready total result; send_tui c; wait_for "prompt-$name" sidebar_text New: || return 1; prompt="$(now_ms)"; send_tui "$name"$'\r'; enter="$(now_ms)"; wait_for "session-$name" session_exists "$name" || return 1; ready="$(now_ms)"; total="$(awk -v s="$start" -v r="$ready" 'BEGIN{print r-s}')"; result="$(awk -v t="$total" 'BEGIN{print(t>5000)?"FAIL":"PASS"}')"; printf 'create\t%s\t%s\t%s\n' "$name" "$total" "$result" >> "$RESULT_LOG"; log "event=session.create name=$name c_to_prompt_ms=$(awk -v s="$start" -v p="$prompt" 'BEGIN{print p-s}') enter_to_session_ms=$(awk -v e="$enter" -v r="$ready" 'BEGIN{print r-e}') total_ms=$total result=$result"; capture "create-$name"; [ "$result" = PASS ] || fail "create-latency-$name"; }
@@ -351,7 +351,7 @@ sidebar_command="env TMUX_SESSION_HISTORY_DIR='$HISTORY_DIR' TMUX_SESSION_LAUNCH
 for index in 1 2 3; do name="live-${RUN_ID##*-}$index"; TEST_SESSIONS+=("$name"); create_session "$name" || true; done
 for index in 1 2 3 4 5 6; do switch_once "$index" || true; done
 build_user_switch_manifest
-for direction in horizontal vertical; do current="$(client_field session_name || true)"; window_id="$(tmuxc display-message -p -t "=$current:" '#{window_id}' 2>/dev/null || true)"; work="$(tmuxc list-panes -t "$window_id" -F '#{pane_id}|#{pane_title}' | awk -F '|' '$2 != "dotfiles-session-sidebar" {print $1; exit}')"; before="$RUN_DIR/layout-$direction-before.tsv"; after="$RUN_DIR/layout-$direction-after.tsv"; tmuxc list-panes -t "$window_id" -F '#{pane_id}|#{pane_title}|#{pane_left},#{pane_top},#{pane_width},#{pane_height}' > "$before"; if [ -n "$work" ]; then [ "$direction" = horizontal ] && tmuxc split-window -h -t "$work" -c "$REPO_ROOT" || tmuxc split-window -v -t "$work" -c "$REPO_ROOT"; tmuxc list-panes -t "$window_id" -F '#{pane_id}|#{pane_title}|#{pane_left},#{pane_top},#{pane_width},#{pane_height}' > "$after"; log "event=layout direction=$direction before=$before after=$after"; else fail "work-pane-$direction"; fi; done
+for direction in horizontal vertical; do current="$(client_field session_name || true)"; window_id="$(tmuxc display-message -p -t "=$current:" '#{window_id}' 2>/dev/null || true)"; work="$(tmuxc list-panes -t "$window_id" -F '#{pane_id}|#{pane_title}' | awk -F '|' '!done && $2 != "dotfiles-session-sidebar" {print $1; done = 1}')"; before="$RUN_DIR/layout-$direction-before.tsv"; after="$RUN_DIR/layout-$direction-after.tsv"; tmuxc list-panes -t "$window_id" -F '#{pane_id}|#{pane_title}|#{pane_left},#{pane_top},#{pane_width},#{pane_height}' > "$before"; if [ -n "$work" ]; then [ "$direction" = horizontal ] && tmuxc split-window -h -t "$work" -c "$REPO_ROOT" || tmuxc split-window -v -t "$work" -c "$REPO_ROOT"; tmuxc list-panes -t "$window_id" -F '#{pane_id}|#{pane_title}|#{pane_left},#{pane_top},#{pane_width},#{pane_height}' > "$after"; log "event=layout direction=$direction before=$before after=$after"; else fail "work-pane-$direction"; fi; done
 scan_live_panes final || true
 scan_client_stream final || true
 if grep -aEin -- "$ERROR_PATTERN" "$RUN_DIR/trace.log" "$RUN_DIR/debug.log" 2>/dev/null >> "$RUN_DIR/error-matches.log" || [ -s "$RUN_DIR/error-matches.log" ]; then fail known-launcher-error; else log 'event=error-scan result=PASS source=trace-debug-and-pane-history matches=0'; fi

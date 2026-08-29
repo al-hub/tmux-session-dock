@@ -36,7 +36,7 @@ tmuxc() { tmux -L "$SOCKET" "$@"; }
 slot_pane() {
     local window_id="$1" slot="$2"
     tmuxc list-panes -t "$window_id" -F '#{pane_id}|#{@dotfiles_subpane_slot}' |
-        awk -F '|' -v wanted="$slot" '$2 == wanted { print $1; exit }'
+        awk -F '|' -v wanted="$slot" '!done && $2 == wanted { print $1; done = 1 }'
 }
 
 slot_height() {

@@ -39,14 +39,14 @@ for attempt in $(seq 1 50); do
 done
 sleep 0.2
 
-sidebar_before="$("${TMUX[@]}" list-panes -a -F '#{pane_id}|#{pane_title}' | awk -F '|' '$2 == "dotfiles-session-sidebar" { print $1; exit }')"
+sidebar_before="$("${TMUX[@]}" list-panes -a -F '#{pane_id}|#{pane_title}' | awk -F '|' '!done && $2 == "dotfiles-session-sidebar" { print $1; done = 1 }')"
 owner_client="$(${TMUX[@]} list-clients -F '#{client_control_mode}|#{client_tty}' |
-    awk -F '|' '$1 != 1 { print $2; exit }')"
+    awk -F '|' '!done && $1 != 1 { print $2; done = 1 }')"
 [ -n "$owner_client" ]
 "${TMUX[@]}" set-option -g @dotfiles_sidebar_owner_client "$owner_client"
 "${TMUX[@]}" run-shell -b "$REPO_ROOT/scripts/tmux-session-launcher --open-sidebar"
 sleep 0.3
-sidebar_after="$("${TMUX[@]}" list-panes -a -F '#{pane_id}|#{pane_title}' | awk -F '|' '$2 == "dotfiles-session-sidebar" { print $1; exit }')"
+sidebar_after="$("${TMUX[@]}" list-panes -a -F '#{pane_id}|#{pane_title}' | awk -F '|' '!done && $2 == "dotfiles-session-sidebar" { print $1; done = 1 }')"
 
 [ "$sidebar_before" = "$sidebar_after" ]
 [ "$("${TMUX[@]}" list-clients 2>/dev/null | wc -l | tr -d ' ')" -ge 2 ]

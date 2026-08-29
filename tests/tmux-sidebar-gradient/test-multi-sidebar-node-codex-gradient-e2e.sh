@@ -23,7 +23,7 @@ trap cleanup EXIT INT TERM
 tmuxc() { tmux -L "$SOCKET" -f "$TEST_TMUX_CONF" "$@"; }
 sidebar_for() {
     tmuxc list-panes -t "=$1:" -F '#{pane_id}|#{pane_title}' |
-        awk -F'|' '$2 == "dotfiles-session-sidebar" { print $1; exit }'
+        awk -F'|' '!done && $2 == "dotfiles-session-sidebar" { print $1; done = 1 }'
 }
 fail_test() {
     printf 'FAIL: %s\n' "$1" >&2
@@ -54,7 +54,7 @@ CLIENT_PID="$ATTACHED_PID"
 ai_pane=""
 node_deadline=$(( $(date +%s) + 8 ))
 while [ "$(date +%s)" -lt "$node_deadline" ]; do
-    ai_pane="$(tmuxc list-panes -t '=node-codex:' -F '#{pane_id}|#{pane_current_command}' | awk -F'|' '$2 == "node" { print $1; exit }')"
+    ai_pane="$(tmuxc list-panes -t '=node-codex:' -F '#{pane_id}|#{pane_current_command}' | awk -F'|' '!done && $2 == "node" { print $1; done = 1 }')"
     [ -n "$ai_pane" ] && break
     sleep 0.1
 done
@@ -73,7 +73,7 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
         sidebar="$(sidebar_for "$session")"
         [ -n "$sidebar" ] || continue
         frame="$(tmuxc capture-pane -e -p -t "$sidebar")"
-        node_row="$(printf '%s\n' "$frame" | awk '/node-codex/ { print; exit }')"
+        node_row="$(printf '%s\n' "$frame" | awk '!done && /node-codex/ { print; done = 1 }')"
         if printf '%s' "$node_row" | grep -Fq '38;5;'; then
             gradient_seen["$session"]=true
         fi

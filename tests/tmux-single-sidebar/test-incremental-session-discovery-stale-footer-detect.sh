@@ -19,7 +19,7 @@ setup_interactive_test
 wait_until "anchor sidebar ready" sidebar_ready
 
 anchor_win="$(tmuxc display-message -p -t '=interactive-anchor:' '#{window_id}')"
-anchor_sb="$(tmuxc list-panes -t "$anchor_win" -F '#{pane_id}|#{pane_title}' | awk -F '|' '$2 == "dotfiles-session-sidebar" { print $1; exit }')"
+anchor_sb="$(tmuxc list-panes -t "$anchor_win" -F '#{pane_id}|#{pane_title}' | awk -F '|' '!done && $2 == "dotfiles-session-sidebar" { print $1; done = 1 }')"
 initial_width="$(tmuxc display-message -p -t "$anchor_sb" '#{pane_width}')"
 
 echo "=== [2/3] Creating sess-beta with a pre-warmed Presenter ==="

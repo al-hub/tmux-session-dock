@@ -22,8 +22,8 @@ tmux -L "$SOCKET" set-option -w -t "$win" @dotfiles_sidebar_managed 1
 tmux -L "$SOCKET" run-shell "$BIN --ensure-sidebar-window $win"
 sleep 0.5
 
-sidebar_pane="$(tmux -L "$SOCKET" list-panes -t "$win" -F '#{pane_id}|#{pane_title}|#{@dotfiles_sidebar_pane}' | awk -F '|' '($2=="dotfiles-session-sidebar" || $3=="1"){print $1; exit}')"
-work_pane="$(tmux -L "$SOCKET" list-panes -t "$win" -F '#{pane_id}|#{pane_title}|#{@dotfiles_sidebar_pane}' | awk -F '|' '$2!="dotfiles-session-sidebar" && $3!="1"{print $1; exit}')"
+sidebar_pane="$(tmux -L "$SOCKET" list-panes -t "$win" -F '#{pane_id}|#{pane_title}|#{@dotfiles_sidebar_pane}' | awk -F '|' '!done && ($2=="dotfiles-session-sidebar" || $3=="1"){print $1; done = 1}')"
+work_pane="$(tmux -L "$SOCKET" list-panes -t "$win" -F '#{pane_id}|#{pane_title}|#{@dotfiles_sidebar_pane}' | awk -F '|' '!done && $2!="dotfiles-session-sidebar" && $3!="1"{print $1; done = 1}')"
 
 [ -n "$sidebar_pane" ] || { echo "FAIL: sidebar_pane not found"; exit 1; }
 [ -n "$work_pane" ] || { echo "FAIL: work_pane not found"; exit 1; }
@@ -58,7 +58,7 @@ echo "=== [4/4] Verifying focus jump from Subpane to Sidebar ==="
 # Enable subpane
 tmux -L "$SOCKET" run-shell "$BIN --toggle-subpane"
 sleep 0.5
-subpane_pane="$(tmux -L "$SOCKET" list-panes -t "$win" -F '#{pane_id}|#{pane_title}|#{@dotfiles_sidebar_subpane}' | awk -F '|' '($2=="dotfiles-sidebar-subpane" || $3=="1"){print $1; exit}')"
+subpane_pane="$(tmux -L "$SOCKET" list-panes -t "$win" -F '#{pane_id}|#{pane_title}|#{@dotfiles_sidebar_subpane}' | awk -F '|' '!done && ($2=="dotfiles-sidebar-subpane" || $3=="1"){print $1; done = 1}')"
 
 if [ -n "$subpane_pane" ]; then
     tmux -L "$SOCKET" select-pane -t "$subpane_pane"

@@ -29,10 +29,10 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 tmuxc() { tmux -L "$SOCKET" -f "$TEST_TMUX_CONF" "$@"; }
-client_session() { tmuxc list-clients -F '#{session_name}' | head -n 1; }
+client_session() { tmuxc list-clients -F '#{session_name}' | sed -n 1p; }
 sidebar_for() {
     tmuxc list-panes -t "=$1:" -F '#{pane_id}|#{pane_title}' |
-        awk -F'|' '$2 == "dotfiles-session-sidebar" { print $1; exit }'
+        awk -F'|' '!done && $2 == "dotfiles-session-sidebar" { print $1; done = 1 }'
 }
 window_size() { tmuxc display-message -p -t "=$1:" '#{window_width}x#{window_height}'; }
 set_state() { printf '%s\n' "$2" > "$CONTROL_DIR/$1"; }

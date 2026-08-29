@@ -29,10 +29,10 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 tmuxc() { tmux -L "$SOCKET" -f "$TEST_TMUX_CONF" "$@"; }
-client_session() { tmuxc list-clients -F '#{session_name}' | head -n 1; }
+client_session() { tmuxc list-clients -F '#{session_name}' | sed -n 1p; }
 sidebar_for() {
     tmuxc list-panes -t "=$1:" -F '#{pane_id}|#{pane_title}' |
-        awk -F'|' '$2 == "dotfiles-session-sidebar" { print $1; exit }'
+        awk -F'|' '!done && $2 == "dotfiles-session-sidebar" { print $1; done = 1 }'
 }
 stall_file_for() { printf '%s/stall-%s\n' "$TMP_DIR" "$1"; }
 observer_pids() {
@@ -44,7 +44,7 @@ observer_pids() {
     done
     return 0
 }
-state_file() { ls "$LOCK_ROOT"/dotfiles-sidebar-ai-*.state 2>/dev/null | head -n 1; }
+state_file() { ls "$LOCK_ROOT"/dotfiles-sidebar-ai-*.state 2>/dev/null | sed -n 1p; }
 watchdog_log() { cat "$(state_file).watchdog.log" 2>/dev/null || true; }
 heartbeat_epoch() { awk '{ print $1 }' "$(state_file).presenter-${1//%/pane}.hb" 2>/dev/null || true; }
 fail_test() {
@@ -97,7 +97,7 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
     sleep 0.3
 done
 grep -q "pane=$ai_pane .*action=escape-sent" <<< "$(watchdog_log)" || fail_test 'stalled ai1 presenter was not recovered by the watchdog'
-stalled_epoch="$(grep "pane=$ai_pane " <<< "$(watchdog_log)" | head -n 1 | grep -oE 'age=[0-9]+' || true)"
+stalled_epoch="$(grep "pane=$ai_pane " <<< "$(watchdog_log)" | sed -n 1p | grep -oE 'age=[0-9]+' || true)"
 deadline=$(( $(date +%s) + 8 ))
 while [ "$(date +%s)" -lt "$deadline" ] && [ "$(heartbeat_epoch "$ai_pane")" = "$before" ]; do sleep 0.2; done
 [ "$(heartbeat_epoch "$ai_pane")" != "$before" ] || fail_test 'ai1 presenter heartbeat did not resume after the watchdog Escape'

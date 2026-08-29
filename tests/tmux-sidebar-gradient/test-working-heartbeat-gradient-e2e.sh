@@ -18,8 +18,8 @@ cp "$(command -v bash)" "$TMP_DIR/codex"
 cleanup() { kill "${CLIENT_PID:-}" >/dev/null 2>&1 || true; tmux -L "$SOCKET" kill-server >/dev/null 2>&1 || true; rm -rf "$TMP_DIR"; }
 trap cleanup EXIT INT TERM
 tmuxc() { tmux -L "$SOCKET" -f "$TEST_TMUX_CONF" "$@"; }
-client_session() { tmuxc list-clients -F '#{session_name}' | head -n 1; }
-sidebar_for() { tmuxc list-panes -t "=$1:" -F '#{pane_id}|#{pane_title}' | awk -F'|' '$2 == "dotfiles-session-sidebar" { print $1; exit }'; }
+client_session() { tmuxc list-clients -F '#{session_name}' | sed -n 1p; }
+sidebar_for() { tmuxc list-panes -t "=$1:" -F '#{pane_id}|#{pane_title}' | awk -F'|' '!done && $2 == "dotfiles-session-sidebar" { print $1; done = 1 }'; }
 strip_ansi() { sed -E $'s/\x1B\\[[0-9;?]*[ -\\/]*[@-~]//g'; }
 fail_test() { printf 'FAIL: %s\n' "$1" >&2; tmuxc list-panes -a -F '#{session_name}|#{pane_id}|#{pane_title}|#{pane_current_command}|#{pane_pid}' >&2 || true; [ -f "$DEBUG_FILE" ] && tail -n 60 "$DEBUG_FILE" >&2 || true; exit 1; }
 
@@ -48,7 +48,7 @@ sleep 0.3
 heartbeat_after="$(cat "$HEARTBEAT_DIR/work1")"
 [ "$heartbeat_before" != "$heartbeat_after" ] || fail_test 'work1 heartbeat did not advance while AI process was working'
 
-pane_work1="$(tmuxc list-panes -t '=work1:' -F '#{pane_id}|#{pane_current_command}|#{pane_pid}' | awk -F'|' '$2 == "codex" { print; exit }')"
+pane_work1="$(tmuxc list-panes -t '=work1:' -F '#{pane_id}|#{pane_current_command}|#{pane_pid}' | awk -F'|' '!done && $2 == "codex" { print; done = 1 }')"
 [ -n "$pane_work1" ] || fail_test 'work1 AI process is not visible as codex'
 ai_pid="${pane_work1##*|}"
 kill -0 "$ai_pid" 2>/dev/null || fail_test 'work1 AI process is not alive'

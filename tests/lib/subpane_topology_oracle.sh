@@ -57,7 +57,7 @@ subpane_oracle_assert_leased_pool() {
             printf '%s\n' "$inventory" >&2
             return 1
         }
-        actual_id="$(printf '%s\n' "$inventory" | awk -F '|' -v slot="$slot" '$5 == "1" && $6 == slot { print $3; exit }')"
+        actual_id="$(printf '%s\n' "$inventory" | awk -F '|' -v slot="$slot" '!done && $5 == "1" && $6 == slot { print $3; done = 1 }')"
         expected_id="${expected_ids[$((slot - 1))]:-}"
         if [ -n "$expected_id" ] && [ "$actual_id" != "$expected_id" ]; then
             echo "oracle: slot $slot identity changed from $expected_id to $actual_id" >&2

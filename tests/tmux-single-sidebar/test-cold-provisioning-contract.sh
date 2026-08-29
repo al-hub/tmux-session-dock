@@ -38,7 +38,7 @@ tmuxc new-session -d -s anchor -x 120 -y 50 -c "$REPO_ROOT" 'sleep 300'
 
 echo "=== [1/2] Testing Cold Provisioning Lifecycle & Ready State ==="
 tmuxc new-session -d -s cold-sess -x 120 -y 50 -c "$REPO_ROOT" 'sleep 300'
-win="$(tmuxc list-windows -t '=cold-sess:' -F '#{window_id}' | head -n 1)"
+win="$(tmuxc list-windows -t '=cold-sess:' -F '#{window_id}' | sed -n 1p)"
 
 # Initially, 0 sidebars exist
 sb_count_before="$(tmuxc list-panes -t "$win" -F '#{pane_title}' | grep -c "dotfiles-session-sidebar" || true)"
@@ -57,7 +57,7 @@ echo "Cold provisioned sidebar pane: $sb_pane, ready: $ready_val"
 
 echo "=== [2/2] Testing Rapid Concurrent Provisioning (Debounce / Idempotence) ==="
 tmuxc new-session -d -s rapid-sess -x 120 -y 50 -c "$REPO_ROOT" 'sleep 300'
-rapid_win="$(tmuxc list-windows -t '=rapid-sess:' -F '#{window_id}' | head -n 1)"
+rapid_win="$(tmuxc list-windows -t '=rapid-sess:' -F '#{window_id}' | sed -n 1p)"
 tmuxc set-option -wq -t "$rapid_win" @dotfiles_sidebar_managed 1
 
 # Fire rapid ensure calls
