@@ -73,7 +73,7 @@ draw_help() {
 
     printf "  ${YELLOW}${BOLD}[ 🧭 포커스 이동 & 위치 맞바꿈 (Prefix 불필요) ]${RESET}\n"
     printf "    ${CYAN}${BOLD}Alt + 방향키${RESET}        ${GRAY}─${RESET}  페인 포커스 즉시 이동 (${BOLD}← ↓ ↑ →${RESET})\n"
-    printf "    ${CYAN}${BOLD}Ctrl+Alt + 방향키${RESET}   ${GRAY}─${RESET}  페인 물리적 위치 즉시 맞바꿈 (${BOLD}← ↓ ↑ →${RESET})\n"
+    printf "    ${CYAN}${BOLD}Ctrl+Alt + 방향키${RESET}   ${GRAY}─${RESET}  페인 위치 맞바꿈 · 사이드바/서브페인에선 ↑↓로 스택 상/하 전환\n"
     printf "    ${CYAN}${BOLD}Ctrl + \\\\${RESET}           ${GRAY}─${RESET}  직전 사용 페인과 원클릭 토글\n"
     printf "    ${CYAN}${BOLD}마우스 드래그${RESET}       ${GRAY}─${RESET}  경계선 드래그 크기 조절 (크기 자동 기억)\n\n"
 

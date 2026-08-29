@@ -100,6 +100,13 @@ tmux bind-key -n -N "🧭 Smart Focus Left" 'M-Left' run-shell "$BIN_PATH --smar
 tmux bind-key -n -N "🧭 Smart Focus Right" 'M-Right' run-shell "$BIN_PATH --smart-pane R" 2>/dev/null || true
 tmux bind-key -n -N "🧭 Smart Focus Up" 'M-Up' run-shell "$BIN_PATH --smart-pane U" 2>/dev/null || true
 tmux bind-key -n -N "🧭 Smart Focus Down" 'M-Down' run-shell "$BIN_PATH --smart-pane D" 2>/dev/null || true
+# Ctrl+Alt+arrow moves the active work pane one step (swap with the neighbour,
+# focus follows). Dock-aware: a swap into the sidebar column is ignored; from
+# the Sidebar or Subpane, Up/Down flips the Subpane stack position instead.
+tmux bind-key -n -N "↔️ Swap Pane Left" 'C-M-Left' run-shell "$BIN_PATH --swap-pane L" 2>/dev/null || true
+tmux bind-key -n -N "↔️ Swap Pane Right" 'C-M-Right' run-shell "$BIN_PATH --swap-pane R" 2>/dev/null || true
+tmux bind-key -n -N "↕️ Swap Pane Up" 'C-M-Up' run-shell "$BIN_PATH --swap-pane U" 2>/dev/null || true
+tmux bind-key -n -N "↕️ Swap Pane Down" 'C-M-Down' run-shell "$BIN_PATH --swap-pane D" 2>/dev/null || true
 
 # 5. IME focus hook (opt-in: set -g @session-dock-ime on). Reconciled on every
 # config load so a tmux.conf change or the S popup takes effect immediately.

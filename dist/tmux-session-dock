@@ -4860,6 +4860,74 @@ smart_navigate_pane()
     return 0
 }
 
+# Panes touching the active pane's edge in <dir> (L|R|U|D), one id per line.
+# tmux geometry: the border between neighbours is one cell wide.
+pane_neighbours_in_direction()
+{
+    local window_id="$1" dir="$2"
+    sidebar_tmux_cmd list-panes -t "$window_id" -F '#{pane_id} #{pane_left} #{pane_right} #{pane_top} #{pane_bottom} #{pane_active}' 2>/dev/null |
+        awk -v dir="$dir" '
+            $6 == 1 { al = $2; ar = $3; at = $4; ab = $5 }
+            { id[NR] = $1; l[NR] = $2; r[NR] = $3; t[NR] = $4; b[NR] = $5 }
+            END {
+                for (i = 1; i <= NR; i++) {
+                    v = (t[i] <= ab && b[i] >= at); h = (l[i] <= ar && r[i] >= al)
+                    if (dir == "L" && al - r[i] >= 1 && al - r[i] <= 2 && v) print id[i]
+                    if (dir == "R" && l[i] - ar >= 1 && l[i] - ar <= 2 && v) print id[i]
+                    if (dir == "U" && at - b[i] >= 1 && at - b[i] <= 2 && h) print id[i]
+                    if (dir == "D" && t[i] - ab >= 1 && t[i] - ab <= 2 && h) print id[i]
+                }
+            }'
+}
+
+# Ctrl+Alt+arrow: move the active work pane one step in <dir> (swap with the
+# neighbour, focus follows). The dock column never takes part: from a work
+# pane a swap towards the sidebar/subpane is ignored; from the sidebar or the
+# subpane, Up/Down flips the subpane stack position and Left/Right do nothing.
+smart_swap_pane()
+{
+    local dir="${1:-L}"
+    case "$dir" in
+        L|left) dir=L ;; R|right) dir=R ;; U|up) dir=U ;; D|down) dir=D ;;
+        *) return 0 ;;
+    esac
+    local active_pane active_win
+    active_pane="$(sidebar_tmux_cmd display-message -p '#{pane_id}' 2>/dev/null || true)"
+    active_win="$(sidebar_tmux_cmd display-message -p '#{window_id}' 2>/dev/null || true)"
+    [ -n "$active_pane" ] && [ -n "$active_win" ] || return 0
+
+    local sidebar_info subpane_info
+    sidebar_info="$(sidebar_tmux_cmd list-panes -t "$active_win" -F '#{pane_id}|#{pane_title}|#{@dotfiles_sidebar_pane}' 2>/dev/null | awk -F '|' '($2=="dotfiles-session-sidebar" || $3=="1"){print $1; exit}')"
+    subpane_info="$(sidebar_tmux_cmd list-panes -t "$active_win" -F '#{pane_id}|#{pane_title}|#{@dotfiles_sidebar_subpane}' 2>/dev/null | awk -F '|' '($2=="dotfiles-sidebar-subpane" || $3=="1"){print $1; exit}')"
+
+    if [ "$active_pane" = "$sidebar_info" ] || [ "$active_pane" = "$subpane_info" ]; then
+        if [ "$dir" = "U" ] || [ "$dir" = "D" ]; then
+            [ -n "$subpane_info" ] || return 0
+            local position
+            position="$(sidebar_subpane_get_position 2>/dev/null || echo bottom)"
+            # Up from a bottom stack (or Down from a top stack) flips it; the
+            # other direction is already the case.
+            if { [ "$dir" = "U" ] && [ "$position" = "bottom" ]; } || { [ "$dir" = "D" ] && [ "$position" = "top" ]; }; then
+                trace_event "swap.pane.stack-position window=$active_win dir=$dir from=$position"
+                sidebar_subpane_swap_position "$active_win" >/dev/null 2>&1 || true
+                sidebar_tmux_cmd select-pane -t "$active_pane" 2>/dev/null || true
+            fi
+        fi
+        return 0
+    fi
+
+    local neighbour
+    neighbour="$(pane_neighbours_in_direction "$active_win" "$dir" | head -n 1)"
+    [ -n "$neighbour" ] || return 0
+    if [ "$neighbour" = "$sidebar_info" ] || [ "$neighbour" = "${subpane_info:-__none__}" ]; then
+        trace_event "swap.pane.ignore window=$active_win dir=$dir reason=dock-column"
+        return 0
+    fi
+    trace_event "swap.pane window=$active_win dir=$dir pane=$active_pane with=$neighbour"
+    sidebar_tmux_cmd swap-pane -d -s "$active_pane" -t "$neighbour" \; select-pane -t "$active_pane" 2>/dev/null || true
+    return 0
+}
+
 focus_or_toggle_sidebar()
 {
     local target_arg="${1:-}"
@@ -11106,6 +11174,10 @@ main()
             ;;
         --swap-subpane-position|--toggle-subpane-position)
             sidebar_subpane_swap_position "${2:-}"
+            return 0
+            ;;
+        --swap-pane)
+            smart_swap_pane "${2:-L}"
             return 0
             ;;
         --smart-pane|--navigate-pane)

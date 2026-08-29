@@ -99,6 +99,7 @@ tmux-single-sidebar/test-subpane-mouse-resize-fidelity.sh
 tmux-single-sidebar/test-subpane-swap-manual-resize-fidelity.sh
 tmux-single-sidebar/test-subpane-switch-position-contract.sh
 tmux-single-sidebar/test-subpane-ctrl-alt-swap.sh
+tmux-single-sidebar/test-swap-pane.sh
 tmux-single-sidebar/test-subpane-swap-switch-immediate.sh
 tmux-single-sidebar/test-keyboard-e2e-subpane.sh
 tmux-single-sidebar/test-keyboard-e2e-subpane-multi-slot-enter.sh
