@@ -88,6 +88,26 @@ grep -q "fcitx5-remote -o" "$CALLS" || fail "pop must restore Korean (-o)"
 [ ! -s "$CALLS" ] || fail "pop without state must do nothing"
 echo 1 > "$TMP/fcitx.mode"; "$HELPER" push; : > "$CALLS"; "$HELPER" pop
 grep -q "fcitx5-remote -c" "$CALLS" || fail "pop after English push must set English (-c)"
+echo "--- pop is skipped while a focused client still shows a sidebar (sidebar -> sidebar move) ---"
+cat > "$TMP/bin/tmux" <<STUB
+#!/usr/bin/env bash
+[ "\$1" = "list-clients" ] && cat "$TMP/clients"
+exit 0
+STUB
+chmod +x "$TMP/bin/tmux"
+echo 2 > "$TMP/fcitx.mode"; "$HELPER" push
+echo "attached,focused,UTF-8|dotfiles-session-sidebar" > "$TMP/clients"
+: > "$CALLS"; TMUX=fake "$HELPER" pop
+grep -q "fcitx5-remote -o" "$CALLS" && fail "pop must be skipped while a focused client shows a sidebar"
+[ "$(cat "$TMP/ime.state")" = "2" ] || fail "skipped pop must keep the remembered state"
+echo "attached,focused,UTF-8|LAPTOP" > "$TMP/clients"
+: > "$CALLS"; TMUX=fake "$HELPER" pop
+grep -q "fcitx5-remote -o" "$CALLS" || fail "pop must restore once the focused client shows a work pane"
+echo 2 > "$TMP/fcitx.mode"; "$HELPER" push
+echo "attached,focused,UTF-8|dotfiles-session-sidebar" > "$TMP/clients"
+: > "$CALLS"; "$HELPER" pop        # no \$TMUX: not running under a tmux hook, no client check
+grep -q "fcitx5-remote -o" "$CALLS" || fail "pop outside tmux must not consult clients"
+rm -f "$TMP/bin/tmux"
 unset TMUX_SESSION_DOCK_IME_STATE
 rm -f "$TMP/bin"/*
 stub imemode.exe; mv "$TMP/bin/imemode.exe" "$HOME/.local/bin/imemode.exe"

@@ -105,6 +105,27 @@ wait_calls $((before + 2)) "restore: leaving sidebar"; settle
 [ "$(last_call)" = "pop" ] || fail "restore: focus-out must pop, got '$(last_call)'"
 [ "$(calls)" = "$((before + 2))" ] || fail "restore round trip must be exactly push+pop"
 
+echo "=== [5b/8] Enter-style session switch: sidebar -> other session's sidebar keeps English ==="
+t new-session -d -s other -x 120 -y 40 "sleep 300"
+t split-window -d -h -t other "sleep 300"
+other_side="$(t list-panes -t other -F '#{pane_id}' | tail -1)"
+t select-pane -t "$other_side" -T dotfiles-session-sidebar
+t select-pane -t "$other_side"             # other's active pane is its sidebar (no client there: no hook)
+other_work="$(t list-panes -t other -F '#{pane_id}' | head -1)"
+t select-pane -t "$sidebar"
+wait_calls $((before + 3)) "back into the sidebar before switching"; settle
+[ "$(last_call)" = "push" ] || fail "re-entry must push"
+before="$(calls)"
+t switch-client -t other                   # lands on other's sidebar: focus-in (push) then focus-out (pop)
+sleep 1.0
+[ "$(last_call)" = "push" ] || fail "sidebar -> sidebar switch must end with push, got '$(last_call)'"
+[ "$(calls)" = "$((before + 1))" ] || fail "sidebar -> sidebar switch must make exactly one call (push), got $(( $(calls) - before ))"
+t select-pane -t "$other_work"
+wait_calls $((before + 2)) "leaving other's sidebar"; settle
+[ "$(last_call)" = "pop" ] || fail "leaving the other sidebar must pop, got '$(last_call)'"
+t switch-client -t main; t select-pane -t "$work"; settle
+t kill-session -t other; settle
+
 echo "=== [6/8] real sidebar pane (title set by the product): quick-jump in/out ==="
 t select-pane -t "$work"; settle
 t kill-pane -t "$sidebar"

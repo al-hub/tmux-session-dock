@@ -82,6 +82,27 @@ case "$verb" in
         ;;
 esac
 
+# Debug trail: `touch ${XDG_RUNTIME_DIR:-/tmp}/tmux-session-dock-ime.debug` to log
+# every invocation (verb, focused client's pane, saved state) next to it.
+DEBUG_FLAG="${XDG_RUNTIME_DIR:-/tmp}/tmux-session-dock-ime.debug"
+if [ -e "$DEBUG_FLAG" ]; then
+    printf '%s pid=%s verb=%s client=[%s]\n' "$(date +%T.%N)" "$$" "$verb" \
+        "$(tmux list-clients -F '#{session_name}:#{pane_id}:#{pane_title}:#{client_flags}' 2>/dev/null | tr '\n' ' ')" >> "$DEBUG_FLAG.log"
+fi
+
+# A pop is provisional. tmux delivers the new pane's focus-in before the old
+# pane's focus-out, so on a sidebar -> sidebar move (Enter switches sessions
+# and lands on the other session's sidebar) the pop would undo the push that
+# just ran. Wait a moment, then skip when a focused client still shows a
+# sidebar; the state stays remembered for the real leave. Also covers an
+# Alt-Tab away from the terminal (tmux still shows the sidebar as active).
+if [ "$verb" = "pop" ] && [ -n "${TMUX:-}" ]; then
+    sleep 0.2
+    if tmux list-clients -F '#{client_flags}|#{pane_title}' 2>/dev/null | grep -F 'focused' | grep -qF '|dotfiles-session-sidebar'; then
+        exit 0
+    fi
+fi
+
 be="$(backend)"
 
 if [ "$verb" = "backend" ]; then echo "$be"; exit 0; fi
