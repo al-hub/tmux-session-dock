@@ -49,7 +49,15 @@ coproc ATTACHED {
 }
 CLIENT_PID="$ATTACHED_PID"
 
-ai_pane="$(tmuxc list-panes -t '=node-codex:' -F '#{pane_id}|#{pane_current_command}' | awk -F'|' '$2 == "node" { print $1; exit }')"
+# tmux starts the command through a shell; the pane reports "node" only once
+# that wrapper has exec'd it, which can take longer than the client attach.
+ai_pane=""
+node_deadline=$(( $(date +%s) + 8 ))
+while [ "$(date +%s)" -lt "$node_deadline" ]; do
+    ai_pane="$(tmuxc list-panes -t '=node-codex:' -F '#{pane_id}|#{pane_current_command}' | awk -F'|' '$2 == "node" { print $1; exit }')"
+    [ -n "$ai_pane" ] && break
+    sleep 0.1
+done
 [ -n "$ai_pane" ] || fail_test 'Codex-like pane is not reported as node'
 
 deadline=$(( $(date +%s) + 12 ))

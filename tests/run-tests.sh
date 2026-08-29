@@ -117,6 +117,11 @@ health_check || exit 1
 #     server %0 is a real pane (often in a session literally named "0"), and
 #     the product binds to TMUX_PANE as its own pane, so discovery and restore
 #     tests fail only on the developer's box, never in CI
+#   - /mnt/* PATH entries dropped: WSL appends the Windows PATH (dozens of
+#     /mnt/c/... directories on a 9p mount). A zsh started in a fresh
+#     ZDOTDIR stats every PATH directory before its first prompt; on 9p that
+#     takes 10-15 s, so subpane shells never answer within a test's budget.
+#     Nothing under test needs a Windows binary.
 # ------------------------------------------------------------------------------
 TEST_HOME="$(mktemp -d "${TMPDIR:-/tmp}/session-dock-test-home.XXXXXX")"
 # Every test gets its own HOME under TEST_HOME. The product persists state
@@ -138,6 +143,12 @@ BASHRC
 }
 export TERM=xterm-256color
 unset TMUX TMUX_PANE
+# A shell started inside a dock-managed tmux may carry DOTFILES_SIDEBAR_* from
+# an older dock; a test server started from here would inherit them as its
+# initial global environment.
+while IFS= read -r _var; do unset "$_var"; done < <(compgen -e DOTFILES_SIDEBAR_ 2>/dev/null || true)
+PATH="$(printf '%s' "$PATH" | tr ':' '\n' | grep -v '^/mnt/' | paste -sd: -)"
+export PATH
 # Shared AI observer state files and locks go under the per-run HOME instead of
 # /tmp, so a test server that dies without cleanup leaves nothing behind.
 export TMUX_SESSION_LAUNCHER_LOCK_ROOT="$TEST_HOME/observer-locks"
