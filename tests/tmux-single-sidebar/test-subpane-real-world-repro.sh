@@ -13,6 +13,13 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 TEST_SOCKET="dock-test-repro-$$"
 BIN_SCRIPT="$REPO_ROOT/scripts/tmux-session-dock"
 source "$REPO_ROOT/tests/lib/subpane_topology_oracle.sh"
+stack_or_flag() {   # stack_or_flag <label> <window> <position> <h1> <h2>
+    local label="$1" window="$2" position="$3"; shift 3
+    if ! subpane_oracle_assert_stack "$TEST_SOCKET" "$window" 2 "$position" "$@"; then
+        echo "🚨 [DETECTED BUG] $label: slot order/height/column violated ($*)"
+        suite_failed=1
+    fi
+}
 suite_failed=0
 STATE_DIR="$(mktemp -d /tmp/subpane-real-world-state.XXXXXX)"
 export TMUX_SESSION_SIDEBAR_SUBPANE_HEIGHT_STATE_FILE="$STATE_DIR/height"
@@ -77,6 +84,8 @@ for i in 1 2 3 4; do
     if [ "$cur_h1" -ne "$CUSTOM_H1" ] || [ "$cur_h2" -ne "$CUSTOM_H2" ]; then
         swap_failed=1
     fi
+    if [ $((i % 2)) -eq 1 ]; then swap_pos=top; else swap_pos=bottom; fi
+    stack_or_flag "swap $i" "$win1" "$swap_pos" "$CUSTOM_H1" "$CUSTOM_H2"
 done
 
 if [ "$swap_failed" -eq 1 ]; then
@@ -117,6 +126,7 @@ TMUX_SESSION_LAUNCHER_SOCKET="$TEST_SOCKET" bash -c "
     ensure_sidebar_subpane_window '$win2' '$s2_bar'
 "
 subpane_oracle_assert_leased_pool "$TEST_SOCKET" 2 "$win2" "${canonical_ids[@]}"
+stack_or_flag "migration to sess2 (top)" "$win2" top "$CUSTOM_H1" "$CUSTOM_H2"
 
 s2_count="$(tmux -L "$TEST_SOCKET" list-panes -t "$win2" -F '#{@dotfiles_sidebar_subpane}' | grep -c '1' || true)"
 s2_h1="$(tmux -L "$TEST_SOCKET" display-message -p -t "$sp1" '#{pane_height}')"
@@ -130,6 +140,7 @@ TMUX_SESSION_LAUNCHER_SOCKET="$TEST_SOCKET" bash -c "
     ensure_sidebar_subpane_window '$win1' '$s1_bar'
 "
 subpane_oracle_assert_leased_pool "$TEST_SOCKET" 2 "$win1" "${canonical_ids[@]}"
+stack_or_flag "roundtrip back to sess1 (top)" "$win1" top "$CUSTOM_H1" "$CUSTOM_H2"
 
 s1_count_back="$(tmux -L "$TEST_SOCKET" list-panes -t "$win1" -F '#{@dotfiles_sidebar_subpane}' | grep -c '1' || true)"
 launcher_h_back="$(tmux -L "$TEST_SOCKET" display-message -p -t "$s1_bar" '#{pane_height}')"

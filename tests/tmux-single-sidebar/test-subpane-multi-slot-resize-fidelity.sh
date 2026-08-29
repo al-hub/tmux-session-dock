@@ -32,6 +32,11 @@ export TMUX_SESSION_SIDEBAR_SUBPANE_POSITION_STATE_FILE="$STATE_DIR/position"
 export TMUX_SESSION_SIDEBAR_SUBPANE_ENABLED_STATE_FILE="$STATE_DIR/enabled"
 
 tmuxc() { tmux -L "$SOCKET" "$@"; }
+source "$REPO_ROOT/tests/lib/subpane_topology_oracle.sh"
+stack() {   # stack <window> <position> <h1> <h2> <h3>  - order + heights + column oracle
+    local window="$1" position="$2"; shift 2
+    subpane_oracle_assert_stack "$SOCKET" "$window" 3 "$position" "$@" || { echo "FAIL: stack oracle: $window $position $*" >&2; exit 1; }
+}
 
 slot_pane() {
     local window_id="$1" slot="$2"
@@ -101,6 +106,7 @@ source "$REPO_ROOT/scripts/lib/sidebar_port_tmux.sh"
 source "$REPO_ROOT/scripts/lib/sidebar_subpane_hub.sh"
 source "$REPO_ROOT/scripts/lib/sidebar_switch.sh"
 
+stack "$win1" bottom "${slot1_heights[1]}" "${slot1_heights[2]}" "${slot1_heights[3]}"
 remember_sidebar_subpane_height_for_window "$win1"
 saved_total_height="$(tmuxc show-option -gqv @dotfiles_sidebar_subpane_height)"
 for slot in 1 2 3; do
@@ -124,12 +130,14 @@ for slot in 1 2 3; do
     assert_eq "slot $slot height after Sidebar OFF/ON" \
         "${slot1_heights[$slot]}" "$(slot_height "${slot1_panes[$slot]}")"
 done
+stack "$win1" bottom "${slot1_heights[1]}" "${slot1_heights[2]}" "${slot1_heights[3]}"
 
 TMUX_PANE="$sidebar1" bash "$REPO_ROOT/scripts/tmux-session-dock" --swap-subpane-position
 for slot in 1 2 3; do
     assert_eq "slot $slot height after first position swap" \
         "${slot1_heights[$slot]}" "$(slot_height "${slot1_panes[$slot]}")"
 done
+stack "$win1" top "${slot1_heights[1]}" "${slot1_heights[2]}" "${slot1_heights[3]}"
 
 tmuxc -f /dev/null new-session -d -s sess2 -n main -x 140 -y 70 'sleep 120'
 win2="$(tmuxc display-message -p -t sess2:main '#{window_id}')"
@@ -150,6 +158,7 @@ for slot in 1 2 3; do
     assert_eq "slot $slot height after Presenter Window migration" \
         "${slot1_heights[$slot]}" "${slot2_heights[$slot]}"
 done
+stack "$win2" top "${slot1_heights[1]}" "${slot1_heights[2]}" "${slot1_heights[3]}"
 
 # Resize every slot after migration; this catches implementations that only
 # remember the first visible slot or only update the aggregate height.
@@ -177,5 +186,6 @@ for slot in 1 2 3; do
     assert_eq "slot $slot height after second position swap" \
         "${slot2_heights[$slot]}" "$(slot_height "${slot2_panes[$slot]}")"
 done
+stack "$win2" bottom "${slot2_heights[1]}" "${slot2_heights[2]}" "${slot2_heights[3]}"
 
 echo "PASS: 3-slot per-slot resize intent survived snapshots, migration, and position swaps"

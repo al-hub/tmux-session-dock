@@ -2,5 +2,5 @@
 set -euo pipefail
 
 TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-exec env TMUX_KEYBOARD_E2E_SCENARIO=subpane-multi-slot-enter \
+exec env TMUX_KEYBOARD_E2E_SCENARIO=subpane-multi-slot-enter PTY_BRIDGE_ROWS=40 \
     bash "$TEST_DIR/test-keyboard-e2e.sh"

@@ -75,3 +75,51 @@ subpane_oracle_assert_leased_pool() {
         return 1
     }
 }
+
+# Stack oracle: the Subpane Slots of one Presenter Window form a stack in the
+# dock column whose order never changes (slot 1 on top, slot N at the bottom -
+# a top/bottom position swap moves the whole stack, it does not reverse it)
+# and whose per-slot heights are the user's last intents.
+#   subpane_oracle_assert_stack <socket> <window> <count> <top|bottom> [<h1> <h2> ...]
+# Prints "oracle: ..." and dumps the window's panes on the first violation.
+subpane_oracle_assert_stack() {
+    local socket="$1" window="$2" count="$3" position="$4"
+    shift 4
+    local -a heights=("$@")
+    local panes sidebar_top sidebar_left slots slot_count order expected i slot actual
+
+    panes="$(tmux -L "$socket" list-panes -t "$window" \
+        -F '#{pane_id}|#{pane_title}|#{@dotfiles_sidebar_pane}|#{@dotfiles_sidebar_subpane}|#{@dotfiles_subpane_slot}|#{pane_top}|#{pane_left}|#{pane_height}' 2>/dev/null)"
+    fail() {
+        echo "oracle: $1" >&2
+        printf '%s\n' "$panes" | awk -F '|' '{ printf "  %s title=%s sidebar=%s subpane=%s slot=%s top=%s left=%s height=%s\n", $1, $2, $3, $4, $5, $6, $7, $8 }' >&2
+        return 1
+    }
+
+    sidebar_top="$(printf '%s\n' "$panes" | awk -F '|' '!done && ($2 == "dotfiles-session-sidebar" || $3 == "1") { print $6; done = 1 }')"
+    sidebar_left="$(printf '%s\n' "$panes" | awk -F '|' '!done && ($2 == "dotfiles-session-sidebar" || $3 == "1") { print $7; done = 1 }')"
+    [ -n "$sidebar_top" ] || { fail "no sidebar pane in $window"; return 1; }
+
+    # slot|top|left|height, sorted by pane_top
+    slots="$(printf '%s\n' "$panes" | awk -F '|' '$4 == "1" && $5 ~ /^[0-9]+$/ { print $5 "|" $6 "|" $7 "|" $8 }' | sort -t '|' -k2,2n)"
+    slot_count="$(printf '%s\n' "$slots" | grep -c . || true)"
+    [ "$slot_count" -eq "$count" ] || { fail "expected $count Subpane Slots in $window, found $slot_count"; return 1; }
+
+    order="$(printf '%s\n' "$slots" | cut -d '|' -f 1 | paste -sd ' ')"
+    expected="$(seq 1 "$count" | paste -sd ' ')"
+    [ "$order" = "$expected" ] || { fail "slot order top->bottom is [$order], expected [$expected] (position=$position)"; return 1; }
+
+    while IFS='|' read -r slot top left height; do
+        [ -n "$slot" ] || continue
+        [ "$left" = "$sidebar_left" ] || { fail "slot $slot is at column $left, sidebar column is $sidebar_left"; return 1; }
+        actual="${heights[$((slot - 1))]:-}"
+        if [ -n "$actual" ] && [ "$height" != "$actual" ]; then
+            fail "slot $slot height is $height, expected $actual (position=$position)"; return 1
+        fi
+        case "$position" in
+            top)    [ "$top" -lt "$sidebar_top" ] || { fail "slot $slot (top=$top) is not above the sidebar (top=$sidebar_top) while position=top"; return 1; } ;;
+            bottom) [ "$top" -gt "$sidebar_top" ] || { fail "slot $slot (top=$top) is not below the sidebar (top=$sidebar_top) while position=bottom"; return 1; } ;;
+        esac
+    done <<< "$slots"
+    return 0
+}

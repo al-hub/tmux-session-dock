@@ -144,6 +144,14 @@ int main(int argc, char **argv)
     unsigned char bytes[4096];
     int index;
 
+    /* Scenarios that stack several Subpane Slots with distinct heights need
+     * more rows than the compact default; PTY_BRIDGE_ROWS / PTY_BRIDGE_COLS
+     * override the attached terminal size. */
+    if (getenv("PTY_BRIDGE_ROWS") && atoi(getenv("PTY_BRIDGE_ROWS")) > 0)
+        window.ws_row = (unsigned short)atoi(getenv("PTY_BRIDGE_ROWS"));
+    if (getenv("PTY_BRIDGE_COLS") && atoi(getenv("PTY_BRIDGE_COLS")) > 0)
+        window.ws_col = (unsigned short)atoi(getenv("PTY_BRIDGE_COLS"));
+
     for (index = 1; index < argc; index++) {
         if (!strcmp(argv[index], "--log") && index + 1 < argc)
             log_path = argv[++index];

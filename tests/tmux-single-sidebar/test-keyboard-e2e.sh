@@ -516,41 +516,67 @@ run_subpane_entry_priority_contract()
 run_subpane_multi_slot_enter_reproduction()
 {
     local anchor_window target_window target sidebar_pane selected before_generation
-    local slot pane requested expected actual
-    local -a slots=(1 2 3)
-    # The attached PTY is intentionally compact; keep the three distinct
+    local slot pane requested expected actual position
+    local slot_total="${TMUX_KEYBOARD_E2E_SUBPANE_COUNT:-3}"
+    local -a slots=() requested_heights=(0)
+    # The attached PTY is intentionally compact (24 rows); keep the distinct
     # intents within its vertical budget so tmux clamping is not a false fail.
-    local -a requested_heights=(0 4 4 4)
+    # Heights differ per slot on purpose: equal heights cannot tell a
+    # reordered or shuffled stack from an intact one.
+    # Production clamps a slot to >= 4 rows (sidebar_subpane_hub.sh), so every
+    # intent here is >= 4.
+    case "$slot_total" in
+        2) slots=(1 2);   requested_heights=(0 4 7) ;;
+        *) slots=(1 2 3); requested_heights=(0 4 5 6) ;;
+    esac
     declare -A expected_heights
+    source "$REPO_ROOT/tests/lib/subpane_topology_oracle.sh"
+    stack_ok() {   # stack_ok <label> <window> <position>
+        local label="$1" window="$2" pos="$3" h=()
+        for slot in "${slots[@]}"; do h+=("${expected_heights[$slot]}"); done
+        subpane_oracle_assert_stack "$SOCKET" "$window" "$slot_total" "$pos" "${h[@]}" || {
+            printf 'FAIL: %s: slot stack order/height violated (position=%s)\n' "$label" "$pos" >&2
+            return 1
+        }
+    }
 
     # This is the user-facing seam missing from the lower-level fidelity
     # tests: resize every slot, then switch sessions through the attached
     # Sidebar TUI with a real Enter key.
-    tmuxc set-option -gq @session-dock-subpane-count 3
+    tmuxc set-option -gq @session-dock-subpane-count "$slot_total"
     focus_sidebar_via_prefix
     wait_for_sidebar_input_ready
     send_keys 's'
-    wait_until 'multi-slot Enter subpane stack opened' 3 count_subpanes
+    wait_until 'multi-slot Enter subpane stack opened' "$slot_total" count_subpanes
 
     anchor_window="$(client_window_id)"
     sidebar_pane="$(sidebar_pane_id)"
+    # Resize bottom-up: tmux takes the rows for a taller pane from the pane
+    # below it, so resizing the last slot first keeps earlier slots intact.
     while IFS='|' read -r pane slot; do
         [ -n "$pane" ] || continue
-        requested="${requested_heights[$slot]}"
-        tmuxc resize-pane -t "$pane" -y "$requested"
+        tmuxc resize-pane -t "$pane" -y "${requested_heights[$slot]}"
+    done < <(tmuxc list-panes -t "$anchor_window" -F '#{pane_id}|#{@dotfiles_subpane_slot}' |
+        awk -F '|' -v n="$slot_total" '$2 >= 1 && $2 <= n { print }' | sort -t '|' -k2,2nr)
+    # The user's intent is whatever the live layout settled on; it only has
+    # to be distinct per slot so the oracle can tell the slots apart.
+    while IFS='|' read -r pane slot; do
+        [ -n "$pane" ] || continue
         expected="$(tmuxc display-message -p -t "$pane" '#{pane_height}')"
         expected_heights[$slot]="$expected"
-        [ "$expected" -eq "$requested" ] || {
-            printf 'FAIL: slot %s could not be resized to %s (got %s)\n' "$slot" "$requested" "$expected" >&2
-            return 1
-        }
     done < <(tmuxc list-panes -t "$anchor_window" -F '#{pane_id}|#{@dotfiles_subpane_slot}' |
-        awk -F '|' '$2 >= 1 && $2 <= 3 { print }' | sort -t '|' -k2,2n)
-
-    [ "${#expected_heights[@]}" -eq 3 ] || {
-        printf 'FAIL: expected three resized Subpane Slots, got %s\n' "${#expected_heights[@]}" >&2
+        awk -F '|' -v n="$slot_total" '$2 >= 1 && $2 <= n { print }' | sort -t '|' -k2,2n)
+    [ "$(printf '%s\n' "${expected_heights[@]}" | sort -u | wc -l)" -eq "$slot_total" ] || {
+        printf 'FAIL: slot heights must be distinct for this scenario, got %s\n' "${expected_heights[*]}" >&2
         return 1
     }
+
+    [ "${#expected_heights[@]}" -eq "$slot_total" ] || {
+        printf 'FAIL: expected %s resized Subpane Slots, got %s\n' "$slot_total" "${#expected_heights[@]}" >&2
+        return 1
+    }
+    position=bottom
+    stack_ok "after opening and resizing the stack" "$anchor_window" "$position" || return 1
 
     # Exercise the production global Sidebar toggle three times. The lease
     # must be fully released while OFF and all three slot intents must return
@@ -568,7 +594,7 @@ run_subpane_multi_slot_enter_reproduction()
         tmuxc run-shell -b "$LAUNCHER --toggle-sidebar"
         wait_until "multi-slot Sidebar ON $iteration" 1 count_sidebars
         wait_for_sidebar_input_ready
-        wait_until "multi-slot Sidebar ON lease $iteration" 3 count_subpanes
+        wait_until "multi-slot Sidebar ON lease $iteration" "$slot_total" count_subpanes
         for slot in "${slots[@]}"; do
             actual="$(tmuxc list-panes -t "$anchor_window" -F '#{@dotfiles_subpane_slot}|#{pane_height}' |
                 awk -F '|' -v wanted="$slot" '!done && $1 == wanted { print $2; done = 1 }')"
@@ -578,8 +604,9 @@ run_subpane_multi_slot_enter_reproduction()
                 return 1
             }
         done
+        stack_ok "after Sidebar OFF/ON toggle $iteration" "$anchor_window" "$position" || return 1
     done
-    printf 'PASS: 3-slot heights survived three real Sidebar OFF/ON toggles\n'
+    printf 'PASS: %s-slot heights survived three real Sidebar OFF/ON toggles\n' "$slot_total"
 
     multi_slot_position()
     {
@@ -619,8 +646,10 @@ run_subpane_multi_slot_enter_reproduction()
                 return 1
             }
         done
+        position="$expected_position"
+        stack_ok "after position swap $iteration" "$anchor_window" "$position" || return 1
     done
-    printf 'PASS: 3-slot heights survived six real top/bottom position swaps\n'
+    printf 'PASS: %s-slot heights survived six real top/bottom position swaps\n' "$slot_total"
 
     target='subpane-enter-1'
     wait_for_sidebar_row "$target"
@@ -644,7 +673,7 @@ run_subpane_multi_slot_enter_reproduction()
     wait_for_action_generation_change "$before_generation"
     wait_until 'multi-slot Enter target session' "$target" client_session
     wait_for_sidebar_input_ready
-    wait_until 'multi-slot Enter target lease' 3 count_subpanes
+    wait_until 'multi-slot Enter target lease' "$slot_total" count_subpanes
 
     target_window="$(client_window_id)"
     for slot in "${slots[@]}"; do
@@ -656,6 +685,7 @@ run_subpane_multi_slot_enter_reproduction()
             return 1
         }
     done
+    stack_ok "after real Enter switch into $target" "$target_window" "$position" || return 1
 
     target='keyboard-anchor'
     wait_for_sidebar_row "$target"
@@ -676,7 +706,7 @@ run_subpane_multi_slot_enter_reproduction()
     wait_for_action_generation_change "$before_generation"
     wait_until 'multi-slot Enter anchor return' "$target" client_session
     wait_for_sidebar_input_ready
-    wait_until 'multi-slot Enter anchor lease' 3 count_subpanes
+    wait_until 'multi-slot Enter anchor lease' "$slot_total" count_subpanes
 
     anchor_window="$(client_window_id)"
     for slot in "${slots[@]}"; do
@@ -688,8 +718,9 @@ run_subpane_multi_slot_enter_reproduction()
             return 1
         }
     done
+    stack_ok "after Enter roundtrip back to the anchor" "$anchor_window" "$position" || return 1
 
-    printf 'PASS: 3-slot mouse-resize intents survived real Enter session switch and return\n'
+    printf 'PASS: %s-slot mouse-resize intents survived real Enter session switch and return\n' "$slot_total"
 }
 
 run_delete_zero_stale_row_reproduction()

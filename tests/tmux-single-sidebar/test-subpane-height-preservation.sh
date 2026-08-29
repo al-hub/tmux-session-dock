@@ -67,6 +67,13 @@ s2="$(slot_pane "$win1" 2)"
 # after-resize-pane seam rather than directly writing the height options.
 tmuxc resize-pane -t "$s1" -y 8
 tmuxc resize-pane -t "$s2" -y 11
+# Order/column oracle on the live stack before the hook runs. (This fixture's
+# sidebar is a mock without @dotfiles_sidebar_enabled, so the sync below parks
+# the slots in the hub; the test only needs the heights it saved.)
+source "$REPO_ROOT/tests/lib/subpane_topology_oracle.sh"
+subpane_oracle_assert_stack "$SOCKET" "$win1" 2 bottom \
+    "$(tmuxc display-message -p -t "$s1" '#{pane_height}')" "$(tmuxc display-message -p -t "$s2" '#{pane_height}')" \
+    || { echo 'FAIL: stack oracle after resize (order/column)' >&2; exit 1; }
 bash "$REPO_ROOT/scripts/tmux-session-dock" --sync-sidebar-layout "$win1" manual-resize
 
 h1="$(tmuxc show-option -gqv @dotfiles_subpane_slot_1_height)"
@@ -94,5 +101,6 @@ s2_target="$(slot_pane "$win2" 2)"
 [ -n "$s2_target" ] || { echo 'FAIL: target slot 2 pane missing' >&2; exit 1; }
 assert_eq 'slot 1 height after Enter switch' "$h1" "$(tmuxc display-message -p -t "$s1_target" '#{pane_height}')"
 assert_eq 'slot 2 height after Enter switch' "$h2" "$(tmuxc display-message -p -t "$s2_target" '#{pane_height}')"
+subpane_oracle_assert_stack "$SOCKET" "$win2" 2 bottom "$h1" "$h2" || { echo 'FAIL: stack oracle after Enter switch (order/heights)' >&2; exit 1; }
 
 echo 'PASS: two-slot mouse heights survived hook, position swap, and Enter session switch'
