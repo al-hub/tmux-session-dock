@@ -88,7 +88,7 @@ if [ "$handover_success" != "true" ]; then
     exit 1
 fi
 
-target_marker_leftover="$(tmux -L "$SOCKET" show-option -wqv -t "$win_a" @dotfiles_sidebar_target_marker 2>/dev/null || true)"
+target_marker_leftover="$(tmux -L "$SOCKET" show-environment -gh "DOTFILES_SIDEBAR_TARGET_MARKER_${win_a//[^A-Za-z0-9]/_}" 2>/dev/null | sed -n 's/^[^=]*=//p')"
 if [ -n "$target_marker_leftover" ]; then
     echo "FAIL: @dotfiles_sidebar_target_marker was not consumed/cleared, found '$target_marker_leftover'"
     exit 1

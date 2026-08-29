@@ -78,7 +78,7 @@ test_context_snapshot()
     local clients panes operation owner window_id sidebar geometry work
     clients="$(tmuxc list-clients -F 'control=#{client_control_mode}|tty=#{client_tty}|session=#{session_name}|window=#{window_id}|pane=#{pane_id}|active=#{window_active}|prefix=#{client_prefix}' 2>/dev/null | tr '\n' ';' || true)"
     panes="$(tmuxc list-panes -a -F 'session=#{session_name}|window=#{window_id}|pane=#{pane_id}|title=#{pane_title}|pid=#{pane_pid}|active=#{pane_active}|dead=#{pane_dead}' 2>/dev/null | tr '\n' ';' || true)"
-    operation="$(tmuxc show-option -gqv @dotfiles_sidebar_operation 2>/dev/null || true)"
+    operation="$(tmuxc show-environment -gh DOTFILES_SIDEBAR_OPERATION 2>/dev/null | sed -n 's/^[^=]*=//p')"
     owner="$(tmuxc show-option -gqv @dotfiles_sidebar_owner_client 2>/dev/null || true)"
     window_id="$(client_window_id 2>/dev/null || true)"
     sidebar="$(sidebar_pane_id 2>/dev/null || true)"
@@ -309,13 +309,37 @@ run_subpane_reproduction()
     wait_until 'subpane opened' 1 count_subpanes
 
     # Test Subpane Hub process persistence across toggles
-    local win_id sub_p capture_text
+    local win_id sub_p capture_text persist_token="" persist_pid=""
     win_id="$(client_window_id 2>/dev/null || true)"
     sub_p="$(tmuxc list-panes -t "$win_id" -F '#{pane_id}|#{@dotfiles_sidebar_subpane}' 2>/dev/null | awk -F '|' '$2 == "1" { print $1; exit }')"
     if [ -n "$sub_p" ]; then
-        sleep 0.5
-        tmuxc send-keys -t "$sub_p" 'echo UNIQUE_SUBPANE_MARKER_12345' C-m
-        sleep 0.5
+        # The subpane shell may still be starting (bash on a CI runner reads a
+        # slow /etc/bash.bashrc and discards typeahead while readline
+        # initialises), so type the marker until the shell has echoed it.
+        # The typed command carries the marker split by quotes, so only the
+        # shell's echoed OUTPUT contains the bare marker: a wrapped input line
+        # cannot satisfy the check. Typeahead that reaches a shell still
+        # initialising is discarded (bash flushes the tty on startup), hence
+        # the retries.
+        local marker_attempt marker_probe marker_seen=false
+        for marker_attempt in 1 2 3 4 5 6; do
+            tmuxc send-keys -t "$sub_p" "echo UNIQUE_SUBPANE_'MARKER'_12345" C-m
+            for marker_probe in $(seq 1 20); do
+                if tmuxc capture-pane -pt "$sub_p" -S - 2>/dev/null | grep -q 'UNIQUE_SUBPANE_MARKER_12345'; then
+                    marker_seen=true
+                    break 2
+                fi
+                sleep 0.1
+            done
+        done
+        [ "$marker_seen" = true ] || { printf 'ERROR: subpane shell never echoed the marker\n' >&2; return 1; }
+        # Process persistence is proven by shell state, not by scrollback: tmux
+        # may rewrap and drop history lines while the pane is parked in the
+        # hub window at another width.
+        persist_token="subpane-$$-$RANDOM"
+        tmuxc send-keys -t "$sub_p" "export SUBPANE_PERSIST_TOKEN=$persist_token" C-m
+        persist_pid="$(tmuxc display-message -p -t "$sub_p" '#{pane_pid}')"
+        sleep 0.3
     fi
 
     test_log "step=subpane.toggle_off_for_persistence_test"
@@ -337,8 +361,21 @@ run_subpane_reproduction()
     sub_p="$(tmuxc list-panes -t "$win_id" -F '#{pane_id}|#{@dotfiles_sidebar_subpane}' 2>/dev/null | awk -F '|' '$2 == "1" { print $1; exit }')"
     [ -n "$sub_p" ] || { printf 'ERROR: subpane not found on reopen\n' >&2; return 1; }
 
+    if [ "$(tmuxc display-message -p -t "$sub_p" '#{pane_pid}')" != "${persist_pid:-}" ]; then
+        printf 'ERROR: Subpane Hub pane process changed across toggle (pid %s -> %s)\n' "${persist_pid:-?}" "$(tmuxc display-message -p -t "$sub_p" '#{pane_pid}')" >&2
+        return 1
+    fi
+    local token_probe token_seen=false
+    tmuxc send-keys -t "$sub_p" 'echo "T:$SUBPANE_PERSIST_TOKEN"' C-m
+    for token_probe in $(seq 1 30); do
+        if tmuxc capture-pane -pt "$sub_p" -S - 2>/dev/null | grep -q "^T:${persist_token}\$"; then
+            token_seen=true
+            break
+        fi
+        sleep 0.1
+    done
     capture_text="$(tmuxc capture-pane -pt "$sub_p" -S - 2>/dev/null || true)"
-    if ! echo "$capture_text" | grep -q "UNIQUE_SUBPANE_MARKER_12345"; then
+    if [ "$token_seen" != true ]; then
         printf 'ERROR: Subpane Hub process was not persistent across toggle! Output was: %s\n' "$capture_text" >&2
         return 1
     fi
@@ -1148,24 +1185,34 @@ wait_for_sessions()
 
 action_generation()
 {
-    local window_id
+    local window_id value
     window_id="$(client_window_id)"
-    tmuxc show-option -wqv -t "$window_id" '@dotfiles_sidebar_action_generation' 2>/dev/null ||
-        tmuxc show-option -gqv '@dotfiles_sidebar_action_generation' 2>/dev/null || true
+    value="$(env_flag ACTION_GENERATION "$window_id")"
+    [ -n "$value" ] || value="$(env_flag ACTION_GENERATION)"
+    printf '%s\n' "$value"
+}
+
+# Runtime flags live in the tmux environment (no client redraw on write).
+env_flag()
+{
+    local name="$1" scope="${2:-}"
+    scope="${scope//[^A-Za-z0-9]/_}"
+    tmuxc show-environment -gh "DOTFILES_SIDEBAR_${name}${scope:+_$scope}" 2>/dev/null | sed -n 's/^[^=]*=//p'
 }
 
 input_ready()
 {
-    local window_id
+    local window_id value
     window_id="$(client_window_id)"
-    tmuxc show-option -wqv -t "$window_id" '@dotfiles_sidebar_input_ready' 2>/dev/null ||
-        tmuxc show-option -gqv '@dotfiles_sidebar_input_ready' 2>/dev/null || true
+    value="$(env_flag INPUT_READY "$window_id")"
+    [ -n "$value" ] || value="$(env_flag INPUT_READY)"
+    printf '%s\n' "$value"
 }
 
 transition_idle()
 {
     local state
-    state="$(tmuxc show-option -gqv '@dotfiles_sidebar_transition' 2>/dev/null || true)"
+    state="$(tmuxc show-environment -gh DOTFILES_SIDEBAR_TRANSITION 2>/dev/null | sed -n 's/^[^=]*=//p')"
     case "$state" in
         *'result=running'*|*'result=committed'*) printf 'false\n'; return 1 ;;
         *) printf 'true\n'; return 0 ;;
@@ -1198,7 +1245,7 @@ prompt_ready()
     if [ -n "$pane_id" ]; then
         window_id="$(tmuxc display-message -p -t "$pane_id" '#{window_id}' 2>/dev/null || true)"
         if [ -n "$window_id" ]; then
-            ready="$(tmuxc show-option -wqv -t "$window_id" '@dotfiles_sidebar_prompt_ready' 2>/dev/null || true)"
+            ready="$(env_flag PROMPT_READY "$window_id")"
             if [ "$ready" = "1" ]; then
                 printf '1\n'
                 return 0
@@ -1207,13 +1254,13 @@ prompt_ready()
     fi
     window_id="$(client_window_id || true)"
     if [ -n "$window_id" ]; then
-        ready="$(tmuxc show-option -wqv -t "$window_id" '@dotfiles_sidebar_prompt_ready' 2>/dev/null || true)"
+        ready="$(env_flag PROMPT_READY "$window_id")"
         if [ "$ready" = "1" ]; then
             printf '1\n'
             return 0
         fi
     fi
-    ready="$(tmuxc show-option -gqv '@dotfiles_sidebar_prompt_ready' 2>/dev/null || true)"
+    ready="$(env_flag PROMPT_READY)"
     if [ "$ready" = "1" ]; then
         printf '1\n'
         return 0
@@ -2255,7 +2302,7 @@ wait_for_session_count_above()
 
 operation_state()
 {
-    tmuxc show-option -gqv '@dotfiles_sidebar_operation' 2>/dev/null || true
+    env_flag OPERATION
 }
 
 wait_for_operation_quiet()

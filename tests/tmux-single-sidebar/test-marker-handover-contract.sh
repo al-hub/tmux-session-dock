@@ -29,8 +29,10 @@ source "$SCRIPT_DIR/scripts/lib/sidebar_switch.sh"
 echo "=== Test 1: sidebar_port_publish_marker_handover sets options on target window ==="
 sidebar_port_publish_marker_handover "$win_b" "sess-b"
 
-target_marker="$(tmux -L "$SOCKET" show-option -wqv -t "$win_b" @dotfiles_sidebar_target_marker)"
-selection_sync="$(tmux -L "$SOCKET" show-option -wqv -t "$win_b" @dotfiles_sidebar_selection_sync)"
+# Handover flags live in the tmux environment (no client redraw on write).
+flag_get() { tmux -L "$SOCKET" show-environment -gh "DOTFILES_SIDEBAR_${2}_${1//[^A-Za-z0-9]/_}" 2>/dev/null | sed -n 's/^[^=]*=//p'; }
+target_marker="$(flag_get "$win_b" TARGET_MARKER)"
+selection_sync="$(flag_get "$win_b" SELECTION_SYNC)"
 
 if [ "$target_marker" != "sess-b" ]; then
     echo "FAIL: expected @dotfiles_sidebar_target_marker to be 'sess-b', got '$target_marker'"
@@ -101,15 +103,15 @@ while [ ! -f "$RUN_DIR/ready_hot" ]; do
 done
 
 # Clear options on win_a
-tmux -L "$SOCKET" set-option -wu -t "$win_a" @dotfiles_sidebar_target_marker 2>/dev/null || true
-tmux -L "$SOCKET" set-option -wu -t "$win_a" @dotfiles_sidebar_selection_sync 2>/dev/null || true
+tmux -L "$SOCKET" set-environment -ghu "DOTFILES_SIDEBAR_TARGET_MARKER_${win_a//[^A-Za-z0-9]/_}" 2>/dev/null || true
+tmux -L "$SOCKET" set-environment -ghu "DOTFILES_SIDEBAR_SELECTION_SYNC_${win_a//[^A-Za-z0-9]/_}" 2>/dev/null || true
 
 # Execute hot switch to sess-a
 sidebar_switch_execute_hot "" "sess-a" "$win_a" "$sb_pane_a" 30
 
 # Verify marker handover published
-hot_target_marker="$(tmux -L "$SOCKET" show-option -wqv -t "$win_a" @dotfiles_sidebar_target_marker)"
-hot_selection_sync="$(tmux -L "$SOCKET" show-option -wqv -t "$win_a" @dotfiles_sidebar_selection_sync)"
+hot_target_marker="$(flag_get "$win_a" TARGET_MARKER)"
+hot_selection_sync="$(flag_get "$win_a" SELECTION_SYNC)"
 
 if [ "$hot_target_marker" != "sess-a" ]; then
     echo "FAIL: hot switch did not set @dotfiles_sidebar_target_marker (got '$hot_target_marker')"

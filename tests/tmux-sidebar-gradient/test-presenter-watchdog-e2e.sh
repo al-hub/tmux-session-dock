@@ -104,7 +104,8 @@ while [ "$(date +%s)" -lt "$deadline" ] && [ "$(heartbeat_epoch "$ai_pane")" = "
 printf 'PASS: a stalled presenter is logged (%s) and unblocked by the watchdog Escape\n' "${stalled_epoch:-age=?}"
 
 # With a prompt open the watchdog only logs; it must not type into the prompt.
-tmuxc set-option -wq -t "$shell_pane" @dotfiles_sidebar_prompt_ready 1
+shell_win="$(tmuxc display-message -p -t "$shell_pane" '#{window_id}')"
+tmuxc set-environment -gh "DOTFILES_SIDEBAR_PROMPT_READY_${shell_win//[^A-Za-z0-9]/_}" 1
 : > "$(stall_file_for shell1)"
 deadline=$(( $(date +%s) + STALE_SECONDS + 8 ))
 while [ "$(date +%s)" -lt "$deadline" ]; do
@@ -115,7 +116,7 @@ grep -q "pane=$shell_pane .*prompt_ready=1 action=logged" <<< "$(watchdog_log)" 
 if grep -q "pane=$shell_pane .*action=escape-sent" <<< "$(watchdog_log)"; then
     fail_test 'watchdog sent Escape into an open prompt'
 fi
-tmuxc set-option -wq -t "$shell_pane" @dotfiles_sidebar_prompt_ready 0
+tmuxc set-environment -gh "DOTFILES_SIDEBAR_PROMPT_READY_${shell_win//[^A-Za-z0-9]/_}" 0
 # Release the deliberately stalled presenter ourselves.
 tmuxc send-keys -t "$shell_pane" Escape
 printf 'PASS: a prompting presenter is logged but not touched\n'

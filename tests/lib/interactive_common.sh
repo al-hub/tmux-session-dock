@@ -43,7 +43,7 @@ test_context_snapshot() {
   local client_state pane_state operation_state_value
   client_state="$(tmuxc list-clients -F 'tty=#{client_tty}|session=#{session_name}|window=#{window_id}|pane=#{pane_id}|active=#{window_active}' 2>/dev/null | head -n 1 || true)"
   pane_state="$(tmuxc list-panes -a -F 'session=#{session_name}|window=#{window_id}|pane=#{pane_id}|title=#{pane_title}|pid=#{pane_pid}|active=#{pane_active}|dead=#{pane_dead}' 2>/dev/null | tr '\n' ';' || true)"
-  operation_state_value="$(tmuxc show-option -gqv @dotfiles_sidebar_operation 2>/dev/null || true)"
+  operation_state_value="$(tmuxc show-environment -gh DOTFILES_SIDEBAR_OPERATION 2>/dev/null | sed -n 's/^[^=]*=//p')"
   test_log "context client=[$client_state] operation=$operation_state_value panes=[$pane_state]"
 }
 
@@ -85,7 +85,7 @@ wait_until() {
   printf '%s\n' "failure_description=$description" > "$RUN_DIR/failure.txt"
   tmuxc list-clients -F '#{client_control_mode}|#{client_tty}|#{session_name}|#{window_id}|#{pane_id}' > "$RUN_DIR/failure-clients.txt" 2>/dev/null || true
   tmuxc list-panes -a -F '#{session_name}|#{window_id}|#{pane_id}|#{pane_title}|#{pane_pid}|#{pane_active}' > "$RUN_DIR/failure-panes.txt" 2>/dev/null || true
-  tmuxc show-options -g 2>/dev/null | grep -E 'dotfiles_sidebar|sidebar_force_refresh' > "$RUN_DIR/failure-options.txt" || true
+  { tmuxc show-options -g 2>/dev/null | grep -E 'dotfiles_sidebar|sidebar_force_refresh'; tmuxc show-environment -gh 2>/dev/null | grep '^DOTFILES_SIDEBAR'; } > "$RUN_DIR/failure-options.txt" || true
   tmuxc capture-pane -p -t "$(sidebar_pane_id 2>/dev/null || true)" 2>/dev/null || true
   return 1
 }
@@ -96,7 +96,7 @@ wait_for_selection_sync_ack() {
   # A tmux option lookup dominates the 2ms sleep, so cap the probe at the
   # same practical timeout as wait_until instead of accumulating minutes.
   for attempt in $(seq 1 150); do
-    ack="$(tmuxc show-options -wqv -t "$window_id" @dotfiles_sidebar_selection_sync_ack 2>/dev/null || true)"
+    ack="$(tmuxc show-environment -gh "DOTFILES_SIDEBAR_SELECTION_SYNC_ACK_${window_id//[^A-Za-z0-9]/_}" 2>/dev/null | sed -n "s/^[^=]*=//p")"
     if [ "$ack" = "$session_name" ]; then
       test_log "wait.end description=selection sync acknowledged window=$window_id session=$session_name attempts=$attempt result=pass"
       return 0
@@ -186,7 +186,7 @@ pane_count_at_least() { [ "$(tmuxc list-panes -t "=$1:" | wc -l)" -ge "$2" ]; }
 sidebar_ready() {
   local window_id="$(client_window_id)" pane_id pane_dead pane_pid
   [ "$(tmuxc show-options -wqv -t "$window_id" @dotfiles_sidebar_ready 2>/dev/null || true)" = 1 ] ||
-    [ "$(tmuxc show-options -wqv -t "$window_id" @dotfiles_sidebar_input_ready 2>/dev/null || true)" = 1 ] || {
+    [ "$(tmuxc show-environment -gh "DOTFILES_SIDEBAR_INPUT_READY_${window_id//[^A-Za-z0-9]/_}" 2>/dev/null | sed -n 's/^[^=]*=//p')" = 1 ] || {
       pane_id="$(sidebar_pane_id)"
       [ -n "$pane_id" ] || return 1
       pane_dead="$(tmuxc display-message -p -t "$pane_id" '#{pane_dead}' 2>/dev/null || true)"

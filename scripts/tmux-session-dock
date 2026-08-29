@@ -122,17 +122,85 @@ SIDEBAR_WINDOW_GENERATION_OPTION="@dotfiles_sidebar_generation"
 SIDEBAR_HOOK_GUARD_OPTION="@dotfiles_sidebar_hook_guard"
 SIDEBAR_LAYOUT_HOOK_GUARD_OPTION="@dotfiles_sidebar_layout_hook_guard"
 SIDEBAR_OWNER_CLIENT_OPTION="@dotfiles_sidebar_owner_client"
-SIDEBAR_TRANSITION_OPTION="@dotfiles_sidebar_transition"
+# Transient transition/handover bookkeeping (transition, phase, generation, deferred,
+# render_pending, handover_rendered, selection_sync(+ack), target_marker) lives in the
+# tmux environment as DOTFILES_SIDEBAR_<NAME>[_<scope>] — see sidebar_env_key(). Options
+# are avoided there because every set-option redraws all attached clients.
 SIDEBAR_TRANSITION_LOCK_DIR=""
-SIDEBAR_TRANSITION_PHASE_OPTION="@dotfiles_sidebar_transition_phase"
-SIDEBAR_TRANSITION_GENERATION_OPTION="@dotfiles_sidebar_transition_generation"
-SIDEBAR_TRANSITION_DEFERRED_OPTION="@dotfiles_sidebar_transition_deferred"
-SIDEBAR_TRANSITION_RENDER_PENDING_OPTION="@dotfiles_sidebar_transition_render_pending"
-SIDEBAR_HANDOVER_RENDERED_OPTION="@dotfiles_sidebar_handover_rendered"
 SIDEBAR_FAST_TRANSITION_OPTION="@dotfiles_sidebar_fast_transition"
-SIDEBAR_SELECTION_SYNC_OPTION="@dotfiles_sidebar_selection_sync"
-SIDEBAR_SELECTION_SYNC_ACK_OPTION="@dotfiles_sidebar_selection_sync_ack"
-SIDEBAR_TARGET_MARKER_OPTION="@dotfiles_sidebar_target_marker"
+
+# Handover and transition bookkeeping lives in tmux *environment* variables
+# rather than user options: every set-option (any scope) makes the server
+# redraw all attached clients (~0.8-4 KB per write), and the handover finishes
+# with a burst of such writes right after the target frame is painted — the
+# flicker users see after Enter.  set-environment causes no redraw.  The
+# variables are hidden (-h): tmux does not export hidden variables into new
+# panes, so shells and nested tmux servers never inherit sidebar state.  Window
+# scoped flags carry the window id in the variable name.
+sidebar_env_key()
+{
+    local name="$1" scope="${2:-}"
+    scope="${scope//[^A-Za-z0-9]/_}"
+    printf 'DOTFILES_SIDEBAR_%s%s' "$name" "${scope:+_$scope}"
+}
+
+sidebar_env_set()
+{
+    tmux set-environment -gh "$1" "$2" 2>/dev/null || true
+}
+
+# Versions before hidden bookkeeping wrote these as plain global variables,
+# which tmux exports into every new pane and, through those shells, into any
+# tmux server they start (a fresh server then began with a stale
+# DOTFILES_SIDEBAR_OPERATION=restoring:... and every presenter took the busy
+# fast path).  Remove any plain leftovers once per process.
+sidebar_env_purge_legacy()
+{
+    local names name args=()
+    names="$(tmux show-environment -g 2>/dev/null | sed -n 's/^\(DOTFILES_SIDEBAR_[A-Za-z0-9_]*\)=.*/\1/p')" || return 0
+    [ -n "$names" ] || return 0
+    for name in $names; do
+        args+=(set-environment -gu "$name" \;)
+    done
+    unset 'args[-1]'
+    tmux "${args[@]}" 2>/dev/null || true
+}
+
+sidebar_env_get()
+{
+    local out
+    out="$(tmux show-environment -gh "$1" 2>/dev/null || true)"
+    case "$out" in ''|-*) return 0 ;; esac
+    printf '%s' "${out#*=}"
+}
+
+transition_state_set() { sidebar_env_set "$(sidebar_env_key TRANSITION)" "$1"; }
+transition_state_get() { sidebar_env_get "$(sidebar_env_key TRANSITION)"; }
+transition_deferred_set() { sidebar_env_set "$(sidebar_env_key TRANSITION_DEFERRED)" "$1"; }
+transition_deferred_get() { sidebar_env_get "$(sidebar_env_key TRANSITION_DEFERRED)"; }
+transition_phase_store() { sidebar_env_set "$(sidebar_env_key TRANSITION_PHASE)" "$1"; }
+transition_generation_store() { sidebar_env_set "$(sidebar_env_key TRANSITION_GENERATION)" "$1"; }
+render_pending_set() { sidebar_env_set "$(sidebar_env_key RENDER_PENDING "$1")" "$2"; }
+render_pending_get() { sidebar_env_get "$(sidebar_env_key RENDER_PENDING "$1")"; }
+handover_rendered_set() { sidebar_env_set "$(sidebar_env_key HANDOVER_RENDERED "$1")" "$2"; }
+handover_rendered_get() { sidebar_env_get "$(sidebar_env_key HANDOVER_RENDERED "$1")"; }
+selection_sync_set() { sidebar_env_set "$(sidebar_env_key SELECTION_SYNC "$1")" "$2"; }
+selection_sync_get() { sidebar_env_get "$(sidebar_env_key SELECTION_SYNC "$1")"; }
+selection_sync_ack_set() { sidebar_env_set "$(sidebar_env_key SELECTION_SYNC_ACK "$1")" "$2"; }
+selection_sync_ack_get() { sidebar_env_get "$(sidebar_env_key SELECTION_SYNC_ACK "$1")"; }
+target_marker_set() { sidebar_env_set "$(sidebar_env_key TARGET_MARKER "$1")" "$2"; }
+target_marker_get() { sidebar_env_get "$(sidebar_env_key TARGET_MARKER "$1")"; }
+# Runtime flags (input_ready, action_generation, prompt_ready) keep their
+# option-style names in the code; the env key is the upper-cased suffix.
+sidebar_runtime_env_key()
+{
+    local option="$1" scope="${2:-}" name
+    name="${option#@dotfiles_sidebar_}"
+    name="${name//[^A-Za-z0-9_]/_}"
+    sidebar_env_key "${name^^}" "$scope"
+}
+force_refresh_set() { sidebar_env_set "$(sidebar_env_key FORCE_REFRESH "$1")" "$2"; }
+force_refresh_get() { sidebar_env_get "$(sidebar_env_key FORCE_REFRESH "$1")"; }
 SIDEBAR_RESTORE_TOPOLOGY_OPTION="@dotfiles_sidebar_restore_topology"
 SIDEBAR_WIDTH_APPLY_GUARD_OPTION="@dotfiles_sidebar_width_apply_guard"
 SIDEBAR_PROVISION_OPTION="@dotfiles_sidebar_provisioning"
@@ -227,9 +295,11 @@ sidebar_runtime_set()
     local ctx_clean="${ctx//[^a-zA-Z0-9_]/_}"
     local cache_var="_cache_opt_${ctx_clean}_${opt_clean}"
     printf -v "$cache_var" '%s' "$value"
-    sidebar_tmux_cmd set-option -gq "$option" "$value" 2>/dev/null || true
     if [ -n "${SIDEBAR_WINDOW_ID:-}" ]; then
-        sidebar_tmux_cmd set-option -wq -t "$SIDEBAR_WINDOW_ID" "$option" "$value" 2>/dev/null || true
+        tmux set-environment -gh "$(sidebar_runtime_env_key "$option")" "$value" \; \
+            set-environment -gh "$(sidebar_runtime_env_key "$option" "$SIDEBAR_WINDOW_ID")" "$value" 2>/dev/null || true
+    else
+        sidebar_env_set "$(sidebar_runtime_env_key "$option")" "$value"
     fi
 }
 
@@ -237,9 +307,9 @@ sidebar_runtime_get()
 {
     local option="$1"
     if [ -n "${SIDEBAR_WINDOW_ID:-}" ]; then
-        sidebar_tmux_cmd show-option -wqv -t "$SIDEBAR_WINDOW_ID" "$option" 2>/dev/null || true
+        sidebar_env_get "$(sidebar_runtime_env_key "$option" "$SIDEBAR_WINDOW_ID")"
     else
-        sidebar_tmux_cmd show-option -gqv "$option" 2>/dev/null || true
+        sidebar_env_get "$(sidebar_runtime_env_key "$option")"
     fi
 }
 
@@ -250,11 +320,7 @@ flush_action_generation_if_dirty()
 {
     [ "${_sidebar_action_generation_dirty:-0}" -eq 1 ] || return 0
     _sidebar_action_generation_dirty=0
-    if [ -n "${SIDEBAR_WINDOW_ID:-}" ]; then
-        sidebar_tmux_cmd set-option -wq -t "$SIDEBAR_WINDOW_ID" "$SIDEBAR_ACTION_GENERATION_OPTION" "${_sidebar_local_action_generation:-0}" 2>/dev/null || true
-    else
-        sidebar_tmux_cmd set-option -gq "$SIDEBAR_ACTION_GENERATION_OPTION" "${_sidebar_local_action_generation:-0}" 2>/dev/null || true
-    fi
+    sidebar_runtime_set "$SIDEBAR_ACTION_GENERATION_OPTION" "${_sidebar_local_action_generation:-0}"
 }
 
 restore_topology_guard_active()
@@ -488,7 +554,7 @@ session_exists()
 
 sidebar_operation_state()
 {
-    sidebar_tmux_cmd show-option -gqv "$SIDEBAR_OPERATION_OPTION" 2>/dev/null || true
+    sidebar_env_get "$(sidebar_runtime_env_key "$SIDEBAR_OPERATION_OPTION")"
 }
 
 sidebar_operation_busy()
@@ -502,7 +568,7 @@ sidebar_operation_busy()
 sidebar_operation_set()
 {
     local state="$1" operation_id="${2:-none}"
-    sidebar_tmux_cmd set-option -gq "$SIDEBAR_OPERATION_OPTION" "$state:$operation_id" 2>/dev/null || true
+    sidebar_env_set "$(sidebar_runtime_env_key "$SIDEBAR_OPERATION_OPTION")" "$state:$operation_id"
     trace_event "operation.state state=$state operation_id=$operation_id"
 }
 
@@ -555,21 +621,18 @@ transition_context_begin()
         was_my_session_attached=false
         animation_attached_override_until=0
     fi
-    tmux set-option -gq "$SIDEBAR_TRANSITION_OPTION" \
-        "operation_id=$operation_id;source=$source_session;target=$target_session;result=running" 2>/dev/null || true
+    transition_state_set "operation_id=$operation_id;source=$source_session;target=$target_session;result=running"
     local render_pending_window="${target_window:-}"
     [ -n "$render_pending_window" ] || render_pending_window="$(sidebar_tmux_session_window "$target_session" || true)"
     [ -n "$render_pending_window" ] &&
-        tmux set-option -wq -t "$render_pending_window" "$SIDEBAR_TRANSITION_RENDER_PENDING_OPTION" \
-            "operation_id=$operation_id;target=$target_session" 2>/dev/null || true
-    tmux set-option -gq "$SIDEBAR_TRANSITION_GENERATION_OPTION" "$transition_generation" 2>/dev/null || true
-    tmux set-option -gq "$SIDEBAR_TRANSITION_DEFERRED_OPTION" 0 2>/dev/null || true
-    tmux set-option -gq "$SIDEBAR_TRANSITION_RENDER_PENDING_OPTION" "" 2>/dev/null || true
+        render_pending_set "$render_pending_window" "operation_id=$operation_id;target=$target_session"
+    transition_generation_store "$transition_generation"
+    transition_deferred_set 0
     # A refresh flag queued before the switch belongs to the detached target's
     # old frame. The selection-sync marker is authoritative for this
     # operation; consuming the stale flag prevents an unrelated full redraw
     # from winning the transition boundary.
-    tmux set-option -gq "@sidebar_force_refresh_$target_session" 0 2>/dev/null || true
+    force_refresh_set "$target_session" 0
     trace_event "transition.refresh-flag.clear target=$target_session operation_id=$operation_id"
     trace_event "transition.begin operation_id=$operation_id generation=$transition_generation source=$source_session target=$target_session"
 }
@@ -625,7 +688,7 @@ transition_lock_release()
 transition_is_active()
 {
     local state
-    state="$(tmux show-option -gqv "$SIDEBAR_TRANSITION_OPTION" 2>/dev/null || true)"
+    state="$(transition_state_get)"
     case "$state" in
         *"result=running"*|*"result=committed"*)
             # Cross-check: if the filesystem lock is absent or its owning
@@ -635,8 +698,7 @@ transition_is_active()
             lock_dir="$(transition_lock_path)"
             if [ ! -d "$lock_dir" ]; then
                 trace_event "transition.stale-clear reason=lock-dir-absent state=$state path=$lock_dir"
-                tmux set-option -gq "$SIDEBAR_TRANSITION_OPTION" \
-                    "$(printf '%s' "$state" | sed 's/result=[^;]*/result=stale-cleared/')" 2>/dev/null || true
+                transition_state_set "$(printf '%s' "$state" | sed 's/result=[^;]*/result=stale-cleared/')"
                 return 1
             fi
             owner_pid="$(cat "$lock_dir/pid" 2>/dev/null || true)"
@@ -644,8 +706,7 @@ transition_is_active()
                 trace_event "transition.stale-clear reason=owner-pid-dead state=$state pid=$owner_pid"
                 rm -f "$lock_dir/pid" 2>/dev/null || true
                 rmdir "$lock_dir" 2>/dev/null || true
-                tmux set-option -gq "$SIDEBAR_TRANSITION_OPTION" \
-                    "$(printf '%s' "$state" | sed 's/result=[^;]*/result=stale-cleared/')" 2>/dev/null || true
+                transition_state_set "$(printf '%s' "$state" | sed 's/result=[^;]*/result=stale-cleared/')"
                 return 1
             fi
             # Lease timeout safety: if a transition lock has been running > 2500ms, clear it
@@ -656,8 +717,7 @@ transition_is_active()
                     trace_event "transition.stale-clear reason=lock-lease-timeout state=$state mtime=$lock_mtime_ms now=$now_ms"
                     rm -f "$lock_dir/pid" 2>/dev/null || true
                     rmdir "$lock_dir" 2>/dev/null || true
-                    tmux set-option -gq "$SIDEBAR_TRANSITION_OPTION" \
-                        "$(printf '%s' "$state" | sed 's/result=[^;]*/result=stale-cleared/')" 2>/dev/null || true
+                    transition_state_set "$(printf '%s' "$state" | sed 's/result=[^;]*/result=stale-cleared/')"
                     return 1
                 fi
             fi
@@ -670,7 +730,7 @@ transition_is_active()
 transition_commit_pending()
 {
     local state
-    state="$(tmux show-option -gqv "$SIDEBAR_TRANSITION_OPTION" 2>/dev/null || true)"
+    state="$(transition_state_get)"
     case "$state" in
         *"result=committed"*) return 0 ;;
         *) return 1 ;;
@@ -681,8 +741,7 @@ transition_context_commit()
 {
     local operation_id="${1:-$current_transition_operation_id}"
     [ -n "$operation_id" ] || return 0
-    tmux set-option -gq "$SIDEBAR_TRANSITION_OPTION" \
-        "operation_id=$operation_id;source=${current_transition_source:-none};target=${current_transition_target:-none};result=committed;reason=awaiting-render" 2>/dev/null || true
+    transition_state_set "operation_id=$operation_id;source=${current_transition_source:-none};target=${current_transition_target:-none};result=committed;reason=awaiting-render"
     transition_phase_set COMMIT "$operation_id"
     trace_event "transition.commit operation_id=$operation_id generation=$transition_generation result=awaiting-render"
 }
@@ -690,16 +749,16 @@ transition_context_commit()
 transition_defer_hook_sync()
 {
     local hook="$1"
-    tmux set-option -gq "$SIDEBAR_TRANSITION_DEFERRED_OPTION" 1 2>/dev/null || true
+    transition_deferred_set 1
     trace_event "transition.hook.defer hook=$hook operation_id=${current_transition_operation_id:-external}"
 }
 
 transition_flush_deferred_metadata()
 {
     local deferred sidebar_pane window_id
-    deferred="$(tmux show-option -gqv "$SIDEBAR_TRANSITION_DEFERRED_OPTION" 2>/dev/null || true)"
+    deferred="$(transition_deferred_get)"
     [ "$deferred" = 1 ] || return 0
-    tmux set-option -gq "$SIDEBAR_TRANSITION_DEFERRED_OPTION" 0 2>/dev/null || true
+    transition_deferred_set 0
     if [ "$(tmux show-option -gqv "$SIDEBAR_MODEL_OPTION" 2>/dev/null || true)" = window-local ]; then
         # Window-local provisioning owns geometry before switch-client. A
         # deferred hook must not synchronously snapshot the target layout in
@@ -730,7 +789,7 @@ transition_phase_set()
 {
     local phase="$1" operation_id="${2:-$current_transition_operation_id}"
     [ -n "$operation_id" ] || return 0
-    tmux set-option -gq "$SIDEBAR_TRANSITION_PHASE_OPTION" "$phase" 2>/dev/null || true
+    transition_phase_store "$phase"
     trace_event "transition.phase operation_id=$operation_id generation=$transition_generation phase=$phase"
 }
 
@@ -755,14 +814,13 @@ transition_context_finish()
         # Native window-local switches have no layout work to flush. Keep the
         # observable transaction close, but avoid the legacy model lookup and
         # deferred-hook bookkeeping on this latency-sensitive path.
-        tmux set-option -gq "$SIDEBAR_TRANSITION_DEFERRED_OPTION" 0 2>/dev/null || true
-        tmux set-option -gq "$SIDEBAR_TRANSITION_OPTION" \
-            "operation_id=$operation_id;source=${current_transition_source:-none};target=${current_transition_target:-none};result=success;reason=$reason" 2>/dev/null || true
         local finished_window="${current_transition_target_window:-}"
         [ -n "$finished_window" ] || finished_window="$(sidebar_tmux_session_window "${current_transition_target:-}" || true)"
-        [ -n "$finished_window" ] &&
-            tmux set-option -wq -t "$finished_window" "$SIDEBAR_TRANSITION_RENDER_PENDING_OPTION" \
-                "operation_id=$operation_id;target=${current_transition_target:-none}" 2>/dev/null || true
+        # One client call for the finish bookkeeping (see the consume path).
+        tmux set-environment -gh "$(sidebar_env_key TRANSITION_DEFERRED)" 0 \; \
+            set-environment -gh "$(sidebar_env_key TRANSITION)" "operation_id=$operation_id;source=${current_transition_source:-none};target=${current_transition_target:-none};result=success;reason=$reason" \; \
+            set-environment -gh "$(sidebar_env_key RENDER_PENDING "${finished_window:-none}")" "operation_id=$operation_id;target=${current_transition_target:-none}" \; \
+            set-environment -gh "$(sidebar_env_key TRANSITION_PHASE)" READY 2>/dev/null || true
         transition_phase_set READY "$operation_id"
         trace_event "transition.finish operation_id=$operation_id generation=$transition_generation result=success reason=$reason"
         if [ -n "$METRICS_FILE" ] && [ "${transition_metrics_start_us:-0}" -gt 0 ]; then
@@ -783,24 +841,23 @@ transition_context_finish()
         return 0
     fi
     [ "$result" = success ] || tmux set-option -gq "$SIDEBAR_FAST_TRANSITION_OPTION" 0 2>/dev/null || true
-    tmux set-option -gq "$SIDEBAR_TRANSITION_OPTION" \
-        "operation_id=$operation_id;source=${current_transition_source:-none};target=${current_transition_target:-none};result=$result;reason=$reason" 2>/dev/null || true
+    transition_state_set "operation_id=$operation_id;source=${current_transition_source:-none};target=${current_transition_target:-none};result=$result;reason=$reason"
     if [ "$result" != success ]; then
         local failed_window
         failed_window="$(sidebar_tmux_session_window "${current_transition_target:-}" || true)"
-        [ -n "$failed_window" ] && tmux set-option -wq -t "$failed_window" "$SIDEBAR_TRANSITION_RENDER_PENDING_OPTION" "" 2>/dev/null || true
+        [ -n "$failed_window" ] && render_pending_set "$failed_window" ""
     fi
     if [ "$result" = success ]; then
         if [ "$(tmux show-option -gqv "$SIDEBAR_MODEL_OPTION" 2>/dev/null || true)" = window-local ]; then
             # The switch path never restores layout. Clear deferred hook
             # state directly instead of entering the legacy snapshot helper.
-            tmux set-option -gq "$SIDEBAR_TRANSITION_DEFERRED_OPTION" 0 2>/dev/null || true
+            transition_deferred_set 0
             trace_event "transition.hook.flush operation_id=${current_transition_operation_id:-external} window=local result=skipped-window-local"
         else
             transition_flush_deferred_metadata
         fi
     else
-        tmux set-option -gq "$SIDEBAR_TRANSITION_DEFERRED_OPTION" 0 2>/dev/null || true
+        transition_deferred_set 0
     fi
     transition_phase_set "$([ "$result" = success ] && printf READY || printf FAILED)" "$operation_id"
     trace_event "transition.finish operation_id=$operation_id generation=$transition_generation result=$result reason=$reason"
@@ -1174,7 +1231,7 @@ sync_active_window()
         return 0
     fi
     if transition_is_active; then
-        trace_event "sidebar.hook.sync.skip reason=transition-active state=$(sidebar_tmux_cmd show-option -gqv "$SIDEBAR_TRANSITION_OPTION" 2>/dev/null || true)"
+        trace_event "sidebar.hook.sync.skip reason=transition-active state=$(transition_state_get)"
         transition_defer_hook_sync active-window
         return 0
     fi
@@ -2568,7 +2625,7 @@ wait_for_sidebar_input_ready()
 {
     local window_id="$1" pane_id="${2:-}" attempt ready
     for attempt in $(seq 1 100); do
-        ready="$(tmux show-option -wqv -t "$window_id" "$SIDEBAR_INPUT_READY_OPTION" 2>/dev/null || true)"
+        ready="$(sidebar_env_get "$(sidebar_runtime_env_key "$SIDEBAR_INPUT_READY_OPTION" "$window_id")")"
         if [ "$ready" = 1 ] && sidebar_window_ready "$window_id" "$pane_id"; then
             trace_event "sidebar.input-ready.barrier window=$window_id pane=$pane_id attempts=$attempt result=ready"
             return 0
@@ -2582,7 +2639,7 @@ wait_for_sidebar_input_ready()
 sidebar_selection_sync_ack_ready()
 {
     local window_id="$1" session_name_value="$2" ack
-    ack="$(tmux show-option -wqv -t "$window_id" "$SIDEBAR_SELECTION_SYNC_ACK_OPTION" 2>/dev/null || true)"
+    ack="$(selection_sync_ack_get "$window_id")"
     [ "$ack" = "$session_name_value" ]
 }
 
@@ -2602,7 +2659,7 @@ sidebar_content_ready()
 sidebar_handover_rendered_ready()
 {
     local window_id="$1" session_name_value="$2"
-    [ "$(tmux show-option -wqv -t "$window_id" "$SIDEBAR_HANDOVER_RENDERED_OPTION" 2>/dev/null || true)" = "$session_name_value" ]
+    [ "$(handover_rendered_get "$window_id")" = "$session_name_value" ]
 }
 
 wait_for_sidebar_content_ready()
@@ -2819,7 +2876,7 @@ switch_session()
             [ "$max_q_w" -lt 1 ] && max_q_w=1
             printf '%s' "$(truncate_text "$queued_msg" "$max_q_w")" 2>/dev/null || true
         fi
-        trace_event "switch.coalesce target=$session_name seq=$_transition_sequence_id source=$source_session state=$(tmux show-option -gqv "$SIDEBAR_TRANSITION_OPTION" 2>/dev/null || true)"
+        trace_event "switch.coalesce target=$session_name seq=$_transition_sequence_id source=$source_session state=$(transition_state_get)"
         return 0
     fi
     new_sidebar_operation_id
@@ -2827,9 +2884,9 @@ switch_session()
     # Publish before target readiness work. A target sidebar can already have
     # a pending refresh from session creation; the marker lets it coalesce
     # that frame instead of flushing a full render before switch-client.
-    tmux set-option -wq -t "$target_window" "$SIDEBAR_SELECTION_SYNC_ACK_OPTION" "" 2>/dev/null || true
-    tmux set-option -wq -t "$target_window" "$SIDEBAR_SELECTION_SYNC_OPTION" "$session_name" 2>/dev/null || true
-    trace_event "switch.target-sidebar.selection-sync-published session=$session_name window=$target_window value=$(tmux show-option -wqv -t "$target_window" "$SIDEBAR_SELECTION_SYNC_OPTION" 2>/dev/null || true)"
+    selection_sync_ack_set "$target_window" ""
+    selection_sync_set "$target_window" "$session_name"
+    trace_event "switch.target-sidebar.selection-sync-published session=$session_name window=$target_window value=$(selection_sync_get "$target_window")"
     if ! transition_context_begin "$operation_id" "$source_session" "$session_name" "$target_window"; then
         trace_event "switch.skip reason=transition-lock-busy source=$source_session target=$session_name"
         return 0
@@ -2850,7 +2907,7 @@ switch_session()
     transition_phase_set ENSURE_TARGET_SIDEBAR "$operation_id"
     sidebar_pane="$(ensure_target_sidebar_window "$session_name" "$target_window" "$(sidebar_width)" || true)"
     if [ -z "$sidebar_pane" ]; then
-        tmux set-option -wq -t "$target_window" "$SIDEBAR_SELECTION_SYNC_OPTION" "" 2>/dev/null || true
+        selection_sync_set "$target_window" ""
         transition_context_finish failed target-sidebar-unavailable "$operation_id"
         message_line "session switch failed: target sidebar is not ready"
         trace_event "switch.abort reason=target-sidebar-unavailable session=$session_name window=$target_window"
@@ -2895,7 +2952,7 @@ switch_session()
     fi
     [ -n "$METRICS_FILE" ] && metrics_start="$(metrics_now_us)"
     if ! sidebar_switch_execute_hot "$client_tty" "$session_name" "$target_window" "$sidebar_pane" "$(sidebar_width)" "$sub_pane" "$sub_height"; then
-        tmux set-option -wq -t "$target_window" "$SIDEBAR_SELECTION_SYNC_OPTION" "" 2>/dev/null || true
+        selection_sync_set "$target_window" ""
         transition_context_finish failed switch-client "$operation_id"
         message_line "session switch failed: client switch was refused"
         trace_event "switch.abort reason=client-switch-failed session=$session_name"
@@ -3013,7 +3070,8 @@ switch_session()
     # The target marker is normally synchronized before switch-client. Keep a
     # post-switch signal only for the timeout fallback, where the target loop
     # may still need one more refresh cycle to converge.
-    IFS='|' read -r sidebar_ready selection_sync_ack <<< "$(tmux display-message -p -t "$target_window" "#{$SIDEBAR_WINDOW_READY_OPTION}|#{$SIDEBAR_SELECTION_SYNC_ACK_OPTION}" 2>/dev/null || true)"
+    sidebar_ready="$(tmux display-message -p -t "$target_window" "#{$SIDEBAR_WINDOW_READY_OPTION}" 2>/dev/null || true)"
+    selection_sync_ack="$(selection_sync_ack_get "$target_window")"
     if [ "$sidebar_ready" = 1 ] && [ "$selection_sync_ack" = "$session_name" ]; then
         trace_event "switch.target-sidebar.selection-sync-complete session=$session_name pane=$sidebar_pane pid=${sidebar_pid:-none}"
     else
@@ -3038,8 +3096,8 @@ switch_session()
         return 1
     fi
     [ -n "$METRICS_FILE" ] && metrics_write "op=switch phase=dispatch operation_id=$operation_id session=$session_name client_switch_us=$client_switch_us elapsed_us=$(( $(metrics_now_us) - switch_metrics_start_us ))"
-    tmux set-option -wq -t "$target_window" "$SIDEBAR_SELECTION_SYNC_OPTION" "" 2>/dev/null || true
-    tmux set-option -wq -t "$target_window" "$SIDEBAR_SELECTION_SYNC_ACK_OPTION" "" 2>/dev/null || true
+    selection_sync_set "$target_window" ""
+    selection_sync_ack_set "$target_window" ""
     transition_context_finish success window-local-ready "$operation_id"
     sidebar_operation_set idle "$operation_id"
     trace_event "switch.end mode=window-local session=$session_name pane=$sidebar_pane client=$client_tty result=ready"
@@ -5043,7 +5101,7 @@ ai_observer_watchdog()
         # One action per stale interval per presenter.
         [ $((now - ${watchdog_last_action_epoch[$pane_id]:-0})) -ge "$SIDEBAR_WATCHDOG_STALE_SECONDS" ] || continue
         watchdog_last_action_epoch["$pane_id"]="$now"
-        prompt_ready="$(tmux show-option -wqv -t "$pane_id" '@dotfiles_sidebar_prompt_ready' 2>/dev/null || true)"
+        prompt_ready="$(sidebar_env_get "$(sidebar_runtime_env_key "$SIDEBAR_PROMPT_READY_OPTION" "$(tmux display-message -p -t "$pane_id" '#{window_id}' 2>/dev/null || true)")")"
         action=logged
         if [ "$mode" = recover ] && [ "$prompt_ready" != 1 ] && [ "${hb_view:-sessions}" = sessions ]; then
             tmux send-keys -t "$pane_id" Escape 2>/dev/null && action=escape-sent
@@ -5088,6 +5146,7 @@ run_ai_observer()
     # Leave nothing behind: the lock and the state file belong to this server.
     trap 'rm -rf "$lock_dir" "$state_path" "${state_path}.tmp.$$" 2>/dev/null; exit 0' EXIT INT TERM HUP
     trace_event "ai-observer.start pid=$$ state=$state_path interval=$interval"
+    sidebar_env_purge_legacy
 
     while true; do
         now="${EPOCHSECONDS:-$(date +%s)}"
@@ -5390,7 +5449,7 @@ native_selection_sync_pending()
 {
     local requested_session local_session
     [ -n "${SIDEBAR_WINDOW_ID:-}" ] || return 1
-    requested_session="$(tmux show-option -wqv -t "$SIDEBAR_WINDOW_ID" "$SIDEBAR_SELECTION_SYNC_OPTION" 2>/dev/null || true)"
+    requested_session="$(selection_sync_get "$SIDEBAR_WINDOW_ID")"
     [ -n "$requested_session" ] || return 1
     local_session="$(sidebar_session_name || true)"
     [ "$requested_session" = "$local_session" ]
@@ -5399,23 +5458,23 @@ native_selection_sync_pending()
 selection_sync_window_pending()
 {
     [ -n "${SIDEBAR_WINDOW_ID:-}" ] || return 1
-    [ -n "$(tmux show-option -wqv -t "$SIDEBAR_WINDOW_ID" "$SIDEBAR_SELECTION_SYNC_OPTION" 2>/dev/null || true)" ]
+    [ -n "$(selection_sync_get "$SIDEBAR_WINDOW_ID")" ]
 }
 
 sidebar_target_marker_pending()
 {
     [ -n "${SIDEBAR_WINDOW_ID:-}" ] || return 1
-    [ -n "$(tmux show-option -wqv -t "$SIDEBAR_WINDOW_ID" "${SIDEBAR_TARGET_MARKER_OPTION:-@dotfiles_sidebar_target_marker}" 2>/dev/null || true)" ] ||
-    [ -n "$(tmux show-option -wqv -t "$SIDEBAR_WINDOW_ID" "${SIDEBAR_SELECTION_SYNC_OPTION:-@dotfiles_sidebar_selection_sync}" 2>/dev/null || true)" ]
+    [ -n "$(target_marker_get "$SIDEBAR_WINDOW_ID")" ] ||
+    [ -n "$(selection_sync_get "$SIDEBAR_WINDOW_ID")" ]
 }
 
 sidebar_consume_pending_target_marker()
 {
     [ -n "${SIDEBAR_WINDOW_ID:-}" ] || return 1
     local target_session=""
-    target_session="$(tmux show-option -wqv -t "$SIDEBAR_WINDOW_ID" "${SIDEBAR_TARGET_MARKER_OPTION:-@dotfiles_sidebar_target_marker}" 2>/dev/null || true)"
+    target_session="$(target_marker_get "$SIDEBAR_WINDOW_ID")"
     if [ -z "$target_session" ]; then
-        target_session="$(tmux show-option -wqv -t "$SIDEBAR_WINDOW_ID" "${SIDEBAR_SELECTION_SYNC_OPTION:-@dotfiles_sidebar_selection_sync}" 2>/dev/null || true)"
+        target_session="$(selection_sync_get "$SIDEBAR_WINDOW_ID")"
     fi
     [ -n "$target_session" ] || return 1
 
@@ -5470,8 +5529,8 @@ sidebar_consume_pending_target_marker()
             return 1
             ;;
         discarded)
-            tmux set-option -wq -t "$SIDEBAR_WINDOW_ID" "${SIDEBAR_TARGET_MARKER_OPTION:-@dotfiles_sidebar_target_marker}" "" 2>/dev/null || true
-            tmux set-option -wq -t "$SIDEBAR_WINDOW_ID" "${SIDEBAR_SELECTION_SYNC_OPTION:-@dotfiles_sidebar_selection_sync}" "" 2>/dev/null || true
+            target_marker_set "$SIDEBAR_WINDOW_ID" ""
+            selection_sync_set "$SIDEBAR_WINDOW_ID" ""
             transition_coordinator_queue_handover_render full "$target_session" \
                 "$old_current" "$old_selected_index" "$old_selected_session"
             trace_event "marker.handover.discarded target=$target_session window=$SIDEBAR_WINDOW_ID"
@@ -5516,14 +5575,17 @@ sidebar_consume_pending_target_marker()
 
     [ "$sidebar_handover_result" = settled ] || return 1
 
-    tmux set-option -wq -t "$SIDEBAR_WINDOW_ID" "${SIDEBAR_TARGET_MARKER_OPTION:-@dotfiles_sidebar_target_marker}" "" 2>/dev/null || true
-    tmux set-option -wq -t "$SIDEBAR_WINDOW_ID" "${SIDEBAR_SELECTION_SYNC_OPTION:-@dotfiles_sidebar_selection_sync}" "" 2>/dev/null || true
-    tmux set-option -wq -t "$SIDEBAR_WINDOW_ID" "${SIDEBAR_SELECTION_SYNC_ACK_OPTION:-@dotfiles_sidebar_selection_sync}" "$target_session" 2>/dev/null || true
-    tmux set-option -wq -t "$SIDEBAR_WINDOW_ID" "$SIDEBAR_HANDOVER_RENDERED_OPTION" "" 2>/dev/null || true
+    # One tmux client for the four flags: each client process the presenter
+    # forks flips the pane's current command, which alone repaints borders
+    # and status lines that show it.
+    tmux set-environment -gh "$(sidebar_env_key TARGET_MARKER "$SIDEBAR_WINDOW_ID")" "" \; \
+        set-environment -gh "$(sidebar_env_key SELECTION_SYNC "$SIDEBAR_WINDOW_ID")" "" \; \
+        set-environment -gh "$(sidebar_env_key SELECTION_SYNC_ACK "$SIDEBAR_WINDOW_ID")" "$target_session" \; \
+        set-environment -gh "$(sidebar_env_key HANDOVER_RENDERED "$SIDEBAR_WINDOW_ID")" "" 2>/dev/null || true
     transition_coordinator_queue_handover_render "$sidebar_handover_render_intent" "$target_session" \
         "$old_current" "$old_selected_index" "$old_selected_session"
-    sidebar_tmux_cmd set-option -gq "@sidebar_force_refresh_$target_session" 0 2>/dev/null || true
-    sidebar_tmux_cmd set-option -gq "@sidebar_force_refresh_${sidebar_session_cached:-$target_session}" 0 2>/dev/null || true
+    tmux set-environment -gh "$(sidebar_env_key FORCE_REFRESH "$target_session")" 0 \; \
+        set-environment -gh "$(sidebar_env_key FORCE_REFRESH "${sidebar_session_cached:-$target_session}")" 0 2>/dev/null || true
     refresh_signal_pending=false
     transition_render_coalesced=true
     last_force_refresh_check_epoch="${EPOCHSECONDS:-$SECONDS}"
@@ -5537,7 +5599,7 @@ transition_render_pending_for_current_session()
     local state target
     transition_render_pending_state=""
     [ -n "${SIDEBAR_WINDOW_ID:-}" ] || return 1
-    state="$(tmux show-option -wqv -t "$SIDEBAR_WINDOW_ID" "$SIDEBAR_TRANSITION_RENDER_PENDING_OPTION" 2>/dev/null || true)"
+    state="$(render_pending_get "$SIDEBAR_WINDOW_ID")"
     transition_render_pending_state="$state"
     target="${state##*target=}"
     [ -n "$target" ] && [ "$target" = "$current_session" ]
@@ -5576,7 +5638,7 @@ request_full_render()
 mark_handover_rendered()
 {
     [ -n "${SIDEBAR_WINDOW_ID:-}" ] || return 0
-    tmux set-option -wq -t "$SIDEBAR_WINDOW_ID" "$SIDEBAR_HANDOVER_RENDERED_OPTION" "${current_session:-}" 2>/dev/null || true
+    handover_rendered_set "$SIDEBAR_WINDOW_ID" "${current_session:-}"
 }
 
 flush_full_render_request()
@@ -5807,11 +5869,6 @@ prompt_text()
         Delete\ *) prompt_type=delete ;;
         Filter:*|Search:*) prompt_type=filter ;;
     esac
-    sidebar_tmux_cmd set-option -gq "@dotfiles_sidebar_prompt_ready" 1 2>/dev/null || true
-    sidebar_tmux_cmd set-option -wq "@dotfiles_sidebar_prompt_ready" 1 2>/dev/null || true
-    if [ -n "${SIDEBAR_WINDOW_ID:-}" ]; then
-        sidebar_tmux_cmd set-option -wq -t "$SIDEBAR_WINDOW_ID" "@dotfiles_sidebar_prompt_ready" 1 2>/dev/null || true
-    fi
     sidebar_runtime_set "$SIDEBAR_PROMPT_READY_OPTION" 1
     prompt_active=true
     trap cleanup_prompt_traps RETURN 2>/dev/null || true
@@ -5928,12 +5985,6 @@ prompt_text()
     fi
 
     sidebar_runtime_set "$SIDEBAR_PROMPT_READY_OPTION" 0
-    sidebar_tmux_cmd set-option -gq "@dotfiles_sidebar_prompt_ready" 0 2>/dev/null || true
-    sidebar_tmux_cmd set-option -sq "@dotfiles_sidebar_prompt_ready" 0 2>/dev/null || true
-    sidebar_tmux_cmd set-option -wq "@dotfiles_sidebar_prompt_ready" 0 2>/dev/null || true
-    if [ -n "${SIDEBAR_WINDOW_ID:-}" ]; then
-        sidebar_tmux_cmd set-option -wq -t "$SIDEBAR_WINDOW_ID" "@dotfiles_sidebar_prompt_ready" 0 2>/dev/null || true
-    fi
 
     trace_event "prompt.result action_id=${current_action_id:-none} type=$prompt_type result=$([ "$prompt_cancelled" = true ] && printf cancelled || printf complete) length=${#prompt_result} terminator=canonical-line"
     stty -echo -icanon time 0 min 0 2>/dev/null || true
@@ -5978,6 +6029,20 @@ debug_log()
             "${TMUX_PANE:-${SELF_PANE:-none}}" "$*"
     } >> "$debug_file" 2>/dev/null || true
 }
+
+# With tracing on, record every tmux option write with its caller: each
+# set-option makes the tmux server redraw attached clients, so these are the
+# candidates behind any post-handover flicker.
+if [ "${TMUX_SESSION_LAUNCHER_TRACE:-0}" = "1" ]; then
+    tmux()
+    {
+        case "${1:-}" in
+            set-option|set-window-option|set|setw|set-environment|setenv|select-pane|select-window|select-layout|resize-pane|resize-window|rename-window|rename-session|set-hook|refresh-client|switch-client|join-pane|break-pane|swap-pane|kill-pane|split-window|respawn-pane|send-keys)
+                trace_event "tmux.write caller=${FUNCNAME[1]:-main} args=$*" ;;
+        esac
+        command tmux "$@"
+    }
+fi
 
 trace_event()
 {
@@ -7175,7 +7240,7 @@ wait_for_sidebar_transition()
         sidebar_pid="$(tmux display-message -p -t "$sidebar_pane" '#{pane_pid}' 2>/dev/null || true)"
         sidebar_tty="$(tmux display-message -p -t "$sidebar_pane" '#{pane_tty}' 2>/dev/null || true)"
         sidebar_input_off="$(tmux display-message -p -t "$sidebar_pane" '#{pane_input_off}' 2>/dev/null || true)"
-        input_ready="$(tmux show-option -gqv "$SIDEBAR_INPUT_READY_OPTION" 2>/dev/null || true)"
+        input_ready="$(sidebar_env_get "$(sidebar_runtime_env_key "$SIDEBAR_INPUT_READY_OPTION")")"
         transition_reason="sidebar-pane"
         [ -n "$sidebar_pane" ] && transition_reason="owner-session"
         [ "$owner_session" = "$target_session" ] && transition_reason="client-session"
@@ -7618,14 +7683,13 @@ tui_new_session()
     ensure_selection_visible
     render_visible_session_rows
 
-    sidebar_runtime_set "$SIDEBAR_WINDOW_READY_OPTION" 1
     if [ -n "${SIDEBAR_WINDOW_ID:-}" ]; then
         tmux set-option -wq -t "$SIDEBAR_WINDOW_ID" "$SIDEBAR_WINDOW_READY_OPTION" 1 2>/dev/null || true
     fi
 
     # The after-new-session hook provisions the target window's stable local
     local gen
-    gen="$(sidebar_tmux_cmd show-option -wqv -t "${SIDEBAR_WINDOW_ID:-}" "$SIDEBAR_ACTION_GENERATION_OPTION" 2>/dev/null || echo 0)"
+    gen="$(sidebar_runtime_get "$SIDEBAR_ACTION_GENERATION_OPTION")"
     sidebar_runtime_set "$SIDEBAR_ACTION_GENERATION_OPTION" "$(( ${gen:-0} + 1 ))"
     sidebar_runtime_set "$SIDEBAR_INPUT_READY_OPTION" 1
     trace_event "session.create.end session=$session_name sidebar=hook-provision"
@@ -8019,6 +8083,7 @@ run_tui()
     local action_generation=0
     declare -f sidebar_ime_switch_to_english >/dev/null 2>&1 && sidebar_ime_switch_to_english "sidebar" || true
     trace_event "sidebar.process.begin pane=${TMUX_PANE:-none}"
+    sidebar_env_purge_legacy
     setup_terminal
     if [ -n "${TMUX_PANE:-}" ]; then
         SIDEBAR_WINDOW_ID="$(tmux display-message -p -t "$TMUX_PANE" '#{window_id}' 2>/dev/null || true)"
@@ -8342,14 +8407,14 @@ run_tui()
         transition_coordinator_flush_handover_render
         flush_full_render_request
         if [ "$full_render_required" = "true" ]; then
-            trace_event "render.full.check reason=${full_render_required_reason:-unspecified} sync_window=$(sidebar_tmux_cmd show-option -wqv -t "${SIDEBAR_WINDOW_ID:-}" "$SIDEBAR_SELECTION_SYNC_OPTION" 2>/dev/null || true)"
+            trace_event "render.full.check reason=${full_render_required_reason:-unspecified} sync_window=$(selection_sync_get "${SIDEBAR_WINDOW_ID:-}")"
             native_transition_render_skip=false
             case "$full_render_required_reason" in
                 geometry-invalidated|topology-invalidated|external-layout-change)
                     if (selection_sync_window_pending || transition_render_pending_for_current_session) && [ "${session_topology_changed:-false}" != "true" ]; then
                         native_transition_render_skip=true
                         if transition_render_pending_for_current_session; then
-                            sidebar_tmux_cmd set-option -wq -t "$SIDEBAR_WINDOW_ID" "$SIDEBAR_TRANSITION_RENDER_PENDING_OPTION" "" 2>/dev/null || true
+                            render_pending_set "$SIDEBAR_WINDOW_ID" ""
                             trace_event "render.coalesce.consume reason=post-transition-geometry session=$current_session"
                         fi
                     fi
@@ -8433,9 +8498,9 @@ run_tui()
                             maintenance_force_start="$metrics_now_us_result"
                             maintenance_metrics_force_checks=$((maintenance_metrics_force_checks + 1))
                         fi
-                        local force_refresh_flag="@sidebar_force_refresh_${sidebar_session_cached:-$current_session}"
+                        local force_refresh_flag="${sidebar_session_cached:-$current_session}"
                         local force_refresh sidebar_owner_session
-                        force_refresh="$(sidebar_tmux_cmd show-option -gqv "$force_refresh_flag" 2>/dev/null || true)"
+                        force_refresh="$(force_refresh_get "$force_refresh_flag")"
                         sidebar_owner_session="$(sidebar_session_name || true)"
                         [ -n "$sidebar_owner_session" ] || sidebar_owner_session="${sidebar_session_cached:-$current_session}"
                         if selection_sync_window_pending; then
@@ -8445,7 +8510,7 @@ run_tui()
                             # the queued selection signal will render the
                             # marker delta after client ownership settles.
                             trace_event "render.full.skip reason=native-session-transition force_reason=$force_refresh session=$sidebar_owner_session"
-                            sidebar_tmux_cmd set-option -gq "$force_refresh_flag" 0 2>/dev/null || true
+                            force_refresh_set "$force_refresh_flag" 0
                             refresh_signal_tick=false
                         elif [ "$force_refresh" = "1" ] || [ "$refresh_signal_tick" = "true" ]; then
                             if [ "$view_mode" = "history" ]; then
@@ -8462,9 +8527,9 @@ run_tui()
                             render_full force-refresh
                             session_animation_refresh_indexes=()
                             last_state_refresh_epoch="${EPOCHSECONDS:-$SECONDS}"
-                            tmux set-option -g "$force_refresh_flag" 0 2>/dev/null || true
+                            force_refresh_set "$force_refresh_flag" 0
                             [ "$sidebar_owner_session" = "${sidebar_session_cached:-}" ] ||
-                                tmux set-option -g "@sidebar_force_refresh_$sidebar_owner_session" 0 2>/dev/null || true
+                                force_refresh_set "$sidebar_owner_session" 0
                         fi
                         last_force_refresh_check_epoch="$now"
                         if [ -n "$METRICS_FILE" ]; then

@@ -101,7 +101,7 @@ run_delete_conflict()
     local target="$1" operation_id="$2" expected_id='' expected_clients expected_owner command
     expected_clients="$(client_set "$target" || true)"
     expected_owner="$(owner_state || true)"
-    "${TMUX[@]}" set-option -g @dotfiles_sidebar_operation "deleting:$operation_id"
+    "${TMUX[@]}" set-environment -gh DOTFILES_SIDEBAR_OPERATION "deleting:$operation_id"
     command="TMUX_SESSION_LAUNCHER_TEST_OPERATION_DELAY=5 $(quote "$LAUNCHER") --delete-session-after-archive $(quote "$target") true $(quote "$operation_id") $(quote "$expected_id") $(quote "$expected_clients") $(quote "$expected_owner")"
     "${TMUX[@]}" run-shell -b "$command"
 }

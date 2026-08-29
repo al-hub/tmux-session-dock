@@ -42,7 +42,6 @@ sidebar_tmux_cmd() {
 
 # Source exact options defined in launcher
 SIDEBAR_WINDOW_READY_OPTION="@dotfiles_sidebar_ready"
-SIDEBAR_SELECTION_SYNC_ACK_OPTION="@dotfiles_sidebar_selection_sync_ack"
 SIDEBAR_WINDOW_PANE_OPTION="@dotfiles_sidebar_pane_id"
 
 # In-memory readiness check function (identical to scripts/tmux-session-launcher)

@@ -40,14 +40,14 @@ switch_to_next_session() {
     # and rendered content as the regression oracle.
     ack_observed=false
     for _ in $(seq 1 150); do
-        if [ "$(tmuxc show-options -wqv -t "$target_window" @dotfiles_sidebar_selection_sync_ack 2>/dev/null || true)" = "$expected_session" ]; then
+        if [ "$(tmuxc show-environment -gh "DOTFILES_SIDEBAR_SELECTION_SYNC_ACK_${target_window//[^A-Za-z0-9]/_}" 2>/dev/null | sed -n 's/^[^=]*=//p')" = "$expected_session" ]; then
             ack_observed=true
             break
         fi
         sleep 0.002
     done
     test_log "selection-sync ack target=$expected_session observed=$ack_observed"
-    wait_until "switch to $expected_session settled" "[ \"\$(client_session)\" = '$expected_session' ] && [ \"\$(tmuxc show-options -wqv -t '$target_window' @dotfiles_sidebar_ready 2>/dev/null || true)\" = 1 ] && tmuxc show-options -gqv @dotfiles_sidebar_transition | grep -Fq 'target=$expected_session;result=success'"
+    wait_until "switch to $expected_session settled" "[ \"\$(client_session)\" = '$expected_session' ] && [ \"\$(tmuxc show-options -wqv -t '$target_window' @dotfiles_sidebar_ready 2>/dev/null || true)\" = 1 ] && tmuxc show-environment -gh DOTFILES_SIDEBAR_TRANSITION 2>/dev/null | grep -Fq 'target=$expected_session;result=success'"
 
     target_pane="$(window_sidebar_pane_id "$target_window")"
     [ -n "$target_pane" ] || {

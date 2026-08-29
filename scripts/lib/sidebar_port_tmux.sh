@@ -4,6 +4,12 @@ set -euo pipefail
 
 if ! declare -f sidebar_tmux_cmd >/dev/null 2>&1; then
     sidebar_tmux_cmd() {
+        if [ "${TMUX_SESSION_LAUNCHER_TRACE:-0}" = "1" ] && declare -f trace_event >/dev/null 2>&1; then
+            case "${1:-}" in
+                set-option|set-window-option|set|setw|set-environment|setenv|select-pane|select-window|select-layout|resize-pane|resize-window|rename-window|rename-session|set-hook|refresh-client|switch-client|join-pane|break-pane|swap-pane|kill-pane|split-window|respawn-pane|send-keys)
+                    trace_event "tmux.write caller=${FUNCNAME[1]:-main} args=$*" ;;
+            esac
+        fi
         if [ -n "${TMUX_SESSION_LAUNCHER_SOCKET:-}" ]; then
             command tmux -L "$TMUX_SESSION_LAUNCHER_SOCKET" "$@"
             return $?
@@ -64,10 +70,11 @@ sidebar_port_publish_marker_handover() {
     local window_id="${1:-}" target_session="${2:-}"
     [ -n "$window_id" ] || return 1
     [ -n "$target_session" ] || return 1
-    local marker_opt="${SIDEBAR_TARGET_MARKER_OPTION:-@dotfiles_sidebar_target_marker}"
-    local sync_opt="${SIDEBAR_SELECTION_SYNC_OPTION:-@dotfiles_sidebar_selection_sync}"
-    sidebar_tmux_cmd set-option -wq -t "$window_id" "$marker_opt" "$target_session" 2>/dev/null || true
-    sidebar_tmux_cmd set-option -wq -t "$window_id" "$sync_opt" "$target_session" 2>/dev/null || true
+    # Handover flags are tmux environment variables (a set-option would make
+    # the server redraw every attached client); one client call sets both.
+    local scope="${window_id//[^A-Za-z0-9]/_}"
+    sidebar_tmux_cmd set-environment -gh "DOTFILES_SIDEBAR_TARGET_MARKER_${scope}" "$target_session" \; \
+        set-environment -gh "DOTFILES_SIDEBAR_SELECTION_SYNC_${scope}" "$target_session" 2>/dev/null || true
 }
 
 sidebar_port_notify_presenter_wake() {

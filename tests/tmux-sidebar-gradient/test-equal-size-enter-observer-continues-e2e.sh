@@ -42,7 +42,7 @@ fail_test() {
     tmuxc list-clients -F '#{client_tty}|#{session_name}|#{client_width}x#{client_height}' >&2 || true
     tmuxc list-panes -a -F '#{session_name}|#{pane_id}|#{pane_title}|#{pane_current_command}|#{pane_width}x#{pane_height}' >&2 || true
     for w in $(tmuxc list-windows -a -F '#{window_id}'); do
-        printf '%s render_pending=%s\n' "$w" "$(tmuxc show-option -wqv -t "$w" @dotfiles_sidebar_transition_render_pending 2>/dev/null || true)" >&2
+        printf '%s render_pending=%s\n' "$w" "$(tmuxc show-environment -gh "DOTFILES_SIDEBAR_RENDER_PENDING_${w//[^A-Za-z0-9]/_}" 2>/dev/null | sed -n "s/^[^=]*=//p")" >&2
     done
     for debug_file in "$TMP_DIR"/*.debug; do
         [ -f "$debug_file" ] || continue
