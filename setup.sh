@@ -5,7 +5,7 @@
 # ==============================================================================
 set -euo pipefail
 
-VERSION="v0.3.40"
+VERSION="v0.3.41"
 REPO_URL="https://github.com/al-hub/tmux-session-dock.git"
 INSTALL_DIR="${TMUX_DOCK_INSTALL_DIR:-$HOME/.local/share/tmux-session-dock}"
 # Git ref (tag, branch or commit) to install from; empty means latest main.
