@@ -174,8 +174,18 @@ sidebar_ime_set_setting on; : > "$CALLS"
 sidebar_ime_keybind_landed; sleep 0.3
 [ "$(cat "$CALLS")" = "imemode.exe en" ] || fail "landing in on mode must en: $(cat "$CALLS")"
 tmux select-pane -T work; : > "$CALLS"
-sidebar_ime_keybind_landed; sleep 0.3
+sidebar_ime_keybind_landed; sleep 1.3     # the landing poll watches for 1 s
 [ ! -s "$CALLS" ] || fail "landing on a work pane must not call the helper"
+echo "--- leaving: pop only for a focused sidebar in restore mode ---"
+sidebar_ime_set_setting restore; : > "$CALLS"
+sidebar_ime_leaving; sleep 0.3
+[ ! -s "$CALLS" ] || fail "leaving from a work pane must not pop"
+tmux select-pane -T dotfiles-session-sidebar; : > "$CALLS"
+sidebar_ime_leaving; sleep 0.3
+[ "$(cat "$CALLS")" = "imemode.exe pop" ] || fail "leaving a focused sidebar must pop: $(cat "$CALLS")"
+sidebar_ime_set_setting on; : > "$CALLS"
+sidebar_ime_leaving; sleep 0.3
+[ ! -s "$CALLS" ] || fail "leaving in mode on must not pop"
 sidebar_ime_set_trigger any; : > "$CALLS"
 tmux select-pane -T dotfiles-session-sidebar
 sidebar_ime_keybind_landed; sleep 0.3

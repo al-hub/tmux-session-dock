@@ -196,23 +196,46 @@ sidebar_ime_set_trigger()
     sidebar_ime_apply
 }
 
-# Called by the dock's own focus commands after they may have landed on the
-# sidebar. Only acts in `keybind` trigger mode; `any` mode is hook-driven.
+# Called by the dock's own focus commands (Alt+s, Prefix+s, Alt+arrows) after
+# they may have landed on the sidebar. Only acts in `keybind` trigger mode;
+# `any` mode is hook-driven. The sidebar pane may still be provisioning when
+# the command returns (focus and title arrive asynchronously on a re-open), so
+# a detached poll watches the window for up to one second.
 sidebar_ime_keybind_landed()
 {
-    local setting helper title
+    local setting helper window="${1:-}" verb="en"
     setting="$(sidebar_ime_setting)"
     [ "$setting" != "off" ] || return 0
     [ "$(sidebar_ime_trigger)" = "keybind" ] || return 0
     helper="$(sidebar_ime_helper_path 2>/dev/null || true)"
     [ -n "$helper" ] || return 0
-    title="$(tmux display-message -p '#{pane_title}' 2>/dev/null || true)"
-    [ "$title" = "$SIDEBAR_IME_TITLE" ] || return 0
-    if [ "$setting" = "restore" ]; then
-        ("$helper" push >/dev/null 2>&1 &)
-    else
-        ("$helper" en >/dev/null 2>&1 &)
-    fi
+    [ "$setting" = "restore" ] && verb="push"
+    (
+        local i=0
+        while [ "$i" -lt 10 ]; do
+            if tmux list-panes ${window:+-t "$window"} -F '#{pane_active}|#{pane_title}' 2>/dev/null | grep -qF "1|$SIDEBAR_IME_TITLE"; then
+                "$helper" "$verb"
+                exit 0
+            fi
+            sleep 0.1
+            i=$((i + 1))
+        done
+    ) >/dev/null 2>&1 &
+    return 0
+}
+
+# Restore on the paths where tmux fires no pane-focus-out: the focused sidebar
+# pane being removed (Prefix+s closes the dock) or quitting on its own.
+# $1 = pane id to judge (default: the current client's active pane).
+sidebar_ime_leaving()
+{
+    local helper state
+    [ "$(sidebar_ime_setting)" = "restore" ] || return 0
+    helper="$(sidebar_ime_helper_path 2>/dev/null || true)"
+    [ -n "$helper" ] || return 0
+    state="$(tmux display-message -p ${1:+-t "$1"} '#{pane_active}|#{pane_title}' 2>/dev/null || true)"
+    [ "$state" = "1|$SIDEBAR_IME_TITLE" ] || return 0
+    ("$helper" pop >/dev/null 2>&1 &)
     return 0
 }
 
