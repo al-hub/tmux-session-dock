@@ -128,7 +128,7 @@ sidebar_switch_execute_hot() {
             if declare -f set_sidebar_layout_hook_guard >/dev/null 2>&1; then
                 set_sidebar_layout_hook_guard 500
             else
-                sidebar_tmux_cmd set-option -gq "${SIDEBAR_LAYOUT_HOOK_GUARD_OPTION:-@dotfiles_sidebar_layout_hook_guard}" "$(( $(date +%s%N) + 500000000 ))" 2>/dev/null || true
+                sidebar_tmux_cmd set-environment -gh "${SIDEBAR_LAYOUT_HOOK_GUARD_ENV:-DOTFILES_SIDEBAR_LAYOUT_HOOK_GUARD}" "$(( $(date +%s%N) + 500000000 ))" 2>/dev/null || true
             fi
 
             local resize_l="$target_h"

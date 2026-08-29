@@ -120,7 +120,11 @@ SIDEBAR_WINDOW_PANE_OPTION="@dotfiles_sidebar_pane_id"
 SIDEBAR_WINDOW_READY_OPTION="@dotfiles_sidebar_ready"
 SIDEBAR_WINDOW_GENERATION_OPTION="@dotfiles_sidebar_generation"
 SIDEBAR_HOOK_GUARD_OPTION="@dotfiles_sidebar_hook_guard"
-SIDEBAR_LAYOUT_HOOK_GUARD_OPTION="@dotfiles_sidebar_layout_hook_guard"
+# Deadline (epoch ns) until which layout hooks are the product's own doing.
+# Written on every layout mutation and by every hook handler, so it lives in
+# the hidden environment like the rest of the transient bookkeeping: a
+# set-option here redrew every attached client on every hook.
+SIDEBAR_LAYOUT_HOOK_GUARD_ENV="DOTFILES_SIDEBAR_LAYOUT_HOOK_GUARD"
 SIDEBAR_OWNER_CLIENT_OPTION="@dotfiles_sidebar_owner_client"
 # Transient transition/handover bookkeeping (transition, phase, generation, deferred,
 # render_pending, handover_rendered, selection_sync(+ack), target_marker) lives in the
@@ -1129,23 +1133,19 @@ install_sidebar_hooks()
 sidebar_layout_hook_guard_active()
 {
     local guard now
-    guard="$(tmux show-option -gqv "$SIDEBAR_LAYOUT_HOOK_GUARD_OPTION" 2>/dev/null || true)"
+    guard="$(sidebar_env_get "$SIDEBAR_LAYOUT_HOOK_GUARD_ENV")"
     case "$guard" in
         ''|*[!0-9]*) return 1 ;;
     esac
     now="$(date +%s%N)"
-    if [ "$guard" -gt "$now" ]; then
-        return 0
-    fi
-    tmux set-option -gq "$SIDEBAR_LAYOUT_HOOK_GUARD_OPTION" 0 2>/dev/null || true
-    return 1
+    [ "$guard" -gt "$now" ]
 }
 
 set_sidebar_layout_hook_guard()
 {
     local duration_ms="${1:-500}"
     local duration_ns=$(( duration_ms * 1000000 ))
-    tmux set-option -gq "$SIDEBAR_LAYOUT_HOOK_GUARD_OPTION" "$(( $(date +%s%N) + duration_ns ))" 2>/dev/null || true
+    sidebar_env_set "$SIDEBAR_LAYOUT_HOOK_GUARD_ENV" "$(( $(date +%s%N) + duration_ns ))"
 }
 
 sync_sidebar_layout()
@@ -1180,7 +1180,7 @@ sync_sidebar_layout()
         return 1
     fi
 
-    tmux set-option -gq "$SIDEBAR_LAYOUT_HOOK_GUARD_OPTION" "$(( $(date +%s%N) + 500000000 ))" 2>/dev/null || true
+    set_sidebar_layout_hook_guard 500
     sleep "${TMUX_SESSION_SIDEBAR_LAYOUT_DEBOUNCE:-0.05}"
     if { [ "$source" = manual-resize ] || [ "$source" = window-resized ]; } && ! sidebar_width_apply_guard_active && ! transition_is_active; then
         local is_attached
