@@ -7,6 +7,44 @@ SUBPANE_LEASE_OPTION="@dotfiles_subpane_lease_window"
 SUBPANE_COUNT_OPTION="@session-dock-subpane-count"
 SUBPANE_KEEPER_OPTION="@dotfiles_subpane_hub_keeper"
 SUBPANE_SLOT_PANE_OPTION_PREFIX="@dotfiles_subpane_slot_"
+# Hidden tmux environment marker raised while a lease transaction (park to
+# the hub, rebuild in a window, position swap) moves slots.  Hook handlers
+# run as separate processes and snapshot User Height Intent 50 ms after an
+# after-resize-pane; one that lands while slots are half parked reads the
+# hub window's heights (or the grown remainder) and records them as intent,
+# which the next rebuild then applies (measured: 4/4/4 became 11/5/4).  The
+# value is an epoch-second deadline so a crashed transaction cannot block
+# snapshots for good.
+SUBPANE_TRANSACTION_ENV="DOTFILES_SIDEBAR_SUBPANE_TRANSACTION"
+SUBPANE_TRANSACTION_TTL_SECONDS=5
+_subpane_hub_transaction_depth=0
+
+subpane_hub_transaction_begin() {
+    _subpane_hub_transaction_depth=$((_subpane_hub_transaction_depth + 1))
+    [ "$_subpane_hub_transaction_depth" -eq 1 ] || return 0
+    sidebar_tmux_cmd set-environment -gh "$SUBPANE_TRANSACTION_ENV" \
+        "$(( ${EPOCHSECONDS:-$(date +%s)} + SUBPANE_TRANSACTION_TTL_SECONDS ))" 2>/dev/null || true
+}
+
+subpane_hub_transaction_end() {
+    [ "$_subpane_hub_transaction_depth" -gt 0 ] || return 0
+    _subpane_hub_transaction_depth=$((_subpane_hub_transaction_depth - 1))
+    [ "$_subpane_hub_transaction_depth" -eq 0 ] || return 0
+    sidebar_tmux_cmd set-environment -ghu "$SUBPANE_TRANSACTION_ENV" 2>/dev/null || true
+}
+
+# True while another process's lease transaction is in flight.  The owning
+# process itself is never blocked (its own snapshots run before it moves
+# anything).
+subpane_hub_transaction_active() {
+    [ "$_subpane_hub_transaction_depth" -eq 0 ] || return 1
+    local out deadline
+    out="$(sidebar_tmux_cmd show-environment -gh "$SUBPANE_TRANSACTION_ENV" 2>/dev/null || true)"
+    case "$out" in ''|-*) return 1 ;; esac
+    deadline="${out#*=}"
+    case "$deadline" in ''|*[!0-9]*) return 1 ;; esac
+    [ "${EPOCHSECONDS:-$(date +%s)}" -le "$deadline" ]
+}
 
 subpane_hub_get_count() {
     local cnt
@@ -178,6 +216,9 @@ subpane_hub_get_window_subpanes() {
 subpane_hub_snapshot_user_intent() {
     local target_win="${1:-}"
     [ -n "$target_win" ] || return 0
+    # Slots are moving: whatever this process would measure now is transaction
+    # geometry, not the user's.
+    subpane_hub_transaction_active && return 0
 
     local total_h=0 slot pane height captured=0
     while IFS='|' read -r slot pane; do
@@ -313,17 +354,20 @@ subpane_hub_swap_stack_position() {
     sidebar_subpane_set_position "$transaction_new_pos"
     transaction_hub="$(subpane_hub_session_name)"
     subpane_hub_ensure_session || return 1
+    subpane_hub_transaction_begin
+    local transaction_rc=0
     while IFS= read -r transaction_pane; do
         [ -n "$transaction_pane" ] || continue
-        sidebar_tmux_cmd join-pane -d -s "$transaction_pane" -t "=$transaction_hub:" -v 2>/dev/null || return 1
+        sidebar_tmux_cmd join-pane -d -s "$transaction_pane" -t "=$transaction_hub:" -v 2>/dev/null || { transaction_rc=1; break; }
     done < <(subpane_hub_get_window_subpanes "$target_win")
-    subpane_hub_release_lease "$target_win"
-    local transaction_total
-    transaction_total="$(sidebar_tmux_cmd show-option -gqv "${SIDEBAR_SUBPANE_HEIGHT_OPTION:-@dotfiles_sidebar_subpane_height}" 2>/dev/null || true)"
-    subpane_hub_atomic_migrate "$launcher_pane" "$transaction_total" >/dev/null || return 1
-    return 0
-
-    return 0
+    if [ "$transaction_rc" -eq 0 ]; then
+        subpane_hub_release_lease "$target_win"
+        local transaction_total
+        transaction_total="$(sidebar_tmux_cmd show-option -gqv "${SIDEBAR_SUBPANE_HEIGHT_OPTION:-@dotfiles_sidebar_subpane_height}" 2>/dev/null || true)"
+        subpane_hub_atomic_migrate "$launcher_pane" "$transaction_total" >/dev/null || transaction_rc=1
+    fi
+    subpane_hub_transaction_end
+    return "$transaction_rc"
 }
 
 # ==============================================================================
@@ -371,6 +415,14 @@ subpane_hub_sweep_ghosts() {
 # directly from its current window to the target without an intermediate redraw.
 # ==============================================================================
 subpane_hub_atomic_migrate() {
+    subpane_hub_transaction_begin
+    local migrate_rc=0
+    subpane_hub_atomic_migrate_body "$@" || migrate_rc=$?
+    subpane_hub_transaction_end
+    return "$migrate_rc"
+}
+
+subpane_hub_atomic_migrate_body() {
     local target_launcher="$1"
     local height="${2:-}" sub_title="${3:-dotfiles-sidebar-subpane}"
     [ -n "$target_launcher" ] || return 1
@@ -537,6 +589,14 @@ subpane_hub_acquire_pane() {
 }
 
 subpane_hub_release_pane() {
+    subpane_hub_transaction_begin
+    local release_rc=0
+    subpane_hub_release_pane_body "$@" || release_rc=$?
+    subpane_hub_transaction_end
+    return "$release_rc"
+}
+
+subpane_hub_release_pane_body() {
     local sub_pane="${1:-}"
     local target_win=""
     if [ -n "$sub_pane" ]; then

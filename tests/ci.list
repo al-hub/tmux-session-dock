@@ -83,6 +83,7 @@ tmux-single-sidebar/test-subpane-contract.sh
 tmux-single-sidebar/test-subpane-smart-navigate-priority.sh
 tmux-single-sidebar/test-subpane-alt-navigation-binding.sh
 tmux-single-sidebar/test-subpane-hub-contract.sh
+tmux-single-sidebar/test-subpane-transaction-snapshot-guard.sh
 tmux-single-sidebar/test-subpane-global-identity-contract.sh
 tmux-single-sidebar/test-subpane-real-world-repro.sh
 tmux-single-sidebar/test-subpane-position-contract.sh
