@@ -1369,7 +1369,8 @@ subpane_hub_sweep_ghosts() {
 # directly from its current window to the target without an intermediate redraw.
 # ==============================================================================
 subpane_hub_atomic_migrate() {
-    subpane_hub_transaction_begin
+    # The marker is raised inside the body, right before the first join, so a
+    # no-op call (slots already attached) never blocks anyone's snapshot.
     local migrate_rc=0
     subpane_hub_atomic_migrate_body "$@" || migrate_rc=$?
     subpane_hub_transaction_end
@@ -1453,6 +1454,7 @@ subpane_hub_atomic_migrate_body() {
         return 0
     fi
 
+    subpane_hub_transaction_begin
     if declare -f set_sidebar_layout_hook_guard >/dev/null 2>&1; then
         set_sidebar_layout_hook_guard 500
     fi
@@ -1543,7 +1545,8 @@ subpane_hub_acquire_pane() {
 }
 
 subpane_hub_release_pane() {
-    subpane_hub_transaction_begin
+    # The body raises the marker before the first join; a call that finds no
+    # slot to park never blocks anyone's snapshot.
     local release_rc=0
     subpane_hub_release_pane_body "$@" || release_rc=$?
     subpane_hub_transaction_end
@@ -1565,10 +1568,14 @@ subpane_hub_release_pane_body() {
     keeper="$(subpane_hub_get_keeper)" || return 1
 
     # Find all subpanes in the target window or server and return to hub
-    local p_id p_win p_sess
+    local p_id p_win p_sess release_started=0
     while IFS='|' read -r p_id p_win p_sess; do
         [ -n "$p_id" ] || continue
         [ "$p_sess" != "$hub_sess" ] || continue
+        if [ "$release_started" -eq 0 ]; then
+            subpane_hub_transaction_begin
+            release_started=1
+        fi
         sidebar_tmux_cmd set-option -p -q -t "$p_id" @dotfiles_subpane_hub_pane 1 2>/dev/null || true
         sidebar_tmux_cmd set-option -p -q -t "$p_id" @dotfiles_sidebar_subpane 1 2>/dev/null || true
         sidebar_tmux_cmd join-pane -d -s "$p_id" -t "$keeper" -v 2>/dev/null || return 1
