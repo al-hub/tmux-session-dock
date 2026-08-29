@@ -2485,9 +2485,6 @@ toggle_current_sidebar()
         if [ -n "$current_win" ]; then
             remember_sidebar_width_for_window "$current_win"
         fi
-        # kill-pane fires no pane-focus-out: restore the IME here if the
-        # sidebar being closed is the focused pane.
-        declare -f sidebar_ime_leaving >/dev/null 2>&1 && sidebar_ime_leaving || true
         set_sidebar_enabled 0
         remove_managed_sidebars || {
             trace_event "sidebar.toggle.abort reason=remove-failed"
@@ -2533,7 +2530,6 @@ toggle_current_sidebar()
     fi
     sidebar_tmux_cmd set-option -gq "$SIDEBAR_PROVISION_OPTION" 0 2>/dev/null || true
     trace_event "sidebar.toggle.end mode=on windows=$(sidebar_window_ids | wc -l | tr -d ' ')"
-    declare -f sidebar_ime_keybind_landed >/dev/null 2>&1 && sidebar_ime_keybind_landed "$active_target_window" || true
 }
 
 toggle_sidebar_for_session()

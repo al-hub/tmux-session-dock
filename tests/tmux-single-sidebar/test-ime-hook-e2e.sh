@@ -135,19 +135,20 @@ t run-shell "$BIN --focus-sidebar"      # smart return -> focus-out hook pops
 wait_calls $((before + 2)) "keybind: leaving via quick-jump"; settle
 [ "$(last_call)" = "pop" ] || fail "keybind+restore: leaving must pop, got '$(last_call)'"
 
-echo "=== [7b/9] Prefix+s: closing the focused sidebar pops, re-opening pushes ==="
+echo "=== [7b/9] Prefix+s (toggle) never touches the IME ==="
 t run-shell "$BIN --focus-sidebar"
 wait_calls $((before + 3)) "keybind: back into the sidebar"; settle
 [ "$(last_call)" = "push" ] || fail "re-entry must push"
+t select-pane -t "$work"
+wait_calls $((before + 4)) "leave before toggling"; settle
 before="$(calls)"
-t run-shell "$BIN --toggle-sidebar"          # closes the dock while it is focused
-wait_calls $((before + 1)) "close via toggle"; settle
-[ "$(last_call)" = "pop" ] || fail "closing the focused sidebar must pop, got '$(last_call)'"
+t run-shell "$BIN --toggle-sidebar"          # closes the dock
+settle; sleep 1.2                            # longer than the landing poll
+[ "$(calls)" = "$before" ] || fail "closing via toggle must not call the helper, got '$(last_call)'"
 [ -z "$(t list-panes -t "$win" -F '#{pane_title}' | grep -F dotfiles-session-sidebar)" ] || fail "toggle must have closed the sidebar"
-before="$(calls)"
-t run-shell "$BIN --toggle-sidebar"          # re-open: focus lands on the new sidebar
-wait_calls $((before + 1)) "re-open via toggle"; settle
-[ "$(last_call)" = "push" ] || fail "re-opening onto the sidebar must push, got '$(last_call)'"
+t run-shell "$BIN --toggle-sidebar"          # re-open (focus may land on the sidebar)
+settle; sleep 1.2
+[ "$(calls)" = "$before" ] || fail "re-opening via toggle must not call the helper, got '$(last_call)'"
 i=0; real=""
 while [ "$i" -lt 100 ]; do
     real="$(t list-panes -t "$win" -F '#{pane_id}|#{pane_title}' | awk -F '|' '$2=="dotfiles-session-sidebar"{print $1; exit}')"
@@ -155,8 +156,7 @@ while [ "$i" -lt 100 ]; do
     sleep 0.05; i=$((i + 1))
 done
 [ -n "$real" ] || fail "re-opened sidebar pane not found"
-t select-pane -t "$work"
-wait_calls $((before + 2)) "leaving the re-opened sidebar"; settle
+t select-pane -t "$work"; settle
 
 echo "=== [8/9] trigger any again: hook-driven on the real sidebar ==="
 t run-shell "$BIN --ime-set-trigger any"

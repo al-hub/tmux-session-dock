@@ -163,7 +163,7 @@ draw_picker() {
                     desc="${DIM}IME 전환이 꺼져 있어 비활성${RESET}"
                 elif [ "$IME_TRIGGER" = "keybind" ]; then
                     is_active=true
-                    desc="키바인드(Alt+s · Prefix+s · Alt+←)로 들어올 때만 전환 ${DIM}(마우스 클릭은 그대로)${RESET}"
+                    desc="키바인드(Alt+s · Alt+←)로 들어올 때만 전환 ${DIM}(마우스 클릭·Prefix+s는 그대로)${RESET}"
                 else
                     desc="현재: ${BOLD}${EMERALD}ANY FOCUS${RESET}${GRAY} — 마우스·세션 전환 포함 모든 진입에서 전환${RESET}"
                 fi

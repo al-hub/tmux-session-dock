@@ -1886,7 +1886,8 @@ sidebar_presenter_render_footer() {
 #       restore  sidebar focus -> remember mode, English; leaving -> restore
 #   @session-dock-ime-trigger  any | keybind          (default any)
 #       any      every focus route (mouse, keys, session switch, attach)
-#       keybind  only the dock's own commands (Alt+s, Prefix+s, Alt+arrows)
+#       keybind  only the dock's focus commands (Alt+s, Alt+arrows); Prefix+s
+#                (show/hide) never touches the IME
 #
 # Mechanism: tmux `pane-focus-in` / `pane-focus-out` hooks whose pane_title
 # compare runs inside tmux (`if-shell -F`, no process, ~0.1 ms per event) and
@@ -2068,7 +2069,7 @@ sidebar_ime_set_trigger()
     sidebar_ime_apply
 }
 
-# Called by the dock's own focus commands (Alt+s, Prefix+s, Alt+arrows) after
+# Called by the dock's focus commands (Alt+s, Alt+arrows) after
 # they may have landed on the sidebar. Only acts in `keybind` trigger mode;
 # `any` mode is hook-driven. The sidebar pane may still be provisioning when
 # the command returns (focus and title arrive asynchronously on a re-open), so
@@ -2096,8 +2097,8 @@ sidebar_ime_keybind_landed()
     return 0
 }
 
-# Restore on the paths where tmux fires no pane-focus-out: the focused sidebar
-# pane being removed (Prefix+s closes the dock) or quitting on its own.
+# Restore where tmux fires no pane-focus-out: the focused sidebar quitting on
+# its own (q).
 # $1 = pane id to judge (default: the current client's active pane).
 sidebar_ime_leaving()
 {
@@ -4951,9 +4952,6 @@ toggle_current_sidebar()
         if [ -n "$current_win" ]; then
             remember_sidebar_width_for_window "$current_win"
         fi
-        # kill-pane fires no pane-focus-out: restore the IME here if the
-        # sidebar being closed is the focused pane.
-        declare -f sidebar_ime_leaving >/dev/null 2>&1 && sidebar_ime_leaving || true
         set_sidebar_enabled 0
         remove_managed_sidebars || {
             trace_event "sidebar.toggle.abort reason=remove-failed"
@@ -4999,7 +4997,6 @@ toggle_current_sidebar()
     fi
     sidebar_tmux_cmd set-option -gq "$SIDEBAR_PROVISION_OPTION" 0 2>/dev/null || true
     trace_event "sidebar.toggle.end mode=on windows=$(sidebar_window_ids | wc -l | tr -d ' ')"
-    declare -f sidebar_ime_keybind_landed >/dev/null 2>&1 && sidebar_ime_keybind_landed "$active_target_window" || true
 }
 
 toggle_sidebar_for_session()
