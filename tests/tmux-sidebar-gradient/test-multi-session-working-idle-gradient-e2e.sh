@@ -40,12 +40,23 @@ row_snapshot()
     printf '%s\n' '-1'
 }
 
+# The row must change within a bounded window.  At 24 fps two frames 0.25 s
+# apart always differ while the presenter runs, but a loaded CI runner (or a
+# WSL host) can stall every process for longer than that; one two-sample
+# comparison then fails without any product defect (measured locally: a
+# 0.8 s hole across all presenters, the observer and the fake AI at once).
+# Poll the session's own row for up to ROW_CHANGE_SECONDS instead.
 row_changes()
 {
-    local pane="$2" first second
-    first="$(tmuxc capture-pane -e -p -t "$pane" 2>/dev/null || true)"
-    second="$(sleep 0.25; tmuxc capture-pane -e -p -t "$pane" 2>/dev/null || true)"
-    [ "$first" != "$second" ]
+    local session="$1" pane="$2" first now deadline
+    first="$(row_snapshot "$session" "$pane")"
+    deadline=$(( $(date +%s) + ${ROW_CHANGE_SECONDS:-3} ))
+    while [ "$(date +%s)" -lt "$deadline" ]; do
+        sleep 0.1
+        now="$(row_snapshot "$session" "$pane")"
+        [ "$now" != "$first" ] && return 0
+    done
+    return 1
 }
 
 for session in state1 state2 state3; do
