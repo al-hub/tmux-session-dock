@@ -715,6 +715,12 @@ run_delete_zero_stale_row_reproduction()
         wait_for_action_generation_change "$before_generation"
         wait_for_sidebar_input_ready
     done
+    # d deletes whatever is selected; a loop that gave up silently once
+    # deleted delete-zero-1 and then reported "0 still exists".
+    [ "$(sidebar_selected_name)" = "0" ] || {
+        printf 'FAIL: could not move the selection to the numeric session 0 (selected: %s)\n' "$(sidebar_selected_name)" >&2
+        return 1
+    }
 
     # The anchor is the numeric session 0. Confirm deletion through the real
     # prompt path, then wait for the asynchronous worker to finish.
@@ -1271,7 +1277,10 @@ prompt_ready()
 
 sidebar_input_ready()
 {
-    if window_local_ready && [ "$(sidebar_is_active)" = true ]; then
+    # The generation marker is published together with input readiness; a
+    # caller that snapshots it while it is still unset would see any later
+    # publish (even the initial 0) as "the action completed".
+    if window_local_ready && [ "$(sidebar_is_active)" = true ] && [ -n "$(action_generation)" ]; then
         printf 'true\n'
         return 0
     fi

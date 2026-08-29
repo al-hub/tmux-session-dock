@@ -5850,7 +5850,9 @@ cleanup_prompt_traps()
     trap handle_geometry_signal WINCH 2>/dev/null || true
     prompt_active=false
     post_operation_fast_read=true
-    discard_pending_input 2>/dev/null || true
+    # The normal exit path drains before publishing PROMPT_READY=0; draining
+    # again here would swallow a key typed right after that publish.
+    [ "${prompt_drained:-0}" = 1 ] || discard_pending_input 2>/dev/null || true
 }
 
 prompt_text()
@@ -5871,6 +5873,7 @@ prompt_text()
     esac
     sidebar_runtime_set "$SIDEBAR_PROMPT_READY_OPTION" 1
     prompt_active=true
+    prompt_drained=0
     trap cleanup_prompt_traps RETURN 2>/dev/null || true
     trap '' USR2 WINCH
 
@@ -5984,14 +5987,21 @@ prompt_text()
         done
     fi
 
-    sidebar_runtime_set "$SIDEBAR_PROMPT_READY_OPTION" 0
-
     trace_event "prompt.result action_id=${current_action_id:-none} type=$prompt_type result=$([ "$prompt_cancelled" = true ] && printf cancelled || printf complete) length=${#prompt_result} terminator=canonical-line"
     stty -echo -icanon time 0 min 0 2>/dev/null || true
     trap handle_refresh_signal USR2
     trap handle_geometry_signal WINCH
     prompt_active=false
     post_operation_fast_read=true
+    # Drain the typeahead that piled up while the prompt was open BEFORE
+    # announcing that the prompt is closed.  Anything typed after seeing
+    # PROMPT_READY=0 — a user pressing the next key the moment the box
+    # disappears, or a test doing the same — must reach the main loop, not the
+    # drain (measured: a `c` typed 50 ms after the previous prompt closed was
+    # rejected as operation-complete-drain and the next prompt never opened).
+    discard_pending_input 2>/dev/null || true
+    prompt_drained=1
+    sidebar_runtime_set "$SIDEBAR_PROMPT_READY_OPTION" 0
     trace_event "prompt.end action_id=${current_action_id:-none} type=$prompt_type"
 }
 
@@ -7687,11 +7697,11 @@ tui_new_session()
         tmux set-option -wq -t "$SIDEBAR_WINDOW_ID" "$SIDEBAR_WINDOW_READY_OPTION" 1 2>/dev/null || true
     fi
 
-    # The after-new-session hook provisions the target window's stable local
-    local gen
-    gen="$(sidebar_runtime_get "$SIDEBAR_ACTION_GENERATION_OPTION")"
-    sidebar_runtime_set "$SIDEBAR_ACTION_GENERATION_OPTION" "$(( ${gen:-0} + 1 ))"
-    sidebar_runtime_set "$SIDEBAR_INPUT_READY_OPTION" 1
+    # The after-new-session hook provisions the target window's sidebar.
+    # Input readiness and the action generation are published by the main
+    # loop once this action has finished collecting and rendering (see
+    # action.complete); publishing them here, before the final render, told
+    # observers the action was over while the frame still showed the prompt.
     trace_event "session.create.end session=$session_name sidebar=hook-provision"
 }
 execute_tui_session_delete_action()
