@@ -636,6 +636,9 @@ run_subpane_multi_slot_enter_reproduction()
             printf 'FAIL: production position transaction returned non-zero on swap %s\n' "$iteration" >&2
             return 1
         fi
+        printf 'DIAG swap %s rc=0 anchor=%s panes: %s | pos=%s lease=%s\n' "$iteration" "$anchor_window" \
+            "$(tmuxc list-panes -a -F '#{window_id}:#{pane_id}:slot=#{@dotfiles_subpane_slot}:sub=#{@dotfiles_sidebar_subpane}:top=#{pane_top}:h=#{pane_height}:#{pane_title}' | tr '\n' ' ')" \
+            "$(tmuxc show-option -gqv @dotfiles_sidebar_subpane_position)" "$(tmuxc show-option -gqv @dotfiles_subpane_lease_window)"
         wait_until "multi-slot position swap $iteration" "$expected_position" multi_slot_position "$anchor_window"
         for slot in "${slots[@]}"; do
             actual="$(tmuxc list-panes -t "$anchor_window" -F '#{@dotfiles_subpane_slot}|#{pane_height}' |
