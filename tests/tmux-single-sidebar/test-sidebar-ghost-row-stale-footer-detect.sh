@@ -18,6 +18,19 @@ assert_settled_presenter() {
     target_window="$(tmuxc display-message -p -t "=$target:" '#{window_id}')"
     wait_for_settled_presenter_screen "$target_window" "$target"
     screen="$PRESENTER_SCREEN_RESULT"
+    # A session created a second before the switch may not be in the target
+    # Presenter's frame yet (its list refreshes once a second); give the frame
+    # a bounded moment to carry every row before judging ghosts/duplicates.
+    local attempt missing
+    for attempt in $(seq 1 60); do
+        missing=0
+        for session_name in "${SESSIONS[@]}"; do
+            [ "$(presenter_screen_session_rows "$screen" "$session_name")" -ge 1 ] || missing=1
+        done
+        [ "$missing" -eq 0 ] && break
+        sleep 0.1
+        screen="$(tmuxc capture-pane -p -t "$(window_sidebar_pane_id "$target_window")" 2>/dev/null || true)"
+    done
     printf '%s\n' "$screen" > "$RUN_DIR/settled-$target-$step.screen"
 
     for session_name in "${SESSIONS[@]}"; do

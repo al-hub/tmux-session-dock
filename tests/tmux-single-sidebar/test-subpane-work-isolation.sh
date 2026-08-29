@@ -6,14 +6,18 @@ SOCKET="test-subpane-work-iso-$$"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 STATE_DIR="$(mktemp -d /tmp/test-subpane-work-iso-state.XXXXXX)"
 
+export TMUX_SESSION_LAUNCHER_TRACE=1 TMUX_SESSION_LAUNCHER_TRACE_FILE="$STATE_DIR/trace.log"
 cleanup() {
+    local status=$?
     tmux -L "$SOCKET" kill-server 2>/dev/null || true
-    rm -rf "$STATE_DIR"
+    # Keep the state dir (trace) on failure: CI collects /tmp/test-* into the
+    # failure artifacts.
+    if [ "$status" -eq 0 ]; then rm -rf "$STATE_DIR"; else printf 'kept %s\n' "$STATE_DIR" >&2; fi
 }
 trap cleanup EXIT
 # Under `set -e` a failing command exits silently; name it so a CI log
 # shows more than "rc=1" (seen once on ubuntu-24.04 with no output at all).
-trap 'printf "FAIL: line %s: %s\n" "$LINENO" "$BASH_COMMAND" >&2; tmux -L "$SOCKET" list-panes -a -F "#{session_name}|#{window_id}|#{pane_id}|#{pane_title}|#{pane_height}" >&2 2>/dev/null || true' ERR
+trap 'printf "FAIL: line %s: %s\n" "$LINENO" "$BASH_COMMAND" >&2; tmux -L "$SOCKET" list-panes -a -F "#{session_name}|#{window_id}|#{pane_id}|#{pane_title}|#{pane_height}" >&2 2>/dev/null || true; printf -- "--- trace tail (%s)\n" "$STATE_DIR/trace.log" >&2; grep -v "render\.row\|read\.begin\|input\.read\.result\|tmux.write caller=render" "$STATE_DIR/trace.log" 2>/dev/null | tail -n 40 >&2 || true' ERR
 
 export TMUX="$SOCKET"
 export TMUX_SESSION_LAUNCHER_SOCKET="$SOCKET"
