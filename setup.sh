@@ -207,7 +207,7 @@ do_status() {
     fi
 
     # Sidebar IME focus hook (opt-in)
-    local ime_status="setting=off trigger=any backend=none hook_in=absent hook_out=absent"
+    local ime_status="setting=off backend=none hook_in=absent hook_out=absent"
     if [ -x "$SCRIPT_DIR/dist/tmux-session-dock" ]; then
         ime_status="$("$SCRIPT_DIR/dist/tmux-session-dock" --ime-status 2>/dev/null || echo "$ime_status")"
     fi

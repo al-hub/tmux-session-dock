@@ -2,7 +2,7 @@
 # ==============================================================================
 # tmux-subpane-picker: Session Dock settings popup (Prefix + S)
 #   section 1  subpane stack count / position
-#   section 2  IME (한/영): English on sidebar focus, trigger scope, restore
+#   section 2  IME (한/영): English on sidebar focus, restore on leave
 # Toggle a row with Space or Enter; ↑/↓ (or k/j) move; Esc/q closes.
 # ==============================================================================
 set -euo pipefail
@@ -50,9 +50,8 @@ set_subpane_config() {
 }
 
 # IME state from the dock binary:
-#   "setting=off|on|restore trigger=any|keybind backend=<name> hook_in=... hook_out=..."
+#   "setting=off|on|restore backend=<name> hook_in=... hook_out=..."
 IME_SETTING="off"
-IME_TRIGGER="any"
 IME_BACKEND="none"
 read_ime_status() {
     local status=""
@@ -60,10 +59,8 @@ read_ime_status() {
         status="$("$DOCK_BIN" --ime-status 2>/dev/null || true)"
     fi
     IME_SETTING="$(printf '%s' "$status" | sed -n 's/.*setting=\([a-z]*\).*/\1/p')"
-    IME_TRIGGER="$(printf '%s' "$status" | sed -n 's/.*trigger=\([a-z]*\).*/\1/p')"
     IME_BACKEND="$(printf '%s' "$status" | sed -n 's/.*backend=\([a-z0-9-]*\).*/\1/p')"
     [ -n "$IME_SETTING" ] || IME_SETTING="off"
-    [ -n "$IME_TRIGGER" ] || IME_TRIGGER="any"
     [ -n "$IME_BACKEND" ] || IME_BACKEND="none"
 }
 
@@ -92,7 +89,6 @@ OPTIONS=(
     "POS|Toggle Position (Top ↔ Bottom)|"
     "#IME|IME 한/영 (Input Method)|"
     "IME|IME → English on Sidebar Focus|"
-    "TRIG|Trigger: Keybind Only|"
     "REST|Restore IME on Leave|"
 )
 
@@ -152,20 +148,9 @@ draw_picker() {
                     desc="사용 불가: IME 헬퍼 없음 ${DIM}(WSL: ./setup.sh update / Linux: fcitx5·fcitx·ibus / macOS: im-select)${RESET}"
                 elif [ "$IME_SETTING" != "off" ]; then
                     is_active=true
-                    desc="사이드바 진입 시 영문 전환 ${DIM}· 백엔드 ${IME_BACKEND}${RESET}"
+                    desc="어떤 경로로 들어와도(Alt+s · Alt+← · 마우스) 영문 전환 ${DIM}· 백엔드 ${IME_BACKEND}${RESET}"
                 else
                     desc="사이드바 진입 시 영문 전환 ${DIM}· 백엔드 ${IME_BACKEND} (한글 상태에서도 j/k/d 단축키 동작)${RESET}"
-                fi
-                ;;
-            TRIG)
-                if [ "$IME_BACKEND" = "none" ] || [ "$IME_SETTING" = "off" ]; then
-                    disabled=true
-                    desc="${DIM}IME 전환이 꺼져 있어 비활성${RESET}"
-                elif [ "$IME_TRIGGER" = "keybind" ]; then
-                    is_active=true
-                    desc="키바인드(Alt+s · Alt+←)로 들어올 때만 전환 ${DIM}(마우스 클릭·Prefix+s는 그대로)${RESET}"
-                else
-                    desc="현재: ${BOLD}${EMERALD}ANY FOCUS${RESET}${GRAY} — 마우스·세션 전환 포함 모든 진입에서 전환${RESET}"
                 fi
                 ;;
             REST)
@@ -217,14 +202,6 @@ apply_selection() {
             else
                 IME_LAST_ON_MODE="$IME_SETTING"
                 dock_cmd --ime-set off
-            fi
-            ;;
-        TRIG)
-            [ "$IME_BACKEND" != "none" ] && [ "$IME_SETTING" != "off" ] || return 0
-            if [ "$IME_TRIGGER" = "keybind" ]; then
-                dock_cmd --ime-set-trigger any
-            else
-                dock_cmd --ime-set-trigger keybind
             fi
             ;;
         REST)

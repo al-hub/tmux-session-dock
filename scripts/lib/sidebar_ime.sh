@@ -7,33 +7,26 @@
 # Whenever the sidebar pane gains focus, the OS input method is switched to
 # English/alphanumeric; optionally the previous mode is restored on leave.
 #
-# Settings (tmux option > persisted state file > default):
-#   @session-dock-ime          off | on | restore     (default off)
+# Setting (tmux option > persisted state file > default):
+#   @session-dock-ime   off | on | restore     (default off)
 #       on       sidebar focus -> English; leaving restores nothing
 #       restore  sidebar focus -> remember mode, English; leaving -> restore
-#   @session-dock-ime-trigger  any | keybind          (default any)
-#       any      every focus route (mouse, keys, session switch, attach)
-#       keybind  only the dock's focus commands (Alt+s, Alt+arrows); Prefix+s
-#                (show/hide) never touches the IME
 #
 # Mechanism: tmux `pane-focus-in` / `pane-focus-out` hooks whose pane_title
 # compare runs inside tmux (`if-shell -F`, no process, ~0.1 ms per event) and
-# run the one-shot helper `tmux-session-dock-ime` only for the sidebar pane.
+# run the one-shot helper `tmux-session-dock-ime` only for the sidebar pane,
+# whatever brought the focus there (Alt+s, Alt+arrows, mouse, session switch).
 # Hooks need `focus-events on` and an attached focused client; headless
-# servers (tests, CI) never fire them. In `keybind` mode the focus-in hook is
-# not installed; the dock commands call the helper after landing on the
-# sidebar instead. The focus-out hook (restore) is used in both trigger modes.
+# servers (tests, CI) never fire them.
 # ==============================================================================
 set -euo pipefail
 
 SIDEBAR_IME_OPTION="@session-dock-ime"
-SIDEBAR_IME_TRIGGER_OPTION="@session-dock-ime-trigger"
 SIDEBAR_IME_HOOK_IN="pane-focus-in"
 SIDEBAR_IME_HOOK_OUT="pane-focus-out"
 SIDEBAR_IME_TITLE="dotfiles-session-sidebar"
 SIDEBAR_IME_STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/dotfiles"
 SIDEBAR_IME_STATE_FILE="$SIDEBAR_IME_STATE_DIR/tmux-sidebar-ime"
-SIDEBAR_IME_TRIGGER_STATE_FILE="$SIDEBAR_IME_STATE_DIR/tmux-sidebar-ime-trigger"
 
 sidebar_ime_normalize()
 {
@@ -41,14 +34,6 @@ sidebar_ime_normalize()
         restore) echo "restore" ;;
         on|1|true|yes|english) echo "on" ;;
         *) echo "off" ;;
-    esac
-}
-
-sidebar_ime_normalize_trigger()
-{
-    case "${1:-}" in
-        keybind|key|keys|bind) echo "keybind" ;;
-        *) echo "any" ;;
     esac
 }
 
@@ -92,11 +77,6 @@ sidebar_ime_read_setting()
 sidebar_ime_setting()
 {
     sidebar_ime_normalize "$(sidebar_ime_read_setting "$SIDEBAR_IME_OPTION" "$SIDEBAR_IME_STATE_FILE")"
-}
-
-sidebar_ime_trigger()
-{
-    sidebar_ime_normalize_trigger "$(sidebar_ime_read_setting "$SIDEBAR_IME_TRIGGER_OPTION" "$SIDEBAR_IME_TRIGGER_STATE_FILE")"
 }
 
 sidebar_ime_write_setting()
@@ -156,30 +136,22 @@ sidebar_ime_install_hook()
     tmux set-hook -ga "$1" "$hook" 2>/dev/null || true
 }
 
-# Reconcile both hooks with the current settings. Safe to call any time.
+# Reconcile both hooks with the current setting. Safe to call any time.
 sidebar_ime_apply()
 {
-    local setting trigger helper
+    local setting helper
     setting="$(sidebar_ime_setting)"
-    trigger="$(sidebar_ime_trigger)"
     helper="$(sidebar_ime_helper_path 2>/dev/null || true)"
     if [ "$setting" = "off" ] || [ -z "$helper" ] || ! sidebar_ime_available; then
         sidebar_ime_uninstall_hook "$SIDEBAR_IME_HOOK_IN"
         sidebar_ime_uninstall_hook "$SIDEBAR_IME_HOOK_OUT"
         return 0
     fi
-    if [ "$trigger" = "any" ]; then
-        if [ "$setting" = "restore" ]; then
-            sidebar_ime_install_hook "$SIDEBAR_IME_HOOK_IN" "$helper push"
-        else
-            sidebar_ime_install_hook "$SIDEBAR_IME_HOOK_IN" "$helper en"
-        fi
-    else
-        sidebar_ime_uninstall_hook "$SIDEBAR_IME_HOOK_IN"
-    fi
     if [ "$setting" = "restore" ]; then
+        sidebar_ime_install_hook "$SIDEBAR_IME_HOOK_IN" "$helper push"
         sidebar_ime_install_hook "$SIDEBAR_IME_HOOK_OUT" "$helper pop"
     else
+        sidebar_ime_install_hook "$SIDEBAR_IME_HOOK_IN" "$helper en"
         sidebar_ime_uninstall_hook "$SIDEBAR_IME_HOOK_OUT"
     fi
     return 0
@@ -189,40 +161,6 @@ sidebar_ime_set_setting()
 {
     sidebar_ime_write_setting "$SIDEBAR_IME_OPTION" "$SIDEBAR_IME_STATE_FILE" "$(sidebar_ime_normalize "${1:-}")"
     sidebar_ime_apply
-}
-
-sidebar_ime_set_trigger()
-{
-    sidebar_ime_write_setting "$SIDEBAR_IME_TRIGGER_OPTION" "$SIDEBAR_IME_TRIGGER_STATE_FILE" "$(sidebar_ime_normalize_trigger "${1:-}")"
-    sidebar_ime_apply
-}
-
-# Called by the dock's focus commands (Alt+s, Alt+arrows) after
-# they may have landed on the sidebar. Only acts in `keybind` trigger mode;
-# `any` mode is hook-driven. The sidebar pane may still be provisioning when
-# the command returns (focus and title arrive asynchronously on a re-open), so
-# a detached poll watches the window for up to one second.
-sidebar_ime_keybind_landed()
-{
-    local setting helper window="${1:-}" verb="en"
-    setting="$(sidebar_ime_setting)"
-    [ "$setting" != "off" ] || return 0
-    [ "$(sidebar_ime_trigger)" = "keybind" ] || return 0
-    helper="$(sidebar_ime_helper_path 2>/dev/null || true)"
-    [ -n "$helper" ] || return 0
-    [ "$setting" = "restore" ] && verb="push"
-    (
-        local i=0
-        while [ "$i" -lt 10 ]; do
-            if tmux list-panes ${window:+-t "$window"} -F '#{pane_active}|#{pane_title}' 2>/dev/null | grep -qF "1|$SIDEBAR_IME_TITLE"; then
-                "$helper" "$verb"
-                exit 0
-            fi
-            sleep 0.1
-            i=$((i + 1))
-        done
-    ) >/dev/null 2>&1 &
-    return 0
 }
 
 # Restore where tmux fires no pane-focus-out: the focused sidebar quitting on
@@ -245,6 +183,6 @@ sidebar_ime_status()
     local hook_in="absent" hook_out="absent"
     sidebar_ime_hook_installed "$SIDEBAR_IME_HOOK_IN" && hook_in="installed"
     sidebar_ime_hook_installed "$SIDEBAR_IME_HOOK_OUT" && hook_out="installed"
-    printf 'setting=%s trigger=%s backend=%s hook_in=%s hook_out=%s\n' \
-        "$(sidebar_ime_setting)" "$(sidebar_ime_trigger)" "$(sidebar_ime_backend_name)" "$hook_in" "$hook_out"
+    printf 'setting=%s backend=%s hook_in=%s hook_out=%s\n' \
+        "$(sidebar_ime_setting)" "$(sidebar_ime_backend_name)" "$hook_in" "$hook_out"
 }

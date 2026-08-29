@@ -2400,8 +2400,22 @@ smart_navigate_pane()
 
     case "$dir" in
         L|left)
-            # If moving Left from a main work pane (not sidebar, not subpane), ALWAYS prioritize the main sidebar session dock!
-            if [ -n "$sidebar_info" ] && [ "$active_pane" != "$sidebar_info" ] && [ "$active_pane" != "$subpane_info" ]; then
+            # Geometric Left: look at the panes touching the active pane's left
+            # border. No neighbour (leftmost pane, or the dock is hidden): stay -
+            # plain `select-pane -L` would wrap to the rightmost pane. If the
+            # neighbour is the dock column (sidebar or subpane) enter the
+            # SIDEBAR - a work pane never lands on the subpane directly; the
+            # subpane is reached from the sidebar with Down. Otherwise let tmux
+            # pick the adjacent work pane (sidebar|w1|w2: Left from w2 -> w1).
+            local left_neighbours
+            left_neighbours="$(sidebar_tmux_cmd list-panes -t "$active_win" -F '#{pane_id} #{pane_left} #{pane_right} #{pane_top} #{pane_bottom} #{pane_active}' 2>/dev/null |
+                awk '$6 == 1 { al = $2; at = $4; ab = $5 }
+                     { id[NR] = $1; r[NR] = $3; t[NR] = $4; b[NR] = $5 }
+                     END { for (i = 1; i <= NR; i++) if (al - r[i] >= 1 && al - r[i] <= 2 && t[i] <= ab && b[i] >= at) print id[i] }')"
+            if [ -z "$left_neighbours" ]; then
+                :
+            elif [ -n "$sidebar_info" ] && [ "$active_pane" != "$sidebar_info" ] && [ "$active_pane" != "$subpane_info" ] &&
+                printf '%s\n' "$left_neighbours" | grep -qx -e "$sidebar_info" -e "${subpane_info:-__none__}"; then
                 sidebar_tmux_cmd select-pane -t "$sidebar_info" 2>/dev/null || true
             else
                 sidebar_tmux_cmd select-pane -L 2>/dev/null || true
@@ -2420,7 +2434,6 @@ smart_navigate_pane()
             sidebar_tmux_cmd select-pane "-$dir" 2>/dev/null || true
             ;;
     esac
-    declare -f sidebar_ime_keybind_landed >/dev/null 2>&1 && sidebar_ime_keybind_landed "$active_win" || true
     return 0
 }
 
@@ -2452,7 +2465,6 @@ focus_or_toggle_sidebar()
             sidebar_tmux_cmd last-pane 2>/dev/null || true
         else
             sidebar_tmux_cmd select-pane -t "$pane_id" 2>/dev/null || true
-            declare -f sidebar_ime_keybind_landed >/dev/null 2>&1 && sidebar_ime_keybind_landed "$target_win" || true
         fi
     else
         toggle_current_sidebar "$target_win"
@@ -8772,15 +8784,11 @@ main()
             declare -f sidebar_ime_set_setting >/dev/null 2>&1 && sidebar_ime_set_setting "${2:-off}" || true
             return 0
             ;;
-        --ime-set-trigger)
-            declare -f sidebar_ime_set_trigger >/dev/null 2>&1 && sidebar_ime_set_trigger "${2:-any}" || true
-            return 0
-            ;;
         --ime-status)
             if declare -f sidebar_ime_status >/dev/null 2>&1; then
                 sidebar_ime_status
             else
-                echo "setting=off trigger=any backend=none hook_in=absent hook_out=absent"
+                echo "setting=off backend=none hook_in=absent hook_out=absent"
             fi
             return 0
             ;;

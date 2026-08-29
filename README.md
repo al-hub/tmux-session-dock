@@ -54,7 +54,6 @@ set -g @session-dock-width '34'           # Sidebar column width
 set -g @session-dock-theme 'open-tokyonight' # Default theme
 set -g @session-dock-dotfiles-mode 'on'   # [Optional] Enable full ergonomics preset (Ctrl+a, path border, Alt-Nav)
 set -g @session-dock-ime 'restore'        # [Optional] IME → English on sidebar focus: off | on | restore (restore puts 한/영 back on leave)
-set -g @session-dock-ime-trigger 'any'    # [Optional] any = every focus route (mouse, keys, session switch) | keybind = Alt+s / Alt+arrows only
 
 run '~/.tmux/plugins/tpm/tpm'
 ```

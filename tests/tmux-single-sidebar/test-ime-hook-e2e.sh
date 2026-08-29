@@ -2,10 +2,11 @@
 # test-ime-hook-e2e.sh — the IME focus hooks end to end on a private tmux server.
 #
 # Oracle: the helper runs exactly when a pane titled dotfiles-session-sidebar
-# gains (and, in restore mode, loses) focus while a client is attached; never
-# for other panes, never on a headless server, never once the setting is off;
-# in keybind mode only the dock's own focus commands trigger it. The helper is
-# a stub imemode.exe that logs its verb; no real IME is touched.
+# gains (and, in restore mode, loses) focus while a client is attached -
+# whatever moved the focus (select-pane, --focus-sidebar, --smart-pane) -
+# never for other panes, never on a headless server, never once the setting
+# is off. The helper is a stub imemode.exe that logs its verb; no real IME is
+# touched.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -54,7 +55,7 @@ settle() { sleep 0.4; }
 t() { tmux -L "$SOCKET" "$@"; }
 status() { t run-shell "$BIN --ime-status"; }
 
-echo "=== [1/9] private server, setting on, hook installed ==="
+echo "=== [1/8] private server, setting on, hook installed ==="
 tmux -L "$SOCKET" -f "$TEST_TMUX_CONF" new-session -d -s main -x 120 -y 40 "sleep 300"
 t set-option -g @session-dock-ime on
 t run-shell "$BIN --apply-ime-hook"
@@ -70,12 +71,12 @@ t select-pane -t "$sidebar" -T dotfiles-session-sidebar
 t select-pane -t "$work"
 settle
 
-echo "=== [2/9] headless: focus changes fire nothing ==="
+echo "=== [2/8] headless: focus changes fire nothing ==="
 t select-pane -t "$sidebar"; t select-pane -t "$work"; t select-pane -t "$sidebar"; t select-pane -t "$work"
 settle
 [ "$(calls)" = "0" ] || fail "headless server must not run the helper"
 
-echo "=== [3/9] attach a control-mode client (counts as focused) ==="
+echo "=== [3/8] attach a control-mode client (counts as focused) ==="
 mkfifo "$TMP/feed"
 sleep 300 > "$TMP/feed" & FEED_PID=$!
 tmux -L "$SOCKET" -C attach -t main < "$TMP/feed" > /dev/null 2>&1 & CLIENT_PID=$!
@@ -84,7 +85,7 @@ i=0; while [ "$i" -lt 60 ] && [ "$(t list-clients 2>/dev/null | wc -l)" -lt 1 ];
 settle
 [ "$(calls)" = "0" ] || fail "attach with work pane active must not run the helper (got $(calls))"
 
-echo "=== [4/9] mode on: sidebar focus -> en once; work pane -> nothing ==="
+echo "=== [4/8] mode on: sidebar focus -> en once; work pane -> nothing ==="
 t select-pane -t "$sidebar"
 wait_calls 1 "first sidebar focus"; settle
 [ "$(calls)" = "1" ] || fail "exactly one call expected, got $(calls)"
@@ -92,7 +93,7 @@ wait_calls 1 "first sidebar focus"; settle
 t select-pane -t "$work"; settle
 [ "$(calls)" = "1" ] || fail "leaving in mode on must not run the helper"
 
-echo "=== [5/9] mode restore: focus in -> push, focus out -> pop ==="
+echo "=== [5/8] mode restore: focus in -> push, focus out -> pop ==="
 t run-shell "$BIN --ime-set restore"
 case "$(status)" in *"setting=restore"*"hook_in=installed hook_out=installed"*) ;; *) fail "restore status: $(status)" ;; esac
 before="$(calls)"
@@ -104,16 +105,8 @@ wait_calls $((before + 2)) "restore: leaving sidebar"; settle
 [ "$(last_call)" = "pop" ] || fail "restore: focus-out must pop, got '$(last_call)'"
 [ "$(calls)" = "$((before + 2))" ] || fail "restore round trip must be exactly push+pop"
 
-echo "=== [6/9] trigger keybind: plain focus fires nothing, --focus-sidebar fires ==="
-t run-shell "$BIN --ime-set-trigger keybind"
-case "$(status)" in *"trigger=keybind"*"hook_in=absent hook_out=installed"*) ;; *) fail "keybind status: $(status)" ;; esac
-before="$(calls)"
-t select-pane -t "$sidebar"; settle
-[ "$(calls)" = "$before" ] || fail "keybind mode: mouse-like select-pane must not call the helper"
+echo "=== [6/8] real sidebar pane (title set by the product): quick-jump in/out ==="
 t select-pane -t "$work"; settle
-before="$(calls)"
-
-echo "=== [7/9] real sidebar pane (title set by the product) + quick-jump ==="
 t kill-pane -t "$sidebar"
 win="$(t display-message -p -t main '#{window_id}')"
 t set-option -gq @dotfiles_sidebar_enabled 1
@@ -129,45 +122,29 @@ done
 t select-pane -t "$work"; settle
 before="$(calls)"
 t run-shell "$BIN --focus-sidebar"
-wait_calls $((before + 1)) "keybind: quick-jump into the real sidebar"; settle
-[ "$(last_call)" = "push" ] || fail "keybind+restore: quick-jump must push, got '$(last_call)'"
+wait_calls $((before + 1)) "quick-jump into the real sidebar"; settle
+[ "$(last_call)" = "push" ] || fail "quick-jump must push, got '$(last_call)'"
 t run-shell "$BIN --focus-sidebar"      # smart return -> focus-out hook pops
-wait_calls $((before + 2)) "keybind: leaving via quick-jump"; settle
-[ "$(last_call)" = "pop" ] || fail "keybind+restore: leaving must pop, got '$(last_call)'"
+wait_calls $((before + 2)) "leaving via quick-jump"; settle
+[ "$(last_call)" = "pop" ] || fail "leaving must pop, got '$(last_call)'"
 
-echo "=== [7b/9] Prefix+s (toggle) never touches the IME ==="
-t run-shell "$BIN --focus-sidebar"
-wait_calls $((before + 3)) "keybind: back into the sidebar"; settle
-[ "$(last_call)" = "push" ] || fail "re-entry must push"
-t select-pane -t "$work"
-wait_calls $((before + 4)) "leave before toggling"; settle
+echo "=== [7/8] Alt+Left between work panes moves without touching the IME; into the sidebar it pushes ==="
+w2="$(t split-window -h -d -t "$work" -P -F '#{pane_id}' "sleep 300")"   # layout: sidebar | work | w2
+t select-pane -t "$w2"; settle
 before="$(calls)"
-t run-shell "$BIN --toggle-sidebar"          # closes the dock
-settle; sleep 1.2                            # longer than the landing poll
-[ "$(calls)" = "$before" ] || fail "closing via toggle must not call the helper, got '$(last_call)'"
-[ -z "$(t list-panes -t "$win" -F '#{pane_title}' | grep -F dotfiles-session-sidebar)" ] || fail "toggle must have closed the sidebar"
-t run-shell "$BIN --toggle-sidebar"          # re-open (focus may land on the sidebar)
-settle; sleep 1.2
-[ "$(calls)" = "$before" ] || fail "re-opening via toggle must not call the helper, got '$(last_call)'"
-i=0; real=""
-while [ "$i" -lt 100 ]; do
-    real="$(t list-panes -t "$win" -F '#{pane_id}|#{pane_title}' | awk -F '|' '$2=="dotfiles-session-sidebar"{print $1; exit}')"
-    [ -n "$real" ] && break
-    sleep 0.05; i=$((i + 1))
-done
-[ -n "$real" ] || fail "re-opened sidebar pane not found"
-t select-pane -t "$work"; settle
-
-echo "=== [8/9] trigger any again: hook-driven on the real sidebar ==="
-t run-shell "$BIN --ime-set-trigger any"
-before="$(calls)"
-t select-pane -t "$real"
-wait_calls $((before + 1)) "any: focus on real sidebar"; settle
-[ "$(last_call)" = "push" ] || fail "any+restore on real sidebar must push"
+t run-shell "$BIN --smart-pane L"
+settle
+[ "$(t display-message -p -t main '#{pane_id}')" = "$work" ] || fail "Left from w2 must land on w1, got $(t display-message -p -t main '#{pane_id}')"
+[ "$(calls)" = "$before" ] || fail "moving between work panes must not call the helper"
+t run-shell "$BIN --smart-pane L"
+wait_calls $((before + 1)) "Left from w1 into the sidebar"; settle
+[ "$(t display-message -p -t main '#{pane_id}')" = "$real" ] || fail "Left from w1 must land on the sidebar"
+[ "$(last_call)" = "push" ] || fail "entering the sidebar via Alt+Left must push"
 t select-pane -t "$work"
-wait_calls $((before + 2)) "any: leaving real sidebar"; settle
+wait_calls $((before + 2)) "leaving the sidebar"; settle
+t kill-pane -t "$w2"; settle
 
-echo "=== [9/9] setting off removes both hooks; no more calls ==="
+echo "=== [8/8] setting off removes both hooks; no more calls ==="
 t run-shell "$BIN --ime-set off"
 t show-hooks -g pane-focus-in  | grep -qF "tmux-session-dock-ime" && fail "focus-in hook must be removed when off"
 t show-hooks -g pane-focus-out | grep -qF "tmux-session-dock-ime" && fail "focus-out hook must be removed when off"
@@ -176,6 +153,5 @@ t select-pane -t "$real"; settle
 t select-pane -t "$work"; settle
 [ "$(calls)" = "$before" ] || fail "helper ran after the setting was turned off"
 [ "$(cat "$HOME/.local/state/dotfiles/tmux-sidebar-ime")" = "off" ] || fail "state file must persist off"
-[ "$(cat "$HOME/.local/state/dotfiles/tmux-sidebar-ime-trigger")" = "any" ] || fail "trigger state file must persist any"
 
 echo "PASS: IME focus hooks e2e"
