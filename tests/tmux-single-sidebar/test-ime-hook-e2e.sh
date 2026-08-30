@@ -53,7 +53,17 @@ wait_calls() {   # wait_calls <expected> <what>
 }
 settle() { sleep 0.4; }
 t() { tmux -L "$SOCKET" "$@"; }
-status() { t run-shell "$BIN --ime-status"; }
+# --ime-status has to run inside the server to see its options, but its answer
+# cannot be read from run-shell's own output: tmux 3.2a hands that back to the
+# client that issued the command, and 3.4 does not - `tmux run-shell 'echo x'`
+# on a headless 3.4 server prints nothing at all. Have the command write the
+# answer to a file instead, which every version delivers the same way. (The
+# product never reads run-shell output; only this test did.)
+status() {
+    : > "$TMP/ime-status"
+    t run-shell "$BIN --ime-status > '$TMP/ime-status' 2>&1" >/dev/null 2>&1 || true
+    cat "$TMP/ime-status" 2>/dev/null
+}
 
 echo "=== [1/8] private server, setting on, hook installed ==="
 tmux -L "$SOCKET" -f "$TEST_TMUX_CONF" new-session -d -s main -x 120 -y 40 "sleep 300"
