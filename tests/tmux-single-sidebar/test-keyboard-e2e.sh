@@ -597,14 +597,14 @@ run_subpane_multi_slot_enter_reproduction()
     # public toggle command here keeps this assertion independent of prefix
     # delivery timing.
     for iteration in 1 2 3; do
-        tmuxc run-shell -b "$LAUNCHER --toggle-sidebar"
+        toggle_sidebar_now
         wait_until "multi-slot Sidebar OFF $iteration" 0 count_sidebars
         [ "$(count_subpanes)" -eq 0 ] || {
             printf 'FAIL: subpane lease remained active during Sidebar OFF toggle %s\n' "$iteration" >&2
             return 1
         }
 
-        tmuxc run-shell -b "$LAUNCHER --toggle-sidebar"
+        toggle_sidebar_now
         wait_until "multi-slot Sidebar ON $iteration" 1 count_sidebars
         wait_for_sidebar_input_ready
         wait_until "multi-slot Sidebar ON lease $iteration" "$slot_total" count_subpanes
@@ -1524,6 +1524,41 @@ wait_for_sidebar_input_ready()
     wait_until 'sidebar input readiness' true sidebar_input_ready
 }
 
+# The production toggle refuses while the dock is still provisioning - it logs
+# `sidebar.toggle.suppressed reason=provisioning` and returns, with no retry and
+# no queue - so a toggle that lands inside that window is simply lost and the
+# wait after it can never be satisfied. Counting panes is not enough to know the
+# previous toggle is finished: the subpane lease is reacquired before the guard
+# is cleared, so the count reaches its target while the guard is still held.
+# Wait for the guard itself. It carries owner_pid:deadline while held and 0
+# once it is not.
+provisioning_guard()
+{
+    tmuxc show-option -gqv '@dotfiles_sidebar_provisioning' 2>/dev/null || true
+}
+
+wait_for_provisioning_clear()
+{
+    local deadline=$(( $(date +%s) + 20 )) value
+    while [ "$(date +%s)" -lt "$deadline" ]; do
+        value="$(provisioning_guard)"
+        case "$value" in ''|0) return 0 ;; esac
+        sleep 0.05
+    done
+    test_log "wait.timeout description=provisioning-guard value=$(provisioning_guard)"
+    printf 'ERROR: timeout waiting for the provisioning guard to clear (value=%s)\n' "$(provisioning_guard)" >&2
+    return 1
+}
+
+# Every toggle in this file goes through here, so none of them races the
+# previous one. The caller keeps its own fallback: the return status is the
+# run-shell's.
+toggle_sidebar_now()
+{
+    wait_for_provisioning_clear || true
+    tmuxc run-shell -b "$LAUNCHER --toggle-sidebar" 2>/dev/null
+}
+
 work_pane_count()
 {
     local session_name="$1"
@@ -1562,10 +1597,10 @@ run_split_cycle_reproduction()
         split_label='horizontal'
     fi
 
-    tmuxc run-shell -b "$LAUNCHER --toggle-sidebar" 2>/dev/null || true
+    toggle_sidebar_now || true
     wait_until 'split-cycle sidebar toggle off' 0 count_sidebars
     sleep 0.2
-    tmuxc run-shell -b "$LAUNCHER --toggle-sidebar" 2>/dev/null || true
+    toggle_sidebar_now || true
     wait_until 'split-cycle sidebar toggle on' 1 count_sidebars
     sleep 0.2
     focus_sidebar_via_prefix
@@ -1828,9 +1863,9 @@ run_arbitrary_topology_reproduction()
 
     # All actions that change the topology or session are sent through the
     # attached PTY, matching a user's prefix, shortcut, and TUI input path.
-    tmuxc run-shell -b "$LAUNCHER --toggle-sidebar" 2>/dev/null || send_keys $'\001s'
+    toggle_sidebar_now || send_keys $'\001s'
     wait_until 'arbitrary-topology sidebar toggle off' 0 count_sidebars
-    tmuxc run-shell -b "$LAUNCHER --toggle-sidebar" 2>/dev/null || send_keys $'\001s'
+    toggle_sidebar_now || send_keys $'\001s'
     wait_until 'arbitrary-topology sidebar toggle on' 1 count_sidebars
     wait_for_sidebar_input_ready
 
@@ -2033,9 +2068,9 @@ run_multi_window_topology_reproduction()
     local previous_session_count restored_session_count window_before window_after
 
     test_log 'multi-window.before.setup'
-    tmuxc run-shell -b "$LAUNCHER --toggle-sidebar" 2>/dev/null || send_keys $'\001s'
+    toggle_sidebar_now || send_keys $'\001s'
     wait_until 'multi-window sidebar toggle off' 0 count_sidebars
-    tmuxc run-shell -b "$LAUNCHER --toggle-sidebar" 2>/dev/null || send_keys $'\001s'
+    toggle_sidebar_now || send_keys $'\001s'
     wait_until 'multi-window sidebar toggle on' 1 count_sidebars
     focus_sidebar_via_prefix
     wait_for_sidebar_input_ready
@@ -2900,12 +2935,12 @@ fi
 
 # Ctrl+a, s: exercise the configured tmux prefix and binding. Since the
 # sidebar already exists, this is also the user's normal toggle-off path.
-tmuxc run-shell -b "$LAUNCHER --toggle-sidebar" 2>/dev/null || send_keys $'\001s'
+toggle_sidebar_now || send_keys $'\001s'
 wait_until 'sidebar toggle off' 0 count_sidebars
 test_log 'step=sidebar.off'
 
 # Ctrl+a, s again: restore the always-on sidebar and leave focus in its TUI.
-tmuxc run-shell -b "$LAUNCHER --toggle-sidebar" 2>/dev/null || send_keys $'\001s'
+toggle_sidebar_now || send_keys $'\001s'
 wait_until 'sidebar toggle on' 1 count_sidebars
 wait_for_sidebar_input_ready
 test_log 'step=sidebar.on'

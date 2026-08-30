@@ -387,6 +387,38 @@ inconsistency today, (a) is the change that stops the report from recurring.
 (a) is done as of v0.3.58, along with the escape hatch in (b); (c) and (d) and
 the five questions stand.
 
+### R11 — a toggle that lands during provisioning is dropped, not deferred · S · low risk
+
+`toggle_current_sidebar` refuses while the provisioning guard is held:
+
+```
+if sidebar_provisioning_active; then
+    trace_event "sidebar.toggle.suppressed reason=provisioning"
+    return 0
+fi
+```
+
+It logs and returns. Nothing retries, nothing is queued, and the user gets no
+message, so a toggle pressed while the previous one is still finishing is
+simply lost. The window is not small: on a WSL2 laptop the ON toggle held the
+guard for about 1.4 s, and the subpane lease is reacquired *before* the guard
+clears - so the dock looks finished (the slots are back, the panes are
+counted) while a toggle sent at that moment still disappears.
+
+Found through test-keyboard-e2e's multi-slot scenario, which toggles three
+times and waits on the pane count between toggles. It failed on every local
+run and intermittently on the CI 24.04 leg, always at whichever checkpoint the
+machine happened to be slow at, which is why it read as flake. The test now
+waits for the guard itself (v0.3.59) and passes deterministically; the product
+behaviour is unchanged and is what this item is about.
+
+Deciding it is the work: a debounce that drops the second press is a defensible
+design for a key the user may hit twice by accident, but it is currently
+indistinguishable from the dock ignoring the keyboard. Candidates: remember one
+pending toggle and apply it when the guard clears; or leave the drop and say so
+in the footer message line, which costs nothing and makes it a choice rather
+than a silence.
+
 ## Not planned
 
 - Raising the subpane slot limit above 3 (R4 makes it possible, it is not itself
