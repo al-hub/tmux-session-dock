@@ -318,12 +318,70 @@ doubling a cold switch until the interval was backed off.
 
 ---
 
+## 9. A question about a client gets a per-client answer — `v0.3.56` → `v0.3.57`
+
+`52d7000`
+
+Eight places asked something about one named client - the session a switch is
+coming from, the session and window a focus hook is acting on, the window a
+subpane hangs off, the size the dock lays itself out against - and all eight
+asked it with `display-message -c <tty>`. Neither supported tmux answers that
+question that way, and the two fail differently, which is why it survived:
+
+```
+tmux 3.2a   display-message -p -c <tty> '#S'   ->  usage, rc=1
+tmux 3.4    two clients, on 'one' and 'two':
+            -c /dev/pts/13 : #S=[two]
+            -c /dev/pts/14 : #S=[two]
+```
+
+3.2a rejects the flag combination, so every call had been failing into a
+fallback since it was written; the fallback resolves against the invoking pane,
+and a presenter runs in the session it is asking about, so the answer was right
+for the wrong reason. 3.4 accepts the flag and uses it only to choose where a
+message is *displayed* - the format is resolved against the most recently used
+session, so every client reports the same answer and a client that has just
+switched still reports the session it left.
+
+```mermaid
+graph TD
+    subgraph BEFORE["v0.3.56 — ask about 'the' client"]
+        Q1["which session is<br/>/dev/pts/14 on?"] --> DM["display-message -p -c tty '#S'"]
+        DM -->|"tmux 3.2a"| ERR["usage, rc=1<br/>→ fallback: the invoking pane"]
+        DM -->|"tmux 3.4"| MRU["the most recently used session<br/>(same answer for every client)"]
+    end
+    subgraph AFTER["v0.3.57 — ask about THIS client"]
+        Q2["which session is<br/>/dev/pts/14 on?"] --> LC["list-clients -F '#{client_tty}|#{fmt}'"]
+        LC --> PICK["pick the row whose tty is ours"]
+        PICK --> ANS["that client's session<br/>(same on 3.2a and 3.4)"]
+    end
+```
+
+One primitive, `sidebar_client_field`, formats through `list-clients` and picks
+our own row; it returns 1 when the client is gone, which is a different answer
+from an empty session name, so the callers that need a fallback still have one.
+
+The **seam moved onto the thing being asked about**: `list-clients` formats
+once per client, so the answer cannot be about a different client than the one
+named. Nothing observable changed for a single client on 3.2a - which is the
+uncomfortable part, and the reason the guardrail is two clients on two sessions
+at two terminal sizes (`test-client-field-contract`) rather than a comment.
+
+---
+
 ## Reading the arc
 
-Four of the eight moved a decision to where it is cheapest and hardest to get
+Four of the nine moved a decision to where it is cheapest and hardest to get
 wrong: into a pure function (2, 5), into one process (3), into the tmux server
 (8). Three replaced a heuristic with an owner (6, 7) or a redraw with silence
 (4). One (1) added capability and left an arithmetic debt that took until
 change 5 to pay off — which is the honest lesson: widening an interface before
 the implementation behind it is deep enough just moves the complexity to the
 callers.
+
+The ninth is a different kind of lesson. Nothing was slow, nothing was racing,
+and every test passed: the code asked the wrong question and got a right-looking
+answer from a fallback. It took a second tmux version to make the wrong answer
+visible, and the guardrail that now holds it is the case the single-client
+world never exercised. A test that cannot fail on the old code is not a
+guardrail, and neither is one whose setup makes the two answers identical.

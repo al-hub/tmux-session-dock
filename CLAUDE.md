@@ -1,7 +1,7 @@
 # tmux-session-dock — orientation for an AI CLI session
 
 Read this first, then only what your task needs. Everything below is true as of
-`v0.3.51`; when it stops being true, fix it here in the same change.
+`v0.3.62`; when it stops being true, fix it here in the same change.
 
 ## What this is
 
@@ -18,7 +18,7 @@ WSL2, so the IME integration has a Windows path as well as Linux/macOS ones.
 
 ```
 scripts/tmux-session-dock      the entrypoint and most of the product (~9k lines)
-scripts/lib/*.sh               12 extracted modules (~2.5k lines)
+scripts/lib/*.sh               12 extracted modules (~2.7k lines)
   sidebar_domain*.sh             pure functions, no tmux calls, unit-tested directly
   sidebar_port_tmux.sh           tmux-facing primitives + sidebar identity constants
   sidebar_subpane_hub.sh         subpane pool, slots, lease, slot mutation lock
@@ -66,6 +66,17 @@ rests on — read it before changing coordination, geometry, or hooks.
    `make test-health` fails on it.
 6. **`set -euo pipefail` is everywhere**, and the presenter dies silently on an
    unbound variable — its stderr goes to the debug log, not your terminal.
+7. **A question about one client goes to `list-clients`.** `display-message -c`
+   cannot answer it: 3.2a rejects `-p -c` outright and 3.4 resolves the format
+   against the most recently used session, so every client reports the same
+   thing. Use `sidebar_client_field`.
+8. **The renderer and the switch share a contract nothing declares.** A switch
+   is only complete once the target presenter has drawn a frame the switch
+   recognises, and it recognises it by reading the pane back as text
+   (`sidebar_content_matches`). Draw anything new into the header or the mark
+   columns, or change how a name is fitted, and every switch can abort as
+   `sidebar-content-unready` — after the client has already moved. It has
+   happened twice; `test-content-oracle-unit` is the guardrail.
 
 ## Working on it
 
@@ -97,7 +108,7 @@ written to explain *why*. To catch up quickly:
 
 ```bash
 git log --oneline -20
-git tag -n20 v0.3.51        # or any release
+git tag -n20 v0.3.62        # or any release
 git log -1 --format=%B <commit>
 ```
 
@@ -111,15 +122,22 @@ The releases that shaped the current design:
 | `v0.3.49` | Transition and operation liveness by owner pid, not lock age; `ensure_target_sidebar_window` returns through result globals; duplicate lib/core definitions removed. |
 | `v0.3.50` | Slot mutations serialized under one lock; hook-suppression flags carry owner and deadline; CI rejects a stale `dist/`. |
 | `v0.3.51` | Hooks gated inside the tmux server; hot paths batched into single round trips; readiness polling backed off. |
+| `v0.3.54` | Awaiting: a session whose AI stopped and that nobody has visited gets a `●` and a header count. The verdict is the shared observer's alone, so two windows cannot contradict each other. |
+| `v0.3.56` | The awaiting header and mark broke every session switch: the switch confirms the target presenter by reading its dock back as text, and the renderer had started drawing something that text did not recognise. Mark After floored at the busy window so the number cannot lie. |
+| `v0.3.57` | Eight per-client questions asked with `display-message -c`, which neither tmux answers that way; and a session whose name outgrows the row's name cell could not be switched to, for the same renderer/oracle coupling as `v0.3.56`. |
+| `v0.3.58` | The settings popup stopped showing a tick on rows that hold a number, and Space can leave a millisecond budget again. |
+| `v0.3.61` | The AI Activity Observer claims its lock by hard-linking a pid file, so there is no moment where the lock is held but looks orphaned. |
 
-`docs/ARCHITECTURE-EVOLUTION.md` draws the eight points where the shape of
+`docs/ARCHITECTURE-EVOLUTION.md` draws the nine points where the shape of
 the codebase changed, before and after, with the release on each side.
 
 `docs/BACKLOG.md` records the four-lens architecture review behind
 `v0.3.49`–`v0.3.51`: what was fixed, the five principles those fixes converged
-on, and seven remaining items with evidence, proposed fix, size and risk. Read
-it before starting anything large — the item you are about to do may already be
-written up there.
+on, and the remaining items with evidence, proposed fix, size and risk. Read it
+before starting anything large — the item you are about to do may already be
+written up there. R10 (the Awaiting settings have no written policy) and R11 (a
+toggle that lands during provisioning is dropped) are open and both need a
+decision before they need code.
 
 ## Reference
 

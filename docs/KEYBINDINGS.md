@@ -1,6 +1,6 @@
 # Keybindings & Navigation Cheat Sheet
 
-Describes `v0.3.51`. Every row below is bound by `session-dock.tmux` (or by the
+Describes `v0.3.62`. Every row below is bound by `session-dock.tmux` (or by the
 ergonomics preset where noted); nothing here relies on an input-method alias.
 
 ## 1. Global Prefix Bindings (`Ctrl + a` with the ergonomics preset, otherwise your own prefix)
@@ -8,7 +8,7 @@ ergonomics preset where noted); nothing here relies on an input-method alias.
 | Keybinding | Action Description | Override option |
 | :--- | :--- | :--- |
 | **`Prefix + s`** | Toggle session dock sidebar open / close | `@session-dock-key` |
-| **`Prefix + S`** | ⚙️ Settings popup: subpane stack count & position, IME mode, switch recovery, activity gradient, awaiting mark | — |
+| **`Prefix + S`** | ⚙️ Settings popup: subpane stack count & position, IME mode, switch recovery, activity gradient, awaiting mark. Inside it, `Space` walks a row's states and `Enter` opens a number prompt on the rows that hold one; a row holding a number shows the number (`[10s]`) where a toggle shows `[✓]` | — |
 | **`Prefix + T`** | 🎨 59-theme interactive picker with live ANSI preview | `@session-dock-theme-key` |
 | **`Prefix + /`** | ⌨️ Searchable command palette | `@session-dock-palette-key` |
 | **`Prefix + h`** | 📖 Interactive help viewer popup | `@session-dock-help-key` |
