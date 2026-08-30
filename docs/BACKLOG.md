@@ -42,8 +42,10 @@ owner or a deadline.
 ## Remaining
 
 Ranked by (probability × user impact) for the correctness items, then by
-(contributor time saved × frequency) for the rest. None of them is a known
-cause of a user-visible failure today except **R1**.
+(contributor time saved × frequency) for the rest. Two have already caused
+user-visible failures: **R8**, which broke session switching outright and is
+the one to take first, and **R1**. The numbers are identities, not an order -
+new findings are appended.
 
 ### R1 — TUI help popup is unreachable on a TPM-only install · S · low risk
 
@@ -148,6 +150,98 @@ Fix incrementally, one concern per change, keeping the single-file `dist`:
 `sidebar_trace.sh` first (it removes ~40 `declare -f` guards), then metrics,
 observer, archive, transaction, provisioning, TUI. Only `main()` and the config
 block stay in the entrypoint.
+
+### R8 — the switch judges readiness by reading the screen back · M · medium risk
+
+A session switch is only complete once the target presenter has drawn a frame
+for the target session. `wait_for_sidebar_content_ready` decides that from
+three things: the window's readiness option, the presenter's own
+`HANDOVER_RENDERED_<window>` declaration, and - the problem - a scrape of the
+pane text matched against what the renderer is expected to have drawn
+(`sidebar_content_matches`, plus a second copy of the same idea as
+`grep -Eq '^[[:space:]]*sessions'` in the batch-restore barrier).
+
+Named in the usual vocabulary, the closest fit is DIP: a high-level policy
+("has the transition completed?") depends on a low-level detail (the exact
+bytes the renderer emits) although both sides already share an abstraction that
+means precisely that. OCP is next: each renderer *addition* forced a
+*modification* of the switch. SRP is true but loosest - the module has two
+reasons to change, though not in the usual "does two jobs" shape.
+
+The more actionable statement is not a SOLID letter. There are **two sources of
+truth for "the target has rendered"**, and the redundant one is obtained by
+parsing a presentation format. In this repo's own vocabulary the seam sits one
+layer too low: the switch wants *render completion* and is given *rendered
+text*.
+
+That makes the header text and the mark column an implicit contract between the
+renderer and the switch, and it has been broken twice by drawing more into
+them:
+
+- `v0.3.54` added a count of waiting sessions to the header. The pattern
+  required a line that was exactly `sessions`, so **every** switch aborted as
+  `sidebar-content-unready` whenever any session was Awaiting - after the
+  client had already moved, which is what made it look like Enter did nothing.
+- The same release put `●` in the mark column. The row pattern allowed only
+  `>`, `*` and spaces, so a switch onto an Awaiting session could not settle
+  either.
+
+Both are fixed and `test-content-oracle-unit` now pins the contract - every
+mark `row_mark_value` can emit, against every header `render_header` can emit -
+so a third render change breaks a test instead of session switching. That is a
+guardrail, not a separation: the coupling is still there, and widening the
+renderer still means remembering to widen the oracle.
+
+The separation is half-built already. `mark_handover_rendered` is called only
+after `render_transition_delta` or `render_full` has actually drawn
+(`scripts/tmux-session-dock` around the `flush_full_render_request` body), so
+the declaration means what the scrape is trying to infer. If it can be trusted,
+the scrape is redundant and can go, taking the implicit contract - and
+`test-content-oracle-unit` - with it.
+
+**Do not simply delete the scrape.** It is the only check of what the user can
+actually see: the declaration says the presenter *called* a render function,
+the scrape says the pane *contains* the frame. tmux updates panes
+asynchronously and a later redraw can overwrite one, so the two are not
+equivalent. The fix is to promote the declaration until it means "on screen",
+not to drop the check that currently means it. Remove SOLID's complaint without
+that and the flicker the barrier exists to prevent comes straight back.
+
+Before removing it, two things need checking, and they are the reason this is
+not a one-line change:
+
+1. **Does every path that draws a settled frame declare it?** After
+   `render_full "$reason"` the declaration is made only for
+   `marker-handover-reconcile` and `enter-session-switch-fallback`. A frame
+   drawn for any other reason leaves no declaration, and the scrape may be
+   quietly covering that gap.
+2. **Is the declaration never ahead of the screen?** It is written after the
+   `printf`, but tmux updates the pane asynchronously; a switch that trusts the
+   flag alone must not finish before the user can see the frame, which is the
+   flicker the barrier exists to prevent.
+
+Fix, in order: instrument which render reasons reach a settled target frame
+without declaring; close that gap in the renderer; then delete the scrape from
+`wait_for_sidebar_content_ready` and the batch-restore barrier, and delete the
+oracle contract test with them.
+
+**Severity**: the impact is severe and the likelihood is now low - which is what
+the M rating multiplies, not smallness. When it fires, the product's primary
+action stops working entirely, and it fails quietly: the client has already
+moved and the error line is overwritten by the next redraw a second later,
+which is why the first report of it was "Enter does nothing" with no clue
+attached. What is low is the chance of firing again: the header pattern now
+accepts anything beginning with `sessions`, the mark pattern is built from the
+glyph constant, the mark's two-column width is asserted, and `render_header` is
+the only writer of row 1.
+
+**Limit of the guardrail**, worth closing cheaply whenever this area is next
+touched: `test-content-oracle-unit` *assembles* the frames it checks - it takes
+the mark from `row_mark_value` but supplies literal headers and its own row
+layout, so it never captures a real render. A change to `format_row`'s columns,
+or a header shaped unlike the three literals, would pass it. Feeding it a pane
+captured from a live presenter would bring the whole render path inside the
+contract.
 
 ## Not planned
 

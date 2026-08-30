@@ -280,7 +280,7 @@ draw_picker() {
                     desc="${DIM}Awaiting 표시가 꺼져 있어 비활성 (현재 ${aafter} ms)${RESET}"
                 else
                     is_active=true
-                    desc="멈춘 뒤 ${BOLD}${EMERALD}${aafter} ms${RESET}${GRAY} 지나면 표시 ${DIM}(Enter: 직접 입력, ${SIDEBAR_AWAITING_AFTER_MS_MIN:-1000}~${SIDEBAR_AWAITING_AFTER_MS_MAX:-300000})${RESET}"
+                    desc="마지막 출력 이후 ${BOLD}${EMERALD}${aafter} ms${RESET}${GRAY} 조용하면 표시 ${DIM}(Enter: 직접 입력, ${SIDEBAR_AWAITING_AFTER_MS_MIN:-10000}~${SIDEBAR_AWAITING_AFTER_MS_MAX:-300000})${RESET}"
                 fi
                 ;;
             REST)
@@ -408,7 +408,7 @@ apply_selection() {
         AAFTER)
             [ "$(get_awaiting_enabled)" = "on" ] || return 0
             prompt_ms_value "@session-dock-awaiting-after" "$(get_awaiting_after)" \
-                "${SIDEBAR_AWAITING_AFTER_MS_MIN:-1000}" "${SIDEBAR_AWAITING_AFTER_MS_MAX:-300000}" "표시까지(ms)"
+                "${SIDEBAR_AWAITING_AFTER_MS_MIN:-10000}" "${SIDEBAR_AWAITING_AFTER_MS_MAX:-300000}" "표시까지(ms)"
             ;;
         REST)
             [ "$IME_BACKEND" != "none" ] && [ "$IME_SETTING" != "off" ] || return 0

@@ -44,7 +44,7 @@ A session whose tracked AI CLI is changing its visible output. The only state th
 _Avoid_: Busy, active
 
 **Awaiting**:
-A session whose tracked AI CLI stopped changing its output long enough to be worth reporting, and that no client has visited since. It says the user is the one who moves this session forward - never that the work finished, which cannot be observed: a session blocked on an approval prompt is Awaiting too. Announced once; visiting the session or the AI moving again ends it, and no clock does.
+A session whose tracked AI CLI has been silent long enough to be worth reporting - the threshold is counted from its last visible output, never from some later moment - and that no client has visited since. It says the user is the one who moves this session forward - never that the work finished, which cannot be observed: a session blocked on an approval prompt is Awaiting too. Announced once; visiting the session or the AI moving again ends it, and no clock does.
 _Avoid_: Done, Finished, Complete, Waiting
 
 **Idle**:

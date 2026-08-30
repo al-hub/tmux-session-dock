@@ -27,9 +27,16 @@ declare -gA _SIDEBAR_ACTIVITY_MOVED=()
 # same one, and only fresh activity (which moves the timestamp) can.
 declare -gA _SIDEBAR_ACTIVITY_ACKED_AT=()
 
-# How long a session must stay unchanged before its stop is worth reporting, and
-# the bounds a user-supplied value is held to.
-SIDEBAR_AWAITING_AFTER_MS_MIN=1000
+# How long a session must stay unchanged before its stop is worth reporting,
+# measured from its last visible output, and the bounds a user-supplied value is
+# held to.
+#
+# The floor is the busy window, not an arbitrary small number: a session counts
+# as working until its output has been unchanged for that long, so a threshold
+# below it could never be honoured and the setting would silently mean
+# something other than what it says. The core entrypoint raises this to match
+# TMUX_SESSION_SIDEBAR_BUSY_SECONDS; the default here matches its default.
+SIDEBAR_AWAITING_AFTER_MS_MIN=10000
 SIDEBAR_AWAITING_AFTER_MS_MAX=300000
 SIDEBAR_AWAITING_AFTER_MS_DEFAULT=30000
 

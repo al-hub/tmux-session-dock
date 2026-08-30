@@ -64,7 +64,7 @@ set -g @session-dock-gradient 'on'        # [Optional] Activity gradient on rows
 set -g @session-dock-gradient-speed '1000' # [Optional] One wave cycle in milliseconds, 400-4000 (24 frames per cycle)
 set -g @session-dock-awaiting 'on'         # [Optional] Mark sessions whose AI stopped and that you have not visited: on | off
 set -g @session-dock-awaiting-blink 'always' # [Optional] Blink that mark: always | off | milliseconds (the state itself never times out)
-set -g @session-dock-awaiting-after '30000'  # [Optional] How long a session must be quiet before it is marked, in ms (1000-300000)
+set -g @session-dock-awaiting-after '30000'  # [Optional] How long a session must be silent before it is marked, in ms, measured from its last output (floor: the busy window, 10000)
 
 # Every option above is also editable from the Prefix + S popup.
 # Key overrides: @session-dock-theme-key, @session-dock-help-key,

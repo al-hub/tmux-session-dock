@@ -55,7 +55,7 @@ set -g @session-dock-gradient 'on'        # [옵션] AI CLI가 도는 세션 행
 set -g @session-dock-gradient-speed '1000' # [옵션] 파형 한 주기(ms), 400~4000 (한 주기 = 24프레임)
 set -g @session-dock-awaiting 'on'         # [옵션] AI가 멈췄고 아직 안 가본 세션에 ● 표시: on | off
 set -g @session-dock-awaiting-blink 'always' # [옵션] 그 표시의 깜빡임: always | off | ms (상태 자체는 시간으로 사라지지 않음)
-set -g @session-dock-awaiting-after '30000'  # [옵션] 멈춘 뒤 표시까지의 시간 ms (1000~300000)
+set -g @session-dock-awaiting-after '30000'  # [옵션] 마지막 출력 이후 이만큼 조용하면 표시, ms (하한은 busy 창인 10000)
 
 # 위 옵션은 모두 Prefix + S 팝업에서도 변경할 수 있습니다.
 # 키 재정의: @session-dock-theme-key, @session-dock-help-key,

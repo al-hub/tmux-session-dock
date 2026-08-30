@@ -411,9 +411,16 @@ declare -gA _SIDEBAR_ACTIVITY_MOVED=()
 # same one, and only fresh activity (which moves the timestamp) can.
 declare -gA _SIDEBAR_ACTIVITY_ACKED_AT=()
 
-# How long a session must stay unchanged before its stop is worth reporting, and
-# the bounds a user-supplied value is held to.
-SIDEBAR_AWAITING_AFTER_MS_MIN=1000
+# How long a session must stay unchanged before its stop is worth reporting,
+# measured from its last visible output, and the bounds a user-supplied value is
+# held to.
+#
+# The floor is the busy window, not an arbitrary small number: a session counts
+# as working until its output has been unchanged for that long, so a threshold
+# below it could never be honoured and the setting would silently mean
+# something other than what it says. The core entrypoint raises this to match
+# TMUX_SESSION_SIDEBAR_BUSY_SECONDS; the default here matches its default.
+SIDEBAR_AWAITING_AFTER_MS_MIN=10000
 SIDEBAR_AWAITING_AFTER_MS_MAX=300000
 SIDEBAR_AWAITING_AFTER_MS_DEFAULT=30000
 
@@ -2757,6 +2764,10 @@ SIDEBAR_GRADIENT_SPEED_OPTION="@session-dock-gradient-speed"
 # before it is worth reporting. All three are re-read once a second.
 SIDEBAR_AWAITING_ENABLED="${TMUX_SESSION_SIDEBAR_AWAITING_ENABLED:-true}"
 SIDEBAR_AWAITING_AFTER_MS="${TMUX_SESSION_SIDEBAR_AWAITING_AFTER_MS:-30000}"
+# Keep the threshold's floor on the busy window, so "quiet for N seconds" is
+# always literally true rather than quietly rounded up to it.
+SIDEBAR_AWAITING_AFTER_MS_MIN=$(( SIDEBAR_BUSY_SECONDS * 1000 ))
+[ "$SIDEBAR_AWAITING_AFTER_MS_MIN" -ge 1000 ] || SIDEBAR_AWAITING_AFTER_MS_MIN=1000
 SIDEBAR_AWAITING_OPTION="@session-dock-awaiting"
 SIDEBAR_AWAITING_BLINK_OPTION="@session-dock-awaiting-blink"
 SIDEBAR_AWAITING_AFTER_OPTION="@session-dock-awaiting-after"
@@ -5779,13 +5790,24 @@ sidebar_selection_sync_ack_ready()
 # Does the captured sidebar text show the sessions view with this session as
 # a row?  Pure bash: capture-pane without -e yields plain text, so no escape
 # stripping and no grep processes are needed.
+# Recognise a settled frame in captured dock text: the header, the session's
+# name, and its row.
+#
+# Both patterns describe what the renderer may draw, and both have been broken
+# by drawing more of it. The header carries a count of waiting sessions after
+# its title, so it is matched by its beginning and not as a whole line; the two
+# mark columns can hold the cursor, the current-session star and the awaiting
+# glyph in any combination, so they are matched as a bounded run of the
+# characters row_mark_value is allowed to emit. Widen these together with any
+# change to render_header or row_mark_value.
 sidebar_content_matches()
 {
-    local content="$1" session_name_value="$2" nl=$'\n' re_name
+    local content="$1" session_name_value="$2" nl=$'\n' re_name mark_class
     re_name="$(printf '%s' "$session_name_value" | sed 's/[][\.*^$/+?(){}|]/\\&/g')"
-    [[ "$nl$content$nl" =~ $nl[[:space:]]*sessions[[:space:]]*$nl ]] || return 1
+    mark_class="[>*${SIDEBAR_AWAITING_GLYPH}[:space:]]"
+    [[ "$nl$content$nl" =~ $nl[[:space:]]*sessions[[:space:]] ]] || return 1
     [[ "$content" == *"$session_name_value"* ]] || return 1
-    [[ "$nl$content$nl" =~ $nl[[:space:]]*(\>\*?|\*?)[[:space:]]+$re_name([[:space:]]|$nl) ]]
+    [[ "$nl$content$nl" =~ $nl${mark_class}{0,2}[[:space:]]+$re_name([[:space:]]|$nl) ]]
 }
 
 sidebar_content_ready()
@@ -5945,7 +5967,7 @@ wait_for_managed_sidebar_snapshot()
             fi
             content="$(tmux capture-pane -p -J -t "$sidebar_pane" 2>/dev/null || true)"
             if [ -z "$sidebar_pane" ] ||
-                ! printf '%s\n' "$content" | grep -Fxq 'sessions' ||
+                ! printf '%s\n' "$content" | grep -Eq '^[[:space:]]*sessions([[:space:]]|$)' ||
                 ! printf '%s\n' "$content" | grep -Eq '^>[*]?([[:space:]]|$)'; then
                 ready=0
                 break

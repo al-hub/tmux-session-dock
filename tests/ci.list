@@ -22,6 +22,7 @@ tmux-single-sidebar/test-restore-terminal-unit.sh
 tmux-single-sidebar/test-animation-cell-width-unit.sh
 tmux-single-sidebar/test-gradient-config-unit.sh
 tmux-single-sidebar/test-awaiting-state-unit.sh
+tmux-single-sidebar/test-content-oracle-unit.sh
 
 # --- contract (real tmux, isolated socket, headless) ---
 tmux-single-sidebar/test-contract.sh
@@ -123,6 +124,8 @@ tmux-single-sidebar/test-subpane-multi-session-stress.sh
 # --- gradient / AI activity ---
 tmux-sidebar-gradient/test-render.sh
 tmux-sidebar-gradient/test-awaiting-e2e.sh
+tmux-sidebar-gradient/test-awaiting-switch-regression.sh
+tmux-sidebar-gradient/test-awaiting-options-e2e.sh
 tmux-sidebar-gradient/test-fingerprint.sh
 tmux-sidebar-gradient/test-state.sh
 tmux-sidebar-gradient/test-session-isolation.sh

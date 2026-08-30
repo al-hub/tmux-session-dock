@@ -121,11 +121,48 @@ observe g 'a' 1000
 expect awaiting 'a replacement AI that stops is news, because it just started'
 printf 'PASS: an exiting AI resets the session, and its replacement can announce\n'
 
+# --- the threshold decides when, exactly -------------------------------------
+# With a threshold longer than the busy window there is a quiet stretch that is
+# reported as Idle before the mark is earned.
+sidebar_domain_activity_reset_all
+observe t 'a' 1000
+observe t 'b' 1001            # a real change: the session is now eligible
+observe t 'b' $((1001 + 10 - 1))
+expect running 'one second inside the busy window'
+observe t 'b' $((1001 + 10))
+expect idle 'left running, but the threshold has not passed'
+observe t 'b' $((1001 + AWAIT_AFTER - 1))
+expect idle 'one second before the threshold'
+observe t 'b' $((1001 + AWAIT_AFTER))
+expect awaiting 'exactly on the threshold'
+printf 'PASS: the mark is earned exactly at the configured threshold\n'
+
+# --- a threshold at the busy window leaves no gap -----------------------------
+# The threshold is measured from the last output and its floor is the busy
+# window, so the shortest setting a user can reach makes the mark appear the
+# moment the session stops counting as Working: Idle is never seen. (The pure
+# policy still accepts a smaller number, which is what the clamp exists to
+# prevent from reaching it.)
+SHORT=10
+sidebar_domain_activity_reset_all
+observe s2 'a' 2000
+observe s2 'b' 2001
+for elapsed in 1 3 5 7 9; do
+    observe s2 'b' $((2001 + elapsed)) false "$SHORT"
+    expect running "still working ${elapsed}s after the last change"
+done
+observe s2 'b' $((2001 + 10)) false "$SHORT"
+expect awaiting 'the first observation that is not running is already awaiting'
+printf 'PASS: a threshold at the busy window turns Working straight into Awaiting\n'
+
 # --- the threshold clamp ------------------------------------------------------
-for pair in ":30000" "abc:30000" "0:1000" "1:1000" "999:1000" "1000:1000" \
-    "30000:30000" "300000:300000" "300001:300000" "9999999:300000"; do
+# The floor is the busy window: a number below it could never be honoured, so
+# it is raised rather than accepted as a promise the code cannot keep.
+for pair in ":30000" "abc:30000" "0:$SIDEBAR_AWAITING_AFTER_MS_MIN" "1:$SIDEBAR_AWAITING_AFTER_MS_MIN" \
+    "6000:$SIDEBAR_AWAITING_AFTER_MS_MIN" "9999:$SIDEBAR_AWAITING_AFTER_MS_MIN" \
+    "10000:10000" "30000:30000" "300000:300000" "300001:300000" "9999999:300000"; do
     sidebar_domain_activity_await_after "${pair%%:*}"
     [ "$sidebar_awaiting_after_ms_result" = "${pair#*:}" ] ||
         fail "clamp('${pair%%:*}') was $sidebar_awaiting_after_ms_result, expected ${pair#*:}"
 done
-printf 'PASS: the threshold is clamped, and an unusable value falls back\n'
+printf 'PASS: a threshold below the busy window is raised to it, not accepted\n'
