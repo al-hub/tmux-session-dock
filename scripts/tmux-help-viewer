@@ -27,7 +27,7 @@ trap "draw_help" WINCH
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." 2>/dev/null && pwd)"
-VERSION="v0.3.46"
+VERSION="v0.3.47"
 if [ -f "$REPO_DIR/setup.sh" ]; then
     VERSION_FROM_SETUP="$(grep -E '^VERSION=' "$REPO_DIR/setup.sh" 2>/dev/null | cut -d'"' -f2 || true)"
     [ -n "$VERSION_FROM_SETUP" ] && VERSION="$VERSION_FROM_SETUP"
