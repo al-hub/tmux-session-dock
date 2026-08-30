@@ -52,6 +52,25 @@ get_awaiting_enabled() {
     case "$v" in off|false|0) printf 'off' ;; *) printf 'on' ;; esac
 }
 
+# A millisecond setting, short enough to stand in the mark column: 1200 -> 1.2s,
+# 45000 -> 45s. The row shows this instead of a tick, because a tick on a row
+# that only holds a number says nothing the number does not say better. Below
+# ten seconds a tenth is worth showing (the wave cycle lives at 0.4-4 s); above
+# it the whole second is the honest reading, and it keeps every mark inside six
+# columns so the titles stay in one line. The exact figure is in the row's own
+# description either way.
+format_ms_short() {
+    local ms="$1"
+    case "$ms" in ''|*[!0-9]*) printf '?'; return 0 ;; esac
+    if [ "$ms" -ge 10000 ]; then
+        printf '%ss' "$(( (ms + 500) / 1000 ))"
+    elif [ $((ms % 1000)) -eq 0 ]; then
+        printf '%ss' "$((ms / 1000))"
+    else
+        printf '%s.%ss' "$((ms / 1000))" "$(( (ms % 1000) / 100 ))"
+    fi
+}
+
 get_awaiting_blink() {
     local v
     v="$(tmux show-option -gqv "@session-dock-awaiting-blink" 2>/dev/null || true)"
@@ -201,7 +220,10 @@ draw_picker() {
             continue
         fi
 
-        local is_active=false disabled=false
+        # A row whose setting is a number puts the number here instead of a
+        # tick: the tick column is a lamp, not a switch, and on a value row it
+        # could only ever report the parent's state.
+        local is_active=false disabled=false mark_override=""
         [ "$id" = "$CURRENT_COUNT" ] && is_active=true
         case "$id" in
             POS)
@@ -240,9 +262,10 @@ draw_picker() {
             GSPD)
                 local gms
                 gms="$(get_gradient_speed)"
+                mark_override="[$(format_ms_short "$gms")]"
                 if [ "$(get_gradient_enabled)" = "on" ]; then
                     is_active=true
-                    desc="한 주기 ${BOLD}${EMERALD}${gms} ms${RESET}${GRAY} · 24프레임 ≈ $(( 24000 / gms )) fps ${DIM}(Enter: ms 직접 입력, ${SIDEBAR_ANIMATION_CYCLE_MS_MIN:-400}~${SIDEBAR_ANIMATION_CYCLE_MS_MAX:-4000})${RESET}"
+                    desc="한 주기 ${BOLD}${EMERALD}${gms} ms${RESET}${GRAY} · 24프레임 ≈ $(( 24000 / gms )) fps ${DIM}(Space/Enter: ms 직접 입력, ${SIDEBAR_ANIMATION_CYCLE_MS_MIN:-400}~${SIDEBAR_ANIMATION_CYCLE_MS_MAX:-4000})${RESET}"
                 else
                     disabled=true
                     desc="${DIM}그라디언트가 꺼져 있어 비활성 (현재 ${gms} ms)${RESET}"
@@ -269,18 +292,20 @@ draw_picker() {
                     desc="확인할 때까지 계속 깜빡임 ${DIM}(Space: 끄기 / Enter: ms 지정)${RESET}"
                 else
                     is_active=true
-                    desc="${BOLD}${EMERALD}${ablink} ms${RESET}${GRAY} 동안만 깜빡인 뒤 정적 ${DIM}(상태는 그대로 유지)${RESET}"
+                    mark_override="[$(format_ms_short "$ablink")]"
+                    desc="${BOLD}${EMERALD}${ablink} ms${RESET}${GRAY} 동안만 깜빡인 뒤 정적 ${DIM}(상태는 유지 · Space: always 복귀 / Enter: ms 재지정)${RESET}"
                 fi
                 ;;
             AAFTER)
                 local aafter
                 aafter="$(get_awaiting_after)"
+                mark_override="[$(format_ms_short "$aafter")]"
                 if [ "$(get_awaiting_enabled)" != "on" ]; then
                     disabled=true
                     desc="${DIM}Awaiting 표시가 꺼져 있어 비활성 (현재 ${aafter} ms)${RESET}"
                 else
                     is_active=true
-                    desc="마지막 출력 이후 ${BOLD}${EMERALD}${aafter} ms${RESET}${GRAY} 조용하면 표시 ${DIM}(Enter: 직접 입력, ${SIDEBAR_AWAITING_AFTER_MS_MIN:-10000}~${SIDEBAR_AWAITING_AFTER_MS_MAX:-300000})${RESET}"
+                    desc="마지막 출력 이후 ${BOLD}${EMERALD}${aafter} ms${RESET}${GRAY} 조용하면 표시 ${DIM}(Space/Enter: 직접 입력, ${SIDEBAR_AWAITING_AFTER_MS_MIN:-10000}~${SIDEBAR_AWAITING_AFTER_MS_MAX:-300000})${RESET}"
                 fi
                 ;;
             REST)
@@ -296,16 +321,23 @@ draw_picker() {
                 ;;
         esac
 
-        local mark="[ ]"
+        local mark="[ ]" mark_width=7 pad
         [ "$is_active" = true ] && mark="[✓]"
+        [ -n "$mark_override" ] && mark="$mark_override"
+        # printf pads to bytes, and the tick is three of them, so pad here by
+        # the character count instead - otherwise a value mark and a tick mark
+        # push the titles to different columns.
+        pad=$(( mark_width - ${#mark} ))
+        [ "$pad" -ge 1 ] || pad=1
+        printf -v mark '%s%*s' "$mark" "$pad" ''
         if [ "$i" -eq "$SELECTED_IDX" ]; then
-            printf "  ${SELECTED_BG} ▸ %s %-30s ${RESET} ${CYAN}─ %b${RESET}\n" "$mark" "$title" "$desc"
+            printf "  ${SELECTED_BG} ▸ %s%-30s ${RESET} ${CYAN}─ %b${RESET}\n" "$mark" "$title" "$desc"
         elif [ "$disabled" = true ]; then
-            printf "    ${DIM}%s %-30s${RESET} ${GRAY}─ %b${RESET}\n" "$mark" "$title" "$desc"
+            printf "    ${DIM}%s%-30s${RESET} ${GRAY}─ %b${RESET}\n" "$mark" "$title" "$desc"
         elif [ "$is_active" = true ]; then
-            printf "    ${EMERALD}${BOLD}%s %-30s${RESET} ${GRAY}─ %b${RESET}\n" "$mark" "$title" "$desc"
+            printf "    ${EMERALD}${BOLD}%s%-30s${RESET} ${GRAY}─ %b${RESET}\n" "$mark" "$title" "$desc"
         else
-            printf "    ${DIM}%s %-30s${RESET} ${GRAY}─ %b${RESET}\n" "$mark" "$title" "$desc"
+            printf "    ${DIM}%s%-30s${RESET} ${GRAY}─ %b${RESET}\n" "$mark" "$title" "$desc"
         fi
         i=$((i + 1))
     done
@@ -399,10 +431,15 @@ apply_selection() {
             if [ "$key_is_enter" = true ]; then
                 prompt_ms_value "@session-dock-awaiting-blink" "$(get_awaiting_blink)" \
                     100 600000 "깜빡임(ms)"
-            elif [ "$(get_awaiting_blink)" = "off" ]; then
-                tmux set-option -gq "@session-dock-awaiting-blink" always
             else
-                tmux set-option -gq "@session-dock-awaiting-blink" off
+                # Space walks the keyword states. A millisecond budget is only
+                # reachable through Enter, so Space must lead back out of it -
+                # without this, a number could be replaced but never undone.
+                case "$(get_awaiting_blink)" in
+                    off)     tmux set-option -gq "@session-dock-awaiting-blink" always ;;
+                    always)  tmux set-option -gq "@session-dock-awaiting-blink" off ;;
+                    *)       tmux set-option -gq "@session-dock-awaiting-blink" always ;;
+                esac
             fi
             ;;
         AAFTER)

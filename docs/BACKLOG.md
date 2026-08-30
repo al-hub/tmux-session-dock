@@ -316,10 +316,20 @@ Seen`, `On Failure`). On a value row the check reports the *parent's* state:
 `AAFTER` is ticked whenever `Awaiting Marker` is on (`:275`). So the row reads
 as a switch that cannot be switched off. The footer legend - `토글 & 적용:
 [ Space / Enter ]` - names both actions in one breath and completes the
-misreading. Candidate: value rows show the value (`[10s]`, `[1.2s]`) instead of
-a tick, and keep `[ ]` + dim when the parent is off.
+misreading. **Done in v0.3.58**: a value row now shows its value in that column
+(`[10s]`, `[1.2s]`, `[600s]`), so the tick is left to mean one thing. The mark is
+padded by character count rather than by printf's byte count, because the tick
+is three bytes and a value is not. `Blink Until Seen` shows its budget the same
+way while it holds one, and its description names both keys. The remaining half
+of this finding is the footer legend, which still says `토글 & 적용` for every
+row alike.
 
 **(b) The blink default is `always`, so out of the box the mark never settles.**
+(Partly addressed in v0.3.58: Space now walks *out* of a millisecond budget back
+to `always`. It used to walk a two-state keyword toggle that treated a budget as
+"not off", so a number could be replaced through Enter but never undone. The
+default itself is still `always` and still untested - that part is a decision,
+below.)
 `sidebar_awaiting_apply` maps an unset option to `blink_ms=-1`
 (`scripts/tmux-session-dock:5591`), and `row_mark_value` then skips the budget
 check entirely. This is documented (README:66) and the popup says it
@@ -374,6 +384,8 @@ Decide before writing code:
 
 Only (a) and (d) are safe to do without answering the rest; (d) is a real
 inconsistency today, (a) is the change that stops the report from recurring.
+(a) is done as of v0.3.58, along with the escape hatch in (b); (c) and (d) and
+the five questions stand.
 
 ## Not planned
 
