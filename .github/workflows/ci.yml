@@ -24,6 +24,13 @@ jobs:
           test -x dist/tmux-session-dock
           test -x dist/tmux-sidebar-tmux-adapter
 
+      - name: Verify committed dist matches the build
+        run: |
+          git diff --exit-code -- dist/ || {
+            echo "::error::dist/ is stale - run 'make build' and commit the result"
+            exit 1
+          }
+
   test-suite:
     name: Tests (${{ matrix.os }})
     needs: lint-and-build

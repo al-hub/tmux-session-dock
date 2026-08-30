@@ -28,6 +28,74 @@ SUBPANE_TRANSACTION_ENV="DOTFILES_SIDEBAR_SUBPANE_TRANSACTION"
 SUBPANE_TRANSACTION_TTL_SECONDS=5
 _subpane_hub_transaction_depth=0
 
+# The core entrypoint defines the real tracer; lib-only harnesses get a no-op.
+declare -f trace_event >/dev/null 2>&1 || eval 'trace_event() { :; }'
+
+# ------------------------------------------------------------------------------
+# Slot mutation lock.  Every operation that joins or parks slot panes (migrate,
+# park/release, position swap) runs under one mkdir+pid lock per server, so
+# two processes (a switch and a hook handler on another client, two clients
+# pressing Enter) never interleave joins of the same slot panes.  The
+# transaction marker above only tells *observers* to skip snapshots; it is not
+# mutual exclusion.  Reentrant within a process (swap parks, then migrates).
+# A lock whose owner pid is dead is reclaimed at once; a live owner is waited
+# for up to SUBPANE_LOCK_WAIT_SECONDS, then the caller gives up (rc 1).
+# ------------------------------------------------------------------------------
+SUBPANE_LOCK_WAIT_SECONDS="${TMUX_SESSION_SIDEBAR_SUBPANE_LOCK_WAIT_SECONDS:-3}"
+_subpane_hub_lock_depth=0
+_subpane_hub_lock_dir=""
+
+subpane_hub_lock_path() {
+    local socket_name
+    socket_name="$(sidebar_tmux_cmd display-message -p '#{socket_path}' 2>/dev/null || printf '%s' "${TMUX%%,*}")"
+    socket_name="$(printf '%s' "$socket_name" | tr -c 'A-Za-z0-9_.-' '_')"
+    printf '%s/dotfiles-sidebar-subpane-%s.lock\n' "${TMUX_SESSION_LAUNCHER_LOCK_ROOT:-/tmp}" "${socket_name:-default}"
+}
+
+subpane_hub_lock_acquire() {
+    if [ "$_subpane_hub_lock_depth" -gt 0 ]; then
+        _subpane_hub_lock_depth=$((_subpane_hub_lock_depth + 1))
+        return 0
+    fi
+    local lock_dir owner_pid waited=0 limit
+    lock_dir="$(subpane_hub_lock_path)"
+    limit=$(( ${SUBPANE_LOCK_WAIT_SECONDS%.*} * 20 ))   # 50 ms steps
+    while :; do
+        if mkdir "$lock_dir" 2>/dev/null; then
+            printf '%s\n' "${BASHPID:-$$}" > "$lock_dir/pid" 2>/dev/null || true
+            _subpane_hub_lock_dir="$lock_dir"
+            _subpane_hub_lock_depth=1
+            return 0
+        fi
+        owner_pid="$(cat "$lock_dir/pid" 2>/dev/null || true)"
+        if [ -n "$owner_pid" ] && ! kill -0 "$owner_pid" 2>/dev/null; then
+            trace_event "subpane.lock.reclaim path=$lock_dir owner=$owner_pid"
+            rm -f "$lock_dir/pid" 2>/dev/null || true
+            rmdir "$lock_dir" 2>/dev/null || true
+            continue
+        fi
+        waited=$((waited + 1))
+        if [ "$waited" -ge "$limit" ]; then
+            trace_event "subpane.lock.busy path=$lock_dir owner=${owner_pid:-unknown} waited_ms=$((waited * 50))"
+            return 1
+        fi
+        sleep 0.05
+    done
+}
+
+subpane_hub_lock_release() {
+    [ "$_subpane_hub_lock_depth" -gt 0 ] || return 0
+    _subpane_hub_lock_depth=$((_subpane_hub_lock_depth - 1))
+    [ "$_subpane_hub_lock_depth" -eq 0 ] || return 0
+    local lock_dir="$_subpane_hub_lock_dir" owner_pid
+    _subpane_hub_lock_dir=""
+    [ -n "$lock_dir" ] || return 0
+    owner_pid="$(cat "$lock_dir/pid" 2>/dev/null || true)"
+    [ -z "$owner_pid" ] || [ "$owner_pid" = "${BASHPID:-$$}" ] || return 0
+    rm -f "$lock_dir/pid" 2>/dev/null || true
+    rmdir "$lock_dir" 2>/dev/null || true
+}
+
 subpane_hub_transaction_begin() {
     _subpane_hub_transaction_depth=$((_subpane_hub_transaction_depth + 1))
     [ "$_subpane_hub_transaction_depth" -eq 1 ] || return 0
@@ -327,6 +395,17 @@ subpane_hub_resolve_pool() {
 }
 
 subpane_hub_swap_stack_position() {
+    local swap_rc=0
+    subpane_hub_lock_acquire || {
+        trace_event "subpane.swap.skip reason=lock-busy window=${1:-none}"
+        return 1
+    }
+    subpane_hub_swap_stack_position_body "$@" || swap_rc=$?
+    subpane_hub_lock_release
+    return "$swap_rc"
+}
+
+subpane_hub_swap_stack_position_body() {
     local target_win="${1:-}"
     [ -n "$target_win" ] || target_win="$(sidebar_tmux_cmd display-message -p '#{window_id}' 2>/dev/null || true)"
     [ -n "$target_win" ] || return 1
@@ -427,8 +506,13 @@ subpane_hub_atomic_migrate() {
     # The marker is raised inside the body, right before the first join, so a
     # no-op call (slots already attached) never blocks anyone's snapshot.
     local migrate_rc=0
+    subpane_hub_lock_acquire || {
+        trace_event "subpane.migrate.skip reason=lock-busy target=${1:-none}"
+        return 1
+    }
     subpane_hub_atomic_migrate_body "$@" || migrate_rc=$?
     subpane_hub_transaction_end
+    subpane_hub_lock_release
     return "$migrate_rc"
 }
 
@@ -609,8 +693,13 @@ subpane_hub_release_pane() {
     # The body raises the marker before the first join; a call that finds no
     # slot to park never blocks anyone's snapshot.
     local release_rc=0
+    subpane_hub_lock_acquire || {
+        trace_event "subpane.release.skip reason=lock-busy pane=${1:-none}"
+        return 1
+    }
     subpane_hub_release_pane_body "$@" || release_rc=$?
     subpane_hub_transaction_end
+    subpane_hub_lock_release
     return "$release_rc"
 }
 

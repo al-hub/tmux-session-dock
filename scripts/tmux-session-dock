@@ -98,6 +98,10 @@ SIDEBAR_WATCHDOG_STALE_SECONDS="${TMUX_SESSION_SIDEBAR_WATCHDOG_STALE_SECONDS:-1
 # A busy operation (save/delete/restore) is trusted only while its owner
 # process is alive and this many seconds have not passed since it began.
 SIDEBAR_OPERATION_TTL_SECONDS="${TMUX_SESSION_SIDEBAR_OPERATION_TTL_SECONDS:-120}"
+# Hook-suppression flags (sidebar ON toggle, archive restore) are trusted only
+# while their owner process is alive and within these budgets.
+SIDEBAR_PROVISION_GUARD_TTL_SECONDS="${TMUX_SESSION_SIDEBAR_PROVISION_GUARD_TTL_SECONDS:-30}"
+SIDEBAR_RESTORE_GUARD_TTL_SECONDS="${TMUX_SESSION_SIDEBAR_RESTORE_GUARD_TTL_SECONDS:-120}"
 SIDEBAR_TRANSITION_RENDER_PENDING_GRACE_SECONDS="${TMUX_SESSION_SIDEBAR_TRANSITION_RENDER_PENDING_GRACE_SECONDS:-3}"
 SIDEBAR_FORCE_REFRESH_CHECK_SECONDS="${TMUX_SESSION_SIDEBAR_FORCE_REFRESH_CHECK_SECONDS:-1}"
 SIDEBAR_KEY_MAINTENANCE_COOLDOWN_MS="${TMUX_SESSION_SIDEBAR_KEY_MAINTENANCE_COOLDOWN_MS:-250}"
@@ -327,10 +331,48 @@ flush_action_generation_if_dirty()
     sidebar_runtime_set "$SIDEBAR_ACTION_GENERATION_OPTION" "${_sidebar_local_action_generation:-0}"
 }
 
+# Guard flags (@dotfiles_sidebar_provisioning, @dotfiles_sidebar_restore_topology,
+# @tmux_batch_busy) suppress hooks and toggles while a toggle or restore is in
+# flight.  They are written as "<owner_pid>:<deadline_epoch>" so a writer that
+# dies (SIGKILL, server stall) cannot leave the server suppressed forever; a
+# legacy value of 1 is honoured, 0/empty is inactive.
+sidebar_guard_flag_set()
+{
+    local option="$1" ttl="${2:-30}"
+    sidebar_tmux_cmd set-option -gq "$option" "$$:$(( ${EPOCHSECONDS:-$(date +%s)} + ttl ))" 2>/dev/null || true
+}
+
+sidebar_guard_flag_clear()
+{
+    sidebar_tmux_cmd set-option -gq "$1" 0 2>/dev/null || true
+}
+
+sidebar_guard_flag_active()
+{
+    local value owner_pid deadline
+    value="$(sidebar_tmux_cmd show-option -gqv "$1" 2>/dev/null || true)"
+    case "$value" in
+        ''|0) return 1 ;;
+        1) return 0 ;;
+        *:*) ;;
+        *) return 1 ;;
+    esac
+    owner_pid="${value%%:*}"
+    deadline="${value#*:}"
+    case "$owner_pid" in ''|*[!0-9]*) return 1 ;; esac
+    case "$deadline" in ''|*[!0-9]*) return 1 ;; esac
+    if ! kill -0 "$owner_pid" 2>/dev/null || [ "${EPOCHSECONDS:-$(date +%s)}" -gt "$deadline" ]; then
+        trace_event "guard.stale-clear option=$1 value=$value"
+        sidebar_tmux_cmd set-option -gq "$1" 0 2>/dev/null || true
+        return 1
+    fi
+    return 0
+}
+
 restore_topology_guard_active()
 {
-    [ "$(sidebar_tmux_cmd show-option -gqv "$SIDEBAR_RESTORE_TOPOLOGY_OPTION" 2>/dev/null || true)" = 1 ] || \
-    [ "$(sidebar_tmux_cmd show-option -gqv "$TMUX_BATCH_BUSY_OPTION" 2>/dev/null || true)" = 1 ]
+    sidebar_guard_flag_active "$SIDEBAR_RESTORE_TOPOLOGY_OPTION" ||
+    sidebar_guard_flag_active "$TMUX_BATCH_BUSY_OPTION"
 }
 prompt_result=""
 prompt_cancelled=false
@@ -1346,7 +1388,7 @@ find_global_sidebar_pane()
 
 sidebar_provisioning_active()
 {
-    [ "$(tmux show-option -gqv "$SIDEBAR_PROVISION_OPTION" 2>/dev/null || true)" = 1 ]
+    sidebar_guard_flag_active "$SIDEBAR_PROVISION_OPTION"
 }
 
 sidebar_window_ids()
@@ -2769,7 +2811,7 @@ toggle_current_sidebar()
         active_target_window="$(sidebar_tmux_cmd list-windows -t "=$current_session_name:" -F '#{window_id}' 2>/dev/null | head -n 1 || true)"
     fi
 
-    sidebar_tmux_cmd set-option -gq "$SIDEBAR_PROVISION_OPTION" 1 2>/dev/null || true
+    sidebar_guard_flag_set "$SIDEBAR_PROVISION_OPTION" "$SIDEBAR_PROVISION_GUARD_TTL_SECONDS"
     if ! provision_managed_sidebars "$(sidebar_width)" "$active_target_window"; then
         sidebar_tmux_cmd set-option -gq "$SIDEBAR_PROVISION_OPTION" 0 2>/dev/null || true
         trace_event "sidebar.toggle.abort reason=provision-failed"
@@ -7206,7 +7248,7 @@ restore_archive()
     # archive is being materialized. Those hooks must not provision or move a
     # sidebar in the middle of the restore transaction; the explicit restore
     # path provisions it once after pane identity and layout are complete.
-    tmux set-option -gq "$SIDEBAR_RESTORE_TOPOLOGY_OPTION" 1 2>/dev/null || true
+    sidebar_guard_flag_set "$SIDEBAR_RESTORE_TOPOLOGY_OPTION" "$SIDEBAR_RESTORE_GUARD_TTL_SECONDS"
     trace_event "restore.topology-guard.begin operation_id=$restore_operation_id"
     operation_test_delay "$restore_operation_id"
     archive_version="$(awk -F '\t' '$1 == "version" { print $2; exit }' "$archive_path")"
@@ -7756,8 +7798,8 @@ EOF
         new_sidebar_operation_id
         batch_operation_id="$sidebar_operation_id_result"
         sidebar_operation_set restoring "$batch_operation_id"
-        sidebar_tmux_cmd set-option -gq "$TMUX_BATCH_BUSY_OPTION" 1 2>/dev/null || true
-        sidebar_tmux_cmd set-option -gq "$SIDEBAR_RESTORE_TOPOLOGY_OPTION" 1 2>/dev/null || true
+        sidebar_guard_flag_set "$TMUX_BATCH_BUSY_OPTION" "$SIDEBAR_RESTORE_GUARD_TTL_SECONDS"
+        sidebar_guard_flag_set "$SIDEBAR_RESTORE_TOPOLOGY_OPTION" "$SIDEBAR_RESTORE_GUARD_TTL_SECONDS"
         trace_event "restore.batch.begin operation_id=$batch_operation_id selected=$selected_count"
         [ -n "$METRICS_FILE" ] && metrics_write "op=batch-restore phase=begin operation_id=$batch_operation_id selected=$selected_count"
         message_line "Restoring: 0/$selected_count"

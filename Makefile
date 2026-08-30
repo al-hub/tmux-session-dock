@@ -2,7 +2,7 @@
 # tmux-session-dock - Makefile
 # Automation for Build, Test, Lint, and Lifecycle Management
 # ==============================================================================
-.PHONY: all build test test-manual test-health clean install uninstall status lint ci
+.PHONY: all build test test-manual test-health check-dist clean install uninstall status lint ci
 
 all: build
 
@@ -17,6 +17,10 @@ test-manual:
 
 test-health:
 	@bash tests/run-tests.sh --health
+
+check-dist: build
+	@git diff --quiet -- dist/ || { echo "❌ dist/ is stale: commit the rebuilt bundle"; git --no-pager diff --stat -- dist/; exit 1; }
+	@echo "✅ dist/ matches the build."
 
 lint:
 	@bash -n setup.sh
@@ -43,4 +47,4 @@ clean:
 	@rm -rf dist/
 	@echo "✅ Clean completed."
 
-ci: build lint test
+ci: build lint check-dist test

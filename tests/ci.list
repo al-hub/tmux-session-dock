@@ -32,6 +32,8 @@ tmux-single-sidebar/test-cold-provisioning-contract.sh
 tmux-single-sidebar/test-concurrent-provision-contract.sh
 tmux-single-sidebar/test-transition-lock-liveness-contract.sh
 tmux-single-sidebar/test-operation-state-liveness-contract.sh
+tmux-single-sidebar/test-guard-flag-liveness-contract.sh
+tmux-single-sidebar/test-subpane-migrate-lock-contract.sh
 tmux-single-sidebar/test-window-ready-options.sh
 tmux-single-sidebar/test-width-restart-contract.sh
 tmux-single-sidebar/test-width-restore-contract.sh
