@@ -109,14 +109,15 @@ wait_for_selection_sync_ack() {
   return 1
 }
 
+# Which session is OUR client on? Ask list-clients, never `display-message -c`:
+# tmux 3.4 uses -c only to choose where a message is shown and resolves the
+# format against the most recently used session instead, so a client that has
+# just moved keeps reporting the session it left (and with two clients attached
+# both report the same one). tmux 3.2a rejects `-p -c` outright. list-clients
+# answers per client on both.
 client_session() {
   local sess=""
-  if [ -n "${CLIENT_TTY:-}" ]; then
-    sess="$(tmuxc display-message -c "$CLIENT_TTY" -p '#{session_name}' 2>/dev/null || true)"
-  fi
-  if [ -z "$sess" ]; then
-    sess="$(tmuxc list-clients -F '#{client_control_mode}|#{client_tty}|#{session_name}' 2>/dev/null | awk -F'|' -v tty="${CLIENT_TTY:-}" '!done && ($1 != 1 && (tty == "" || $2 == tty)) {print $3; done = 1}')"
-  fi
+  sess="$(tmuxc list-clients -F '#{client_control_mode}|#{client_tty}|#{session_name}' 2>/dev/null | awk -F'|' -v tty="${CLIENT_TTY:-}" '!done && ($1 != 1 && (tty == "" || $2 == tty)) {print $3; done = 1}')"
   if [ -z "$sess" ]; then
     sess="$(tmuxc list-clients -F '#{client_control_mode}|#{session_name}' 2>/dev/null | awk -F'|' '!done && $1 != 1 {print $2; done = 1}')"
   fi
