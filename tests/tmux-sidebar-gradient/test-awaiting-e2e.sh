@@ -45,6 +45,21 @@ row_for() {
 }
 mark_for() { local row; row="$(row_for "$1")"; printf '%s' "${row:1:1}"; }
 
+# The glyph blinks, so "no mark" has to be observed across a full cycle rather
+# than in one sample.
+wait_no_mark() {    # wait_no_mark <session> <what>
+    local deadline=$(( $(date +%s) + 20 )) t
+    while [ "$(date +%s)" -lt "$deadline" ]; do
+        local clear=true
+        for t in 1 2 3 4 5 6 7 8; do
+            [ "$(mark_for "$1")" = '●' ] && { clear=false; break; }
+            sleep 0.3
+        done
+        [ "$clear" = true ] && return 0
+    done
+    fail_test "$2: the mark was still showing (row: $(row_for "$1"))"
+}
+
 wait_for_mark() {   # wait_for_mark <session> <expected char> <what>
     local want="$2" deadline=$(( $(date +%s) + 20 )) got=''
     while [ "$(date +%s)" -lt "$deadline" ]; do
@@ -89,7 +104,24 @@ printf 'waiting\n' > "$CONTROL"
 wait_for_mark worker '●' 'a stop nobody visited'
 printf 'PASS: a session that stopped while unattended is marked\n'
 
-# --- 2. the header answers without scrolling ---------------------------------
+# --- 2. the mark blinks, drawn by the dock itself ----------------------------
+# SGR 5 is accepted and then ignored by several terminals, so the dock draws the
+# blink: the glyph must alternate with a blank while the session waits.
+seen_on=false seen_off=false
+deadline=$(( $(date +%s) + 25 ))   # generous: a loaded runner slows the phase, it must not stop it
+while [ "$(date +%s)" -lt "$deadline" ]; do
+    case "$(mark_for worker)" in
+        '●') seen_on=true ;;
+        ' '|'') seen_off=true ;;
+    esac
+    [ "$seen_on" = true ] && [ "$seen_off" = true ] && break
+    sleep 0.2
+done
+[ "$seen_on" = true ] || fail_test 'the mark never showed its glyph'
+[ "$seen_off" = true ] || fail_test 'the mark never blanked: it is not blinking'
+printf 'PASS: the mark blinks without relying on the terminal\n'
+
+# --- 3. the header answers without scrolling ---------------------------------
 header="$(tmuxc capture-pane -p -t "$SIDEBAR" | strip_ansi | sed -n 1p)"
 case "$header" in
     *awaiting*) ;;
@@ -97,37 +129,32 @@ case "$header" in
 esac
 printf 'PASS: the header reports how many sessions are waiting\n'
 
-# --- 3. arriving clears it, and leaving does not bring it back ---------------
+# --- 4. arriving clears it, and leaving does not bring it back ---------------
 # Read the mark from the anchor sidebar while the client is back on anchor: a
 # presenter nobody is attached to has a stale idea of the current session.
 client_tty="$(tmuxc list-clients -F '#{client_tty}' | sed -n 1p)"
 tmuxc switch-client -c "$client_tty" -t '=worker:'
 sleep 4                     # the observer publishes the client list once a second
 tmuxc switch-client -c "$client_tty" -t '=anchor:'
-wait_for_mark worker ' ' 'after visiting the session'
+wait_no_mark worker 'after visiting the session'
 sleep 5                     # well past the 1 s threshold: a re-arm would show by now
-[ "$(mark_for worker)" = '●' ] &&
-    fail_test 'leaving the session re-raised a stop the user had already seen'
+wait_no_mark worker 'after leaving the session again'
 printf 'PASS: visiting clears the mark, and leaving does not bring it back\n'
 
-# --- 4. new output takes it back to the wave ---------------------------------
+# --- 5. new output takes it back to the wave ---------------------------------
 printf 'active\n' > "$CONTROL"
-deadline=$(( $(date +%s) + 15 )); moved=false
-while [ "$(date +%s)" -lt "$deadline" ]; do
-    [ "$(mark_for worker)" = ' ' ] && { moved=true; break; }
-    sleep 0.2
-done
-[ "$moved" = true ] || fail_test "resumed output did not clear the mark (row: $(row_for worker))"
+wait_no_mark worker 'resumed output'
+moved=true
 printf 'PASS: output resuming returns the row to the gradient\n'
 
-# --- 5. the option hides it --------------------------------------------------
+# --- 6. the option hides it --------------------------------------------------
 tmuxc set-option -gq @session-dock-awaiting off
 printf 'waiting\n' > "$CONTROL"
 sleep 5
-[ "$(mark_for worker)" = '●' ] && fail_test '@session-dock-awaiting off still drew the mark'
+wait_no_mark worker '@session-dock-awaiting off'
 header="$(tmuxc capture-pane -p -t "$SIDEBAR" | strip_ansi | sed -n 1p)"
 case "$header" in
     *awaiting*) fail_test "the header still counts with the marker off: '$header'" ;;
 esac
 printf 'PASS: @session-dock-awaiting off hides the mark and the count\n'
-printf 'SUMMARY: pass=5 xfail=0 fail=0\n'
+printf 'SUMMARY: pass=6 xfail=0 fail=0\n'

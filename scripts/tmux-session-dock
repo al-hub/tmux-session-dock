@@ -4956,14 +4956,15 @@ row_mark_value()
         status_mark='*'
     elif [ "$sidebar_awaiting_enabled" = true ] && [ "${session_awaiting[$index]:-false}" = true ]; then
         status_mark="$SIDEBAR_AWAITING_GLYPH"
-        # Blink is the terminal's job (SGR 5): one escape, no frame loop, no
-        # wakeup. `always` never expires; a millisecond budget expires against
-        # the moment this presenter first saw the session waiting.
-        if [ "$sidebar_awaiting_blink_ms" -ne 0 ]; then
+        # `always` never expires; a millisecond budget expires against the
+        # moment this presenter first saw the session waiting. While it lasts
+        # the glyph alternates with a blank on the shared phase below, so every
+        # row blinks together instead of drifting apart.
+        if [ "$sidebar_awaiting_blink_ms" -ne 0 ] && [ "$awaiting_blink_phase" = off ]; then
             since="${session_awaiting_since[$name]:-0}"
             elapsed_ms=$(( (${EPOCHSECONDS:-$SECONDS} - since) * 1000 ))
             if [ "$sidebar_awaiting_blink_ms" -lt 0 ] || [ "$elapsed_ms" -lt "$sidebar_awaiting_blink_ms" ]; then
-                status_mark="${SIDEBAR_AWAITING_BLINK_ON}${SIDEBAR_AWAITING_GLYPH}${SIDEBAR_AWAITING_BLINK_OFF}"
+                status_mark=' '
             fi
         fi
     fi
@@ -5521,8 +5522,16 @@ sidebar_gradient_refresh()
 }
 
 SIDEBAR_AWAITING_GLYPH=$'\u25cf'
-SIDEBAR_AWAITING_BLINK_ON=$'\033[5m'
-SIDEBAR_AWAITING_BLINK_OFF=$'\033[25m'
+# The blink is drawn here rather than handed to the terminal as SGR 5: too many
+# terminals (Windows Terminal among them) accept the escape and render nothing,
+# which turns the mark into a silent dot. Drawing it costs no tmux call and no
+# extra wakeup - the presenter loop is already awake several times a second,
+# and one cell is repainted with a bare printf.
+SIDEBAR_AWAITING_BLINK_PERIOD_MS=1000
+SIDEBAR_AWAITING_BLINK_READ_TIMEOUT=0.2
+awaiting_blink_slot=0
+awaiting_blink_slot_last=""
+has_awaiting_blink=false
 
 # Effective awaiting configuration; replaced from the tmux options on every
 # re-read. blink_ms: -1 always, 0 off, >0 a budget in milliseconds.
@@ -5530,6 +5539,8 @@ sidebar_awaiting_enabled="$SIDEBAR_AWAITING_ENABLED"
 sidebar_awaiting_blink_ms=-1
 sidebar_awaiting_after_ms="$SIDEBAR_AWAITING_AFTER_MS"
 declare -A session_awaiting_since=()
+# Which half of the blink cycle every awaiting mark is currently showing.
+awaiting_blink_phase=on
 
 sidebar_awaiting_apply()
 {
@@ -5832,7 +5843,7 @@ run_ai_observer()
     local -A probed_pane_pid=() probed_ai_pane=()
     local name pane fp alive obs_state obs_changed body line idle_since="" shell_probe_epoch=0
     local -A attached_sessions=()
-    local await_after_seconds=0
+    local await_after_seconds=0 observer_sweeps=0
     state_path="$(ai_observer_state_path)"
     lock_dir="${state_path}.lock"
     interval="$SIDEBAR_AI_OBSERVATION_SECONDS"
@@ -5940,6 +5951,7 @@ run_ai_observer()
         await_after_seconds=$(( sidebar_awaiting_after_ms_result / 1000 ))
         [ "$await_after_seconds" -lt 1 ] && await_after_seconds=1
 
+        observer_sweeps=$((observer_sweeps + 1))
         body=""
         for name in "${!observed_sessions[@]}"; do
             pane="${ai_pane_for_session[$name]:-}"
@@ -5955,7 +5967,8 @@ run_ai_observer()
             sidebar_domain_activity_observe obs_state obs_changed \
                 "$name" "$pane" "$pane_pid_value" "$alive" "$fp" "$now" "$SIDEBAR_BUSY_SECONDS" \
                 "$await_after_seconds" \
-                "$([ -n "${attached_sessions[$name]:-}" ] && printf true || printf false)"
+                "$([ -n "${attached_sessions[$name]:-}" ] && printf true || printf false)" \
+                "$([ "$observer_sweeps" -le 1 ] && printf true || printf false)"
             [ "$obs_changed" = true ] && trace_event "ai-observer.state session=$name state=$obs_state pane=${pane:-none}"
             body+="${name}"$'\t'"${obs_state}"$'\t'"${pane}"$'\t'"${fp}"$'\n'
         done
@@ -6438,6 +6451,40 @@ flush_full_render_request()
             mark_handover_rendered
             ;;
     esac
+}
+
+# Repaint column 2 for the rows that are blinking. Nothing else on the row is
+# touched, and no tmux command is issued: this is a bare write to our own pane.
+# Returns 1 when there was nothing to blink, so the caller can skip the write.
+render_awaiting_blink_cells()
+{
+    local index line buffer="" height visible_rows name since elapsed_ms
+    [ "$sidebar_awaiting_enabled" = true ] || return 1
+    [ "$sidebar_awaiting_blink_ms" -ne 0 ] || return 1
+    [ "$view_mode" = sessions ] || return 1
+    height="${cached_pane_height:-20}"
+    visible_rows=$((height - 3))
+    [ "$visible_rows" -lt 1 ] && visible_rows=1
+    index="$scroll_offset"
+    while [ "$index" -lt "$((scroll_offset + visible_rows))" ] &&
+        [ "$index" -lt "${#session_names[@]}" ]; do
+        if [ "${session_awaiting[$index]:-false}" = true ]; then
+            name="${session_names[$index]}"
+            if [ "$name" != "$current_session" ]; then
+                since="${session_awaiting_since[$name]:-0}"
+                elapsed_ms=$(( (${EPOCHSECONDS:-$SECONDS} - since) * 1000 ))
+                if [ "$sidebar_awaiting_blink_ms" -lt 0 ] || [ "$elapsed_ms" -lt "$sidebar_awaiting_blink_ms" ]; then
+                    line=$((2 + index - scroll_offset))
+                    row_mark_value "$index"
+                    buffer+="$(printf '\033[%s;1H%s' "$line" "$row_mark_result")"
+                fi
+            fi
+        fi
+        index=$((index + 1))
+    done
+    [ -n "$buffer" ] || return 1
+    printf '%s' "$buffer"
+    return 0
 }
 
 render_age_cells()
@@ -8925,6 +8972,17 @@ run_tui()
         # signals.  Polling it here is only a fallback, so do it once per
         # second: at animation rate it cost one or two tmux forks per frame.
         _tui_loop_iter=$((_tui_loop_iter + 1))
+        # Advance the blink phase on its own half-period. Costs one comparison
+        # per loop and, when a mark is actually blinking, one bare write.
+        if [ "$sidebar_awaiting_enabled" = true ] && [ "$sidebar_awaiting_blink_ms" -ne 0 ] &&
+            [ -n "${EPOCHREALTIME:-}" ]; then
+            awaiting_blink_slot=$(( ${EPOCHREALTIME/./} / (SIDEBAR_AWAITING_BLINK_PERIOD_MS * 500) % 2 ))
+            if [ "$awaiting_blink_slot" != "${awaiting_blink_slot_last:-}" ]; then
+                awaiting_blink_slot_last="$awaiting_blink_slot"
+                [ "$awaiting_blink_slot" = 0 ] && awaiting_blink_phase=on || awaiting_blink_phase=off
+                render_awaiting_blink_cells || true
+            fi
+        fi
         marker_poll_epoch="${EPOCHSECONDS:-$SECONDS}"
         if [ "$marker_poll_epoch" != "${last_marker_poll_epoch:-}" ]; then
             last_marker_poll_epoch="$marker_poll_epoch"
@@ -8951,6 +9009,16 @@ run_tui()
         fi
         read_timeout="$SIDEBAR_IDLE_INTERVAL"
         has_animation=false
+        has_awaiting_blink=false
+        if [ "$sidebar_awaiting_enabled" = true ] && [ "$sidebar_awaiting_blink_ms" -ne 0 ] &&
+            [ "$view_mode" = sessions ]; then
+            for index in "${!session_awaiting[@]}"; do
+                [ "${session_awaiting[$index]:-false}" = true ] || continue
+                [ "${session_names[$index]}" = "$current_session" ] && continue
+                has_awaiting_blink=true
+                break
+            done
+        fi
         # A disabled gradient must also stop the fast read: without this the
         # loop kept waking every frame to render nothing.
         if [ "$sidebar_gradient_enabled" = "true" ] && sidebar_animation_visible; then
@@ -8975,6 +9043,13 @@ run_tui()
             read_timeout=0.01
         else
             read_timeout=1.0
+        fi
+        # A blinking mark needs the loop back before the next half-period or the
+        # phase stutters, so this caps the idle read - but only while something
+        # is actually blinking, and never at the cost of a shorter timeout that
+        # another condition already asked for.
+        if [ "$has_awaiting_blink" = true ] && [ "$read_timeout" = 1.0 ]; then
+            read_timeout="$SIDEBAR_AWAITING_BLINK_READ_TIMEOUT"
         fi
 
         trace_event "read.begin timeout=$read_timeout"

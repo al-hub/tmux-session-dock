@@ -15,9 +15,12 @@ declare -gA _SIDEBAR_ACTIVITY_LAST_CHANGED_AT=()
 # have stopped - painting a false "awaiting" on each one whenever an observer
 # starts.
 declare -gA _SIDEBAR_ACTIVITY_SEEN=()
-# True once a session has been observed changing for real, i.e. on some
-# observation after the first. Only such a session can have "stopped"; one that
-# has merely been sighted has nothing to announce.
+# True once a session is eligible to report a stop. Two ways to earn it: the
+# observer watched the session change after first sighting it, or the session
+# appeared while the observer was already running, which makes its AI genuinely
+# new. Only the sessions swept up when an observer first starts are excluded -
+# those have been sitting there for an unknown time, and announcing them would
+# raise a false alarm on every reopened dock.
 declare -gA _SIDEBAR_ACTIVITY_MOVED=()
 # The stop the user has already witnessed, keyed by the moment that stop began.
 # A stop is announced once: leaving the session again must not re-raise the
@@ -63,6 +66,10 @@ sidebar_domain_activity_observe() {
     # True when a client is currently on this session: the user is here, so a
     # stop needs no announcement.
     local acknowledged="${11:-false}"
+    # True only while an observer is taking its very first sweep. A session
+    # first seen then predates the observer and must stay silent; one first seen
+    # later did not exist a moment ago, so its stop is real news.
+    local bootstrap_sweep="${12:-false}"
     local previous_state="${_SIDEBAR_ACTIVITY_STATE[$session_name]:-gone}"
     local state="gone"
     local pane_replaced=false
@@ -89,10 +96,12 @@ sidebar_domain_activity_observe() {
         _SIDEBAR_ACTIVITY_PANE["$session_name"]="$pane_id"
         _SIDEBAR_ACTIVITY_PID["$session_name"]="$pane_pid"
 
-        local first_sighting=false
         if [ "${_SIDEBAR_ACTIVITY_SEEN[$session_name]:-}" != true ]; then
-            first_sighting=true
             _SIDEBAR_ACTIVITY_SEEN["$session_name"]=true
+            # An AI that finished drawing before the observer's next sample is
+            # never seen to change, so eligibility cannot wait for movement
+            # alone: a session that appeared after the observer started counts.
+            [ "$bootstrap_sweep" = true ] || _SIDEBAR_ACTIVITY_MOVED["$session_name"]=true
         elif [ "$observed_change" = true ]; then
             _SIDEBAR_ACTIVITY_MOVED["$session_name"]=true
         fi

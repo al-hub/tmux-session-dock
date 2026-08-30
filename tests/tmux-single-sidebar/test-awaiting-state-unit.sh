@@ -18,10 +18,10 @@ BUSY=10
 # shadow a caller variable of that name behind the nameref.
 out_state="" out_changed=""
 
-# observe <session> <observation> <now> [acknowledged] [await_after]
+# observe <session> <observation> <now> [acknowledged] [await_after] [bootstrap_sweep]
 observe() {
     sidebar_domain_activity_observe out_state out_changed \
-        "$1" '%1' '1234' true "$2" "$3" "$BUSY" "${5:-$AWAIT_AFTER}" "${4:-false}"
+        "$1" '%1' '1234' true "$2" "$3" "$BUSY" "${5:-$AWAIT_AFTER}" "${4:-false}" "${6:-false}"
 }
 
 expect() {
@@ -74,16 +74,30 @@ expect idle 'stopped while the user was in the session'
 printf 'PASS: a stop the user witnessed is not announced\n'
 
 # --- the bootstrap guard -----------------------------------------------------
-# A fresh observer has empty maps, so the first observation of an idle session
-# looks like a change and therefore like "running". Without the guard, every AI
-# session would raise a false awaiting once the threshold passed.
+# A fresh observer has empty maps, so its first sweep sees every session as
+# having just changed. Those sessions have been sitting there for an unknown
+# time; announcing them would raise a false alarm on every reopened dock.
 sidebar_domain_activity_reset_all
-observe boot 'unchanged-screen' 500
-expect running 'bootstrap sighting'
+observe boot 'unchanged-screen' 500 false "$AWAIT_AFTER" true
+expect running 'first sweep sighting'
 observe boot 'unchanged-screen' 600
-[ "$out_state" = awaiting ] && fail 'bootstrap: a first sighting must never produce awaiting'
-expect idle 'bootstrap stop'
-printf 'PASS: the first sighting of a session never produces awaiting\n'
+[ "$out_state" = awaiting ] && fail 'a session swept up by a starting observer must not announce'
+expect idle 'first sweep stop'
+observe boot 'moved' 601
+expect running 'the same session actually working'
+observe boot 'moved' 700
+expect awaiting 'and now its stop is real news'
+printf 'PASS: a session the observer merely inherited stays silent until it moves\n'
+
+# --- a session that appears later is new, even if its screen never moves ------
+# An AI that finishes drawing before the observer's next sample is never seen to
+# change. It is still a session that did not exist a moment ago, so its stop is
+# worth reporting.
+observe fresh 'drawn-once' 800
+expect running 'a session that appeared while the observer was running'
+observe fresh 'drawn-once' 900
+expect awaiting 'its stop is announced without ever being seen to change'
+printf 'PASS: a session created after the observer starts can announce its first stop\n'
 
 # --- await_after 0 disables the state entirely (presenter local fallback) -----
 sidebar_domain_activity_reset_all
@@ -104,8 +118,8 @@ expect gone 'AI exited'
 observe g 'a' 902
 expect running 'a new AI is a first sighting again'
 observe g 'a' 1000
-expect idle 'and its first stop does not announce'
-printf 'PASS: an exiting AI resets the session, guard included\n'
+expect awaiting 'a replacement AI that stops is news, because it just started'
+printf 'PASS: an exiting AI resets the session, and its replacement can announce\n'
 
 # --- the threshold clamp ------------------------------------------------------
 for pair in ":30000" "abc:30000" "0:1000" "1:1000" "999:1000" "1000:1000" \
