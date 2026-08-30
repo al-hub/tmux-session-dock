@@ -83,14 +83,26 @@ sidebar="$(sidebar_for live2)"
 # ... and until that frame has held still for a moment: the handover render
 # sequence (initial, geometry, enter fallback) can still repaint after the
 # first marked frame.
+#
+# The geometry has to hold still as well, not just the text. The client that
+# lands on live2 is smaller than the session (80x23 against 100x30 here), so
+# tmux resizes the window under it and the dock column shrinks with it - the
+# trace records the layout going from a 25-column dock to a 15-column one. That
+# resize repaints the whole pane row by row, and a capture taken inside the
+# repaint can miss a row that is about to be redrawn.
 handover_deadline=$(( $(date +%s) + 8 ))
 settled_plain=""
+settled_geometry=""
+dock_geometry() { tmuxc display-message -p -t "$sidebar" '#{pane_width}x#{pane_height}' 2>/dev/null || true; }
 while [ "$(date +%s)" -lt "$handover_deadline" ]; do
+    geometry_now="$(dock_geometry)"
     plain_now="$(tmuxc capture-pane -p -t "$sidebar" 2>/dev/null || true)"
-    if grep -Eq '^>[^a-z]*live2' <<< "$plain_now" && [ "$plain_now" = "$settled_plain" ]; then
+    if grep -Eq '^>[^a-z]*live2' <<< "$plain_now" &&
+        [ "$plain_now" = "$settled_plain" ] && [ "$geometry_now" = "$settled_geometry" ]; then
         break
     fi
     settled_plain="$plain_now"
+    settled_geometry="$geometry_now"
     sleep 0.3
 done
 grep -Eq '^>[^a-z]*live2' <<< "$settled_plain" || fail_test 'live2 presenter never marked live2 current after Enter'
@@ -110,7 +122,27 @@ for sample in $(seq 1 12); do
             break
         fi
     done
-    [ "$live1_line" -ge 0 ] || fail_test 'live1 row missing after Enter'
+    if [ "$live1_line" -lt 0 ]; then
+        # A row can be absent from one capture without being absent from the
+        # dock: a repaint (a late resize, a handover frame) draws the rows one
+        # printf at a time, so a capture landing inside it sees a torn frame.
+        # A row that is really gone is gone from the next capture too.
+        sleep 0.3
+        frame="$(tmuxc capture-pane -e -p -t "$sidebar" 2>/dev/null || true)"
+        plain="$(strip_ansi <<< "$frame")"
+        mapfile -t raw_lines <<< "$frame"
+        mapfile -t plain_lines <<< "$plain"
+        for line_index in "${!plain_lines[@]}"; do
+            if [[ "${plain_lines[$line_index]}" == *live1* ]]; then
+                live1_line="$line_index"
+                break
+            fi
+        done
+        [ "$live1_line" -ge 0 ] || {
+            printf 'dock %s at %s:\n%s\n' "$sidebar" "$(dock_geometry)" "$plain" >&2
+            fail_test 'live1 row missing after Enter'
+        }
+    fi
     colors="$(grep -o '38;5;' <<< "${raw_lines[$live1_line]}" | wc -l | tr -d ' ' || true)"
     [ "$colors" -ge 1 ] && gradient_samples=$((gradient_samples + 1))
     [ -n "$previous_frame" ] && [ "$frame" != "$previous_frame" ] && frame_changed=1
