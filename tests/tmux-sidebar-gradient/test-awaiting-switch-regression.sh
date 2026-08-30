@@ -67,17 +67,25 @@ tmuxc set-option -gq @session-dock-awaiting-after 1000
 coproc ATTACHED { script -qefc "tmux -L '$SOCKET' attach-session -t anchor" --log-out "$TMP_DIR/out.log" >/dev/null 2>&1; }
 CLIENT_PID="$ATTACHED_PID"
 
+# The loop's own verdict is the one that counts. Re-asking after the break
+# re-captures the pane, and a capture that lands inside a repaint (the dock
+# animates a working session, and a resize repaints every row) can miss a row
+# that is on screen - which failed this test twice in one suite run, a second
+# after the row had already been seen.
 ANCHOR_SB=''
+rows_seen=false
 deadline=$(( $(date +%s) + 45 ))   # three sessions and three presenters, on a loaded runner
 while [ "$(date +%s)" -lt "$deadline" ]; do
     ANCHOR_SB="$(sidebar_of anchor)"
-    [ -n "$ANCHOR_SB" ] && [ -n "$(sidebar_of target)" ] && [ -n "$(sidebar_of worker)" ] &&
-        [ -n "$(row_of "$ANCHOR_SB" worker)" ] && [ -n "$(row_of "$ANCHOR_SB" target)" ] && break
+    if [ -n "$ANCHOR_SB" ] && [ -n "$(sidebar_of target)" ] && [ -n "$(sidebar_of worker)" ] &&
+        [ -n "$(row_of "$ANCHOR_SB" worker)" ] && [ -n "$(row_of "$ANCHOR_SB" target)" ]; then
+        rows_seen=true
+        break
+    fi
     sleep 0.2
 done
 [ -n "$ANCHOR_SB" ] || fail_test 'the anchor dock never started'
-[ -n "$(row_of "$ANCHOR_SB" worker)" ] || fail_test 'the worker row never appeared'
-[ -n "$(row_of "$ANCHOR_SB" target)" ] || fail_test 'the target row never appeared'
+[ "$rows_seen" = true ] || fail_test 'the worker and target rows never appeared together'
 
 # --- put a session into Awaiting so the header carries a count ---------------
 printf 'waiting\n' > "$CONTROL"

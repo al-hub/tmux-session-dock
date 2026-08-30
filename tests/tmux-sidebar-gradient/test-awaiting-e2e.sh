@@ -86,16 +86,25 @@ tmuxc split-window -d -h -b -l 35 -t '=anchor:' \
 coproc ATTACHED { script -qefc "tmux -L '$SOCKET' attach-session -t anchor" --log-out "$TMP_DIR/output.log" >/dev/null 2>&1; }
 CLIENT_PID="$ATTACHED_PID"
 
+# The loop's own verdict is the one that counts. Re-asking after the break
+# re-captures the pane, and a capture that lands inside a repaint (the dock
+# animates a working session, and a resize repaints every row) can miss a row
+# that is on screen - which failed this test twice in one suite run, a second
+# after the row had already been seen.
 SIDEBAR=''
+worker_seen=false
 deadline=$(( $(date +%s) + 15 ))
 while [ "$(date +%s)" -lt "$deadline" ]; do
     SIDEBAR="$(tmuxc list-panes -t '=anchor:' -F '#{pane_id}|#{pane_title}' |
         awk -F'|' '!done && $2 == "dotfiles-session-sidebar" { print $1; done = 1 }')"
-    [ -n "$SIDEBAR" ] && [ -n "$(row_for worker)" ] && break
+    if [ -n "$SIDEBAR" ] && [ -n "$(row_for worker)" ]; then
+        worker_seen=true
+        break
+    fi
     sleep 0.2
 done
 [ -n "$SIDEBAR" ] || fail_test 'the anchor sidebar never started'
-[ -n "$(row_for worker)" ] || fail_test 'the worker row never appeared in the dock'
+[ "$worker_seen" = true ] || fail_test 'the worker row never appeared in the dock'
 [ -s "$HEARTBEAT" ] || fail_test 'the fake AI never produced output'
 
 # --- 1. a stop the user did not witness raises the mark ----------------------
