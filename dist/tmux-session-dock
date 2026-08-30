@@ -347,6 +347,39 @@ sidebar_domain_animation_fit_cell_width() {
     done
     printf '%s\n' "$out"
 }
+
+# The gradient is a 24-phase wave. The user configures one number - how long a
+# full cycle takes, in milliseconds - and both clocks derive from it: the frame
+# clock the phase is computed against, and the read timeout that decides how
+# often the presenter loop wakes. Deriving them together is the point: setting
+# one without the other makes the loop wake at a rate the frame clock does not
+# match, which either burns wakeups or drops frames.
+#
+# Results land in sidebar_animation_timing_{cycle_ms,frame_us,interval}.
+SIDEBAR_ANIMATION_PHASES=24
+SIDEBAR_ANIMATION_CYCLE_MS_MIN=400
+SIDEBAR_ANIMATION_CYCLE_MS_MAX=4000
+SIDEBAR_ANIMATION_CYCLE_MS_DEFAULT=1000
+
+sidebar_animation_timing_cycle_ms=0
+sidebar_animation_timing_frame_us=0
+sidebar_animation_timing_interval=0
+
+sidebar_domain_animation_timing() {
+    local cycle_ms="${1:-}"
+    case "$cycle_ms" in
+        ''|*[!0-9]*) cycle_ms="$SIDEBAR_ANIMATION_CYCLE_MS_DEFAULT" ;;
+    esac
+    # A cycle faster than the floor costs more wakeups per second than the
+    # gradient is worth; slower than the ceiling reads as a stalled wave.
+    [ "$cycle_ms" -lt "$SIDEBAR_ANIMATION_CYCLE_MS_MIN" ] && cycle_ms="$SIDEBAR_ANIMATION_CYCLE_MS_MIN"
+    [ "$cycle_ms" -gt "$SIDEBAR_ANIMATION_CYCLE_MS_MAX" ] && cycle_ms="$SIDEBAR_ANIMATION_CYCLE_MS_MAX"
+    local frame_us=$(( cycle_ms * 1000 / SIDEBAR_ANIMATION_PHASES ))
+    sidebar_animation_timing_cycle_ms="$cycle_ms"
+    sidebar_animation_timing_frame_us="$frame_us"
+    printf -v sidebar_animation_timing_interval '%d.%06d' \
+        $(( frame_us / 1000000 )) $(( frame_us % 1000000 ))
+}
 # <<< MODULE: sidebar_domain_animation.sh <<<
 
 # >>> MODULE: sidebar_domain_activity.sh >>>
@@ -2636,7 +2669,12 @@ fi
 SIDEBAR_WIDTH="${TMUX_SESSION_SIDEBAR_WIDTH:-35}"
 SIDEBAR_WIDTH_STATE_FILE="${TMUX_SESSION_SIDEBAR_WIDTH_STATE_FILE:-${XDG_STATE_HOME:-$HOME/.local/state}/dotfiles/tmux-sidebar-width}"
 SIDEBAR_BUSY_SECONDS="${TMUX_SESSION_SIDEBAR_BUSY_SECONDS:-10}"
+# Gradient defaults. @session-dock-gradient and @session-dock-gradient-speed
+# override these at runtime and are re-read once a second by the presenter, so
+# a change from the Prefix + S popup lands on the next frame without a restart.
 SIDEBAR_ANIMATION_ENABLED="${TMUX_SESSION_SIDEBAR_ANIMATION_ENABLED:-true}"
+SIDEBAR_GRADIENT_OPTION="@session-dock-gradient"
+SIDEBAR_GRADIENT_SPEED_OPTION="@session-dock-gradient-speed"
 # Animate the gradient in presenters whose session has no attached client too
 # (nobody sees those frames; only useful for headless captures such as tests).
 SIDEBAR_ANIMATE_DETACHED="${TMUX_SESSION_SIDEBAR_ANIMATE_DETACHED:-false}"
@@ -7711,7 +7749,7 @@ format_session_name()
     [ "$padding" -lt 0 ] && padding=0
     local result='' char phase color colored
 
-    if [ "$animate" = "true" ] && [ "$SIDEBAR_ANIMATION_ENABLED" = "true" ]; then
+    if [ "$animate" = "true" ] && [ "$sidebar_gradient_enabled" = "true" ]; then
         local text_len="${#text}"
         for ((i = 0; i < text_len; i++)); do
             char="${text:i:1}"
@@ -7937,6 +7975,43 @@ refresh_animation_attach_state()
         *"|$my_session|"*) was_my_session_attached=true ;;
         *) was_my_session_attached=false ;;
     esac
+}
+
+# Effective gradient configuration. Starts from the environment defaults and is
+# replaced by the tmux options whenever the presenter re-reads them.
+sidebar_gradient_enabled="$SIDEBAR_ANIMATION_ENABLED"
+sidebar_gradient_cycle_ms=0
+
+# Apply one (enabled, cycle_ms) pair read from the options. Empty means "not
+# set", which keeps the environment default. Traces only on a real change, so
+# the once-a-second read is silent while nothing moves.
+sidebar_gradient_apply()
+{
+    local raw_enabled="${1:-}" raw_speed="${2:-}" enabled cycle_ms
+    case "$raw_enabled" in
+        on|true|1)   enabled=true ;;
+        off|false|0) enabled=false ;;
+        *)           enabled="$SIDEBAR_ANIMATION_ENABLED" ;;
+    esac
+    sidebar_domain_animation_timing "$raw_speed"
+    cycle_ms="$sidebar_animation_timing_cycle_ms"
+    if [ "$enabled" = "$sidebar_gradient_enabled" ] && [ "$cycle_ms" = "$sidebar_gradient_cycle_ms" ]; then
+        return 0
+    fi
+    sidebar_gradient_enabled="$enabled"
+    sidebar_gradient_cycle_ms="$cycle_ms"
+    SIDEBAR_ANIMATION_FRAME_US="$sidebar_animation_timing_frame_us"
+    SIDEBAR_ANIMATION_INTERVAL="$sidebar_animation_timing_interval"
+    trace_event "gradient.config enabled=$enabled cycle_ms=$cycle_ms frame_us=$SIDEBAR_ANIMATION_FRAME_US interval=$SIDEBAR_ANIMATION_INTERVAL"
+}
+
+# One round trip, used at presenter start; the loop gets the same values for
+# free from the once-a-second prefetch below.
+sidebar_gradient_refresh()
+{
+    local out
+    out="$(tmux display-message -p "#{$SIDEBAR_GRADIENT_OPTION}|#{$SIDEBAR_GRADIENT_SPEED_OPTION}" 2>/dev/null || true)"
+    sidebar_gradient_apply "${out%%|*}" "${out#*|}"
 }
 
 sidebar_animation_visible()
@@ -8574,8 +8649,15 @@ _tick_prefetch_iter=-1
 _tick_session_name=""
 sidebar_tick_prefetch()
 {
-    sidebar_env_fetch_all "${TMUX_PANE:-${SELF_PANE:-}}" '#{session_name}'
-    _tick_session_name="${SIDEBAR_ENV_MANY[__display]:-}"
+    local display
+    sidebar_env_fetch_all "${TMUX_PANE:-${SELF_PANE:-}}" \
+        "#{session_name}|#{$SIDEBAR_GRADIENT_OPTION}|#{$SIDEBAR_GRADIENT_SPEED_OPTION}"
+    display="${SIDEBAR_ENV_MANY[__display]:-}"
+    _tick_session_name="${display%%|*}"
+    # The gradient options ride along in the same format: re-reading them costs
+    # no extra round trip, so a popup change lands within a second.
+    display="${display#*|}"
+    sidebar_gradient_apply "${display%%|*}" "${display##*|}"
     _tick_prefetch_iter="$_tui_loop_iter"
 }
 
@@ -11218,6 +11300,7 @@ run_tui()
         exec 2>>"$TMUX_SESSION_LAUNCHER_DEBUG_FILE"
     fi
     sidebar_env_purge_legacy
+    sidebar_gradient_refresh
     setup_terminal
     if [ -n "${TMUX_PANE:-}" ]; then
         SIDEBAR_WINDOW_ID="$(tmux display-message -p -t "$TMUX_PANE" '#{window_id}' 2>/dev/null || true)"
@@ -11296,7 +11379,9 @@ run_tui()
         fi
         read_timeout="$SIDEBAR_IDLE_INTERVAL"
         has_animation=false
-        if sidebar_animation_visible; then
+        # A disabled gradient must also stop the fast read: without this the
+        # loop kept waking every frame to render nothing.
+        if [ "$sidebar_gradient_enabled" = "true" ] && sidebar_animation_visible; then
             for index in "${!session_animate[@]}"; do
                 if [ "${session_animate[$index]}" = "true" ]; then
                     has_animation=true
@@ -11710,7 +11795,7 @@ run_tui()
         fi
 
         if [ -z "$key" ] && [ "$view_mode" = "sessions" ] &&
-            [ "$SIDEBAR_ANIMATION_ENABLED" = "true" ] && sidebar_animation_visible; then
+            [ "$sidebar_gradient_enabled" = "true" ] && sidebar_animation_visible; then
             animation_tick_counter=$((animation_tick_counter + 1))
             if [ "$animation_tick_counter" -ge 1 ]; then
                 animation_tick_counter=0

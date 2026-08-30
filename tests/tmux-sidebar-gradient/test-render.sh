@@ -29,7 +29,11 @@ test_idle_name_has_no_gradient()
 
 test_animation_can_be_disabled_globally()
 {
+    # The environment variable is the default the effective configuration is
+    # derived from when @session-dock-gradient is unset; sidebar_gradient_apply
+    # with two empty values is exactly that case.
     SIDEBAR_ANIMATION_ENABLED=false
+    sidebar_gradient_apply '' ''
     animation_frame=0
     output="$(print_session_name 'alpha' 5 true 0)"
 
@@ -37,9 +41,24 @@ test_animation_can_be_disabled_globally()
     assert_not_contains "$output" $'\033[' 'disabled gradient ANSI sequence'
 }
 
+test_gradient_option_overrides_the_environment_default()
+{
+    SIDEBAR_ANIMATION_ENABLED=false
+    sidebar_gradient_apply 'on' ''
+    animation_frame=0
+    output="$(print_session_name 'alpha' 8 true 0)"
+    assert_contains "$output" $'\033[38;5;' 'option on overrides a disabled default'
+
+    SIDEBAR_ANIMATION_ENABLED=true
+    sidebar_gradient_apply 'off' ''
+    output="$(print_session_name 'alpha' 5 true 0)"
+    assert_eq 'alpha' "$output" 'option off overrides an enabled default'
+}
+
 test_animated_cell_matches_static_row_in_narrow_sidebar()
 {
     SIDEBAR_ANIMATION_ENABLED=true
+    sidebar_gradient_apply '' ''
     animation_frame=0
     scroll_offset=0
     cached_pane_width=15
@@ -74,4 +93,5 @@ run_test 'renderer changes ANSI colors between frames' test_gradient_changes_by_
 run_test 'animated name cell matches static row width in narrow sidebar' test_animated_cell_matches_static_row_in_narrow_sidebar
 run_test 'renderer omits gradient for idle state' test_idle_name_has_no_gradient
 run_test 'renderer respects global animation disable' test_animation_can_be_disabled_globally
+run_test 'gradient option overrides the environment default' test_gradient_option_overrides_the_environment_default
 finish_tests

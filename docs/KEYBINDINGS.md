@@ -8,7 +8,7 @@ ergonomics preset where noted); nothing here relies on an input-method alias.
 | Keybinding | Action Description | Override option |
 | :--- | :--- | :--- |
 | **`Prefix + s`** | Toggle session dock sidebar open / close | `@session-dock-key` |
-| **`Prefix + S`** | ⚙️ Settings popup: subpane stack count & position, IME mode, switch recovery | — |
+| **`Prefix + S`** | ⚙️ Settings popup: subpane stack count & position, IME mode, switch recovery, activity gradient (on/off and wave cycle in ms) | — |
 | **`Prefix + T`** | 🎨 59-theme interactive picker with live ANSI preview | `@session-dock-theme-key` |
 | **`Prefix + /`** | ⌨️ Searchable command palette | `@session-dock-palette-key` |
 | **`Prefix + h`** | 📖 Interactive help viewer popup | `@session-dock-help-key` |

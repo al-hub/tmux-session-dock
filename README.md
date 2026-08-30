@@ -20,7 +20,7 @@
 
 - **Open, save, move, and select**: Toggle the dock with `Prefix + s`, select a row, and press `Enter` to switch sessions immediately. Create, rename, archive/delete, and restore sessions from the dock.
 - **Zero-flicker switching**: Window-Local Presenters use native `switch-client` instead of physically moving panes.
-- **Gradient activity effect**: Detects background AI CLI activity and renders it as a live waveform gradient on session rows, including rows for non-selected sessions.
+- **Gradient activity effect**: Detects background AI CLI activity and renders it as a live waveform gradient on session rows, including rows for non-selected sessions. Turn it off or set the wave speed in milliseconds from `Prefix + S`.
 - **Subpane stack**: Open/close a terminal subpane beside the dock (`s`), stack up to three of them (`Prefix + S`), swap the stack Top/Bottom (`p`); each slot keeps its own height across session switches.
 - **Archive**: Snapshot and batch-restore sessions without polluting `$HISTFILE`.
 
@@ -59,6 +59,8 @@ set -g @session-dock-ime 'restore'        # [Optional] IME → English on sideba
 set -g @session-dock-switch-recovery 'popup' # [Optional] When Enter cannot land on a session (dead sidebar presenter): popup = show the diagnosis and ask | auto = respawn silently | off
 set -g @session-dock-subpane-count '1'    # [Optional] Terminal subpanes stacked beside the dock: 1 | 2 | 3
 set -g @session-dock-subpane-position 'bottom' # [Optional] Stack the subpanes below or above the dock: bottom | top
+set -g @session-dock-gradient 'on'        # [Optional] Activity gradient on rows whose AI CLI is working: on | off
+set -g @session-dock-gradient-speed '1000' # [Optional] One wave cycle in milliseconds, 400-4000 (24 frames per cycle)
 
 # Every option above is also editable from the Prefix + S popup.
 # Key overrides: @session-dock-theme-key, @session-dock-help-key,
@@ -111,7 +113,7 @@ cd ~/.local/share/tmux-session-dock
 | Keybinding | Action Description |
 | :--- | :--- |
 | **`Prefix + s`** | Toggle session dock sidebar open / close |
-| **`Prefix + S`** | ⚙️ Open the settings popup (subpane stack & position, IME, switch recovery) |
+| **`Prefix + S`** | ⚙️ Open the settings popup (subpane stack & position, IME, switch recovery, activity gradient) |
 | **`Prefix + T`** | 🎨 Open 59-theme interactive picker with live ANSI preview |
 | **`Prefix + /`** | ⌨️ Open searchable command palette |
 | **`Prefix + h`** | 📖 Open interactive help viewer popup |

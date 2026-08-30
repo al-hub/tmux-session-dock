@@ -3,7 +3,10 @@
 # tmux-subpane-picker: Session Dock settings popup (Prefix + S)
 #   section 1  subpane stack count / position
 #   section 2  IME (한/영): English on sidebar focus, restore on leave
+#   section 3  switch recovery
+#   section 4  activity gradient: on/off and cycle length in milliseconds
 # Toggle a row with Space or Enter; ↑/↓ (or k/j) move; Esc/q closes.
+# The gradient speed row opens an inline millisecond prompt instead.
 # ==============================================================================
 set -euo pipefail
 
@@ -34,6 +37,28 @@ DOCK_BIN="$REPO_DIR/dist/tmux-session-dock"
 # Source lib if available
 [ -r "$REPO_DIR/scripts/lib/sidebar_port_tmux.sh" ] && source "$REPO_DIR/scripts/lib/sidebar_port_tmux.sh"
 [ -r "$REPO_DIR/scripts/lib/sidebar_subpane_hub.sh" ] && source "$REPO_DIR/scripts/lib/sidebar_subpane_hub.sh"
+
+# The clamp lives in the domain lib so the popup and the presenter cannot
+# disagree about what a millisecond value means.
+[ -r "$REPO_DIR/scripts/lib/sidebar_domain_animation.sh" ] &&
+    source "$REPO_DIR/scripts/lib/sidebar_domain_animation.sh"
+
+get_gradient_enabled() {
+    local v
+    v="$(tmux show-option -gqv "@session-dock-gradient" 2>/dev/null || true)"
+    case "$v" in off|false|0) printf 'off' ;; *) printf 'on' ;; esac
+}
+
+get_gradient_speed() {
+    local v
+    v="$(tmux show-option -gqv "@session-dock-gradient-speed" 2>/dev/null || true)"
+    if declare -f sidebar_domain_animation_timing >/dev/null 2>&1; then
+        sidebar_domain_animation_timing "$v"
+        printf '%s' "$sidebar_animation_timing_cycle_ms"
+        return 0
+    fi
+    case "$v" in ''|*[!0-9]*) printf '1000' ;; *) printf '%s' "$v" ;; esac
+}
 
 get_subpane_count() {
     tmux show-option -gqv "@session-dock-subpane-count" 2>/dev/null || echo "1"
@@ -92,6 +117,9 @@ OPTIONS=(
     "REST|Restore IME on Leave|"
     "#RECOV|세션 전환 복구 (Switch Recovery)|"
     "RECOV|On Failure: Ask / Auto / Off|"
+    "#GRAD|활동 그라디언트 (Activity Gradient)|"
+    "GRAD|Gradient on Active Sessions|"
+    "GSPD|Wave Cycle (ms)|"
 )
 
 is_header() { case "$1" in \#*) return 0 ;; *) return 1 ;; esac; }
@@ -166,6 +194,25 @@ draw_picker() {
                     off)   is_active=false; desc="현재: ${BOLD}${YELLOW}OFF${RESET}${GRAY} — 조용히 실패, footer 메시지만 (Space: ASK)${RESET}" ;;
                 esac
                 ;;
+            GRAD)
+                if [ "$(get_gradient_enabled)" = "on" ]; then
+                    is_active=true
+                    desc="AI CLI가 도는 세션 행에 파형 표시 ${DIM}(Space: 끄기 — 끄면 프레임 깨우기도 멈춤)${RESET}"
+                else
+                    desc="현재 ${BOLD}${YELLOW}OFF${RESET}${GRAY} — 행을 정적으로 그리고 프레임 깨우기 없음 (Space: 켜기)${RESET}"
+                fi
+                ;;
+            GSPD)
+                local gms
+                gms="$(get_gradient_speed)"
+                if [ "$(get_gradient_enabled)" = "on" ]; then
+                    is_active=true
+                    desc="한 주기 ${BOLD}${EMERALD}${gms} ms${RESET}${GRAY} · 24프레임 ≈ $(( 24000 / gms )) fps ${DIM}(Enter: ms 직접 입력, ${SIDEBAR_ANIMATION_CYCLE_MS_MIN:-400}~${SIDEBAR_ANIMATION_CYCLE_MS_MAX:-4000})${RESET}"
+                else
+                    disabled=true
+                    desc="${DIM}그라디언트가 꺼져 있어 비활성 (현재 ${gms} ms)${RESET}"
+                fi
+                ;;
             REST)
                 if [ "$IME_BACKEND" = "none" ] || [ "$IME_SETTING" = "off" ]; then
                     disabled=true
@@ -194,7 +241,37 @@ draw_picker() {
     done
 
     printf "\n${GRAY}──────────────────────────────────────────────────────────────────────────${RESET}\n"
-    printf "  ${DIM}이동:${RESET} ${BOLD}${YELLOW}[ ↑ / ↓ ]${RESET} ${DIM}| 토글 & 적용:${RESET} ${BOLD}${EMERALD}[ Space / Enter ]${RESET} ${DIM}| 닫기:${RESET} ${BOLD}${YELLOW}[ Esc / q ]${RESET}\n"
+    printf "  ${DIM}이동:${RESET} ${BOLD}${YELLOW}[ ↑ / ↓ ]${RESET} ${DIM}| 토글 & 적용:${RESET} ${BOLD}${EMERALD}[ Space / Enter ]${RESET} ${DIM}| 값 입력:${RESET} ${BOLD}${EMERALD}[ 숫자 ]${RESET} ${DIM}| 닫기:${RESET} ${BOLD}${YELLOW}[ Esc / q ]${RESET}\n"
+}
+
+# Read a millisecond value on the footer line. Digits type, Backspace deletes,
+# Enter commits, Esc cancels; an out-of-range number is clamped rather than
+# refused, with the same clamp the presenter applies.
+prompt_gradient_speed() {
+    local entry="" key extra current
+    current="$(get_gradient_speed)"
+    while :; do
+        printf "\r\033[2K  ${BOLD}${EMERALD}주기(ms):${RESET} ${BOLD}%s${RESET}${DIM}▏${RESET}  ${GRAY}현재 %s · 범위 %s~%s · Enter 적용 · Esc 취소${RESET}" \
+            "$entry" "$current" "${SIDEBAR_ANIMATION_CYCLE_MS_MIN:-400}" "${SIDEBAR_ANIMATION_CYCLE_MS_MAX:-4000}"
+        IFS= read -rsn1 key || return 0
+        case "$key" in
+            $'\e')
+                read -rsn2 -t 0.05 extra 2>/dev/null || true
+                [ -n "$extra" ] || return 0
+                ;;
+            ""|$'\n'|$'\r')
+                [ -n "$entry" ] || return 0
+                if declare -f sidebar_domain_animation_timing >/dev/null 2>&1; then
+                    sidebar_domain_animation_timing "$entry"
+                    entry="$sidebar_animation_timing_cycle_ms"
+                fi
+                tmux set-option -gq "@session-dock-gradient-speed" "$entry"
+                return 0
+                ;;
+            $'\177'|$'\b') entry="${entry%?}" ;;
+            [0-9]) [ "${#entry}" -lt 5 ] && entry+="$key" ;;
+        esac
+    done
 }
 
 apply_selection() {
@@ -225,6 +302,17 @@ apply_selection() {
                 off)  tmux set-option -gq @session-dock-switch-recovery popup ;;
                 *)    tmux set-option -gq @session-dock-switch-recovery auto ;;
             esac
+            ;;
+        GRAD)
+            if [ "$(get_gradient_enabled)" = "on" ]; then
+                tmux set-option -gq "@session-dock-gradient" off
+            else
+                tmux set-option -gq "@session-dock-gradient" on
+            fi
+            ;;
+        GSPD)
+            [ "$(get_gradient_enabled)" = "on" ] || return 0
+            prompt_gradient_speed
             ;;
         REST)
             [ "$IME_BACKEND" != "none" ] && [ "$IME_SETTING" != "off" ] || return 0

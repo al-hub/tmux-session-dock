@@ -11,7 +11,7 @@
 
 - **열기·저장·이동·선택**: `Prefix + s`로 세션 도크를 열고 닫습니다. 행을 선택해 `Enter`로 즉시 세션을 이동하며, 세션 생성·이름 변경·삭제/아카이브와 아카이브 복원을 도크 안에서 처리합니다.
 - **무깜빡임 전환**: 물리 페인을 옮기지 않고 각 윈도우의 Presenter를 통해 Native `switch-client`를 수행합니다.
-- **Gradient 효과**: 백그라운드 AI CLI의 활동 상태를 감지해 세션 행에 실시간 파형 gradient로 표시합니다. 선택한 세션만이 아니라 다른 세션의 활동도 확인할 수 있습니다.
+- **Gradient 효과**: 백그라운드 AI CLI의 활동 상태를 감지해 세션 행에 실시간 파형 gradient로 표시합니다. 선택한 세션만이 아니라 다른 세션의 활동도 확인할 수 있습니다. `Prefix + S`에서 켜고 끄거나 파형 주기(ms)를 지정할 수 있습니다.
 - **Subpane 스택**: 도크 옆 터미널 Subpane을 열고 닫고(`s`), 최대 3개까지 쌓으며(`Prefix + S`), 상단/하단을 전환(`p`)합니다. 각 슬롯의 높이는 세션 전환 후에도 유지됩니다.
 - **아카이브**: 셸 히스토리(`$HISTFILE`)를 오염시키지 않고 세션을 스냅샷으로 저장하고 일괄 복원합니다.
 
@@ -50,6 +50,8 @@ set -g @session-dock-ime 'restore'        # [옵션] 사이드바 진입 시 IME
 set -g @session-dock-switch-recovery 'popup' # [옵션] Enter 전환 실패(대상 사이드바 presenter 사망 등) 시: popup = 진단 팝업으로 선택 | auto = 자동 재기동 | off
 set -g @session-dock-subpane-count '1'    # [옵션] 도크 옆에 쌓을 터미널 서브페인 개수: 1 | 2 | 3
 set -g @session-dock-subpane-position 'bottom' # [옵션] 서브페인 스택 위치: bottom | top
+set -g @session-dock-gradient 'on'        # [옵션] AI CLI가 도는 세션 행의 활동 그라디언트: on | off
+set -g @session-dock-gradient-speed '1000' # [옵션] 파형 한 주기(ms), 400~4000 (한 주기 = 24프레임)
 
 # 위 옵션은 모두 Prefix + S 팝업에서도 변경할 수 있습니다.
 # 키 재정의: @session-dock-theme-key, @session-dock-help-key,
@@ -101,7 +103,7 @@ cd ~/.local/share/tmux-session-dock
 | 단축키 | 기능 설명 |
 | :--- | :--- |
 | **`Prefix + s`** | 세션 도크 사이드바 열기 / 닫기 (토글) |
-| **`Prefix + S`** | ⚙️ 설정 팝업 (서브페인 스택·위치, IME, 전환 복구) |
+| **`Prefix + S`** | ⚙️ 설정 팝업 (서브페인 스택·위치, IME, 전환 복구, 활동 그라디언트) |
 | **`Prefix + T`** | 🎨 59종 테마 피커 팝업 (실시간 ANSI 프리뷰) |
 | **`Prefix + /`** | ⌨️ 전체 단축키 검색 (커맨드 팔레트) |
 | **`Prefix + h`** | 📖 인터랙티브 도움말 팝업 |

@@ -20,6 +20,7 @@ tmux-single-sidebar/test-port-tmux-unit.sh
 tmux-single-sidebar/test-ime-unit.sh
 tmux-single-sidebar/test-restore-terminal-unit.sh
 tmux-single-sidebar/test-animation-cell-width-unit.sh
+tmux-single-sidebar/test-gradient-config-unit.sh
 
 # --- contract (real tmux, isolated socket, headless) ---
 tmux-single-sidebar/test-contract.sh
@@ -35,6 +36,7 @@ tmux-single-sidebar/test-operation-state-liveness-contract.sh
 tmux-single-sidebar/test-guard-flag-liveness-contract.sh
 tmux-single-sidebar/test-subpane-migrate-lock-contract.sh
 tmux-single-sidebar/test-hot-path-round-trips-contract.sh
+tmux-single-sidebar/test-gradient-option-contract.sh
 tmux-single-sidebar/test-window-ready-options.sh
 tmux-single-sidebar/test-width-restart-contract.sh
 tmux-single-sidebar/test-width-restore-contract.sh
