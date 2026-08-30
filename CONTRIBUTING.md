@@ -21,3 +21,7 @@ Thank you for your interest in contributing!
    `@session-dock-*` option); it never reads internal `@dotfiles_*` runtime
    options or trace logs. A wait loop that times out is a failure.
 5. Submit a clean Pull Request targeting `main`.
+
+Known gaps and the reasoning behind recent stability/performance work are
+recorded in [docs/BACKLOG.md](docs/BACKLOG.md); read it before starting a
+larger change.
