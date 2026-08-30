@@ -74,6 +74,7 @@ tmux-single-sidebar/test-window-local-multi-client.sh
 # --- keyboard e2e (attached PTY) ---
 tmux-single-sidebar/test-keyboard-one-step-switch-contract.sh
 tmux-single-sidebar/test-keyboard-e2e-history-select-all.sh
+tmux-single-sidebar/test-keyboard-e2e-dead-target-sidebar.sh
 tmux-single-sidebar/test-keyboard-e2e-rapid-operations.sh
 tmux-single-sidebar/test-keyboard-e2e-rename-roundtrip.sh
 tmux-single-sidebar/test-keyboard-e2e-direct-layout.sh

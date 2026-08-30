@@ -197,9 +197,9 @@ case "$SYSCALL_TRACE" in
         ;;
 esac
 case "$SCENARIO" in
-    subpane|subpane-focus-priority|subpane-entry-priority|subpane-multi-slot-enter|full|minimal|split-cycle|direct-layout|rapid-operations|session-create-latency|arbitrary-topology|multi-window-topology|window-local-switch|window-local-lifecycle|window-local-toggle|delete-zero-stale-row|history-select-all) ;;
+    subpane|subpane-focus-priority|subpane-entry-priority|subpane-multi-slot-enter|full|minimal|split-cycle|direct-layout|rapid-operations|session-create-latency|arbitrary-topology|multi-window-topology|window-local-switch|window-local-lifecycle|window-local-toggle|delete-zero-stale-row|history-select-all|dead-target-sidebar) ;;
     *)
-        printf 'TMUX_KEYBOARD_E2E_SCENARIO must be subpane, subpane-focus-priority, subpane-entry-priority, subpane-multi-slot-enter, full, minimal, split-cycle, direct-layout, rapid-operations, session-create-latency, arbitrary-topology, multi-window-topology, window-local-switch, window-local-lifecycle, window-local-toggle, delete-zero-stale-row, or history-select-all\n' >&2
+        printf 'TMUX_KEYBOARD_E2E_SCENARIO must be subpane, subpane-focus-priority, subpane-entry-priority, subpane-multi-slot-enter, full, minimal, split-cycle, direct-layout, rapid-operations, session-create-latency, arbitrary-topology, multi-window-topology, window-local-switch, window-local-lifecycle, window-local-toggle, delete-zero-stale-row, history-select-all, or dead-target-sidebar\n' >&2
         exit 2
         ;;
 esac
@@ -754,6 +754,78 @@ run_subpane_multi_slot_enter_reproduction()
     stack_ok "after Enter roundtrip back to the anchor" "$anchor_window" "$position" || return 1
 
     printf 'PASS: %s-slot mouse-resize intents survived real Enter session switch and return\n' "$slot_total"
+}
+
+# Reproduction: Enter on a session whose Sidebar Presenter process has died.
+# The pane is still there (remain-on-exit) but dead; the switch path must
+# respawn it and land the client on the target. Observed on the user's server
+# after an external SIGTERM killed a presenter: the switch polled
+# pane_pid/pane_dead of the dead pane until its budget ran out and gave up
+# silently, so the session could never be entered again.
+run_dead_target_sidebar_reproduction()
+{
+    local target=dead-target before_generation target_window target_pane target_pid
+    local -a session_order=(keyboard-anchor dead-target)
+    local selected_name selected_index order_index key
+
+    focus_sidebar_via_prefix
+    wait_for_sidebar_input_ready
+    before_generation="$(action_generation)"
+    send_keys c
+    wait_for_prompt_ready
+    send_keys "$target"$'\r'
+    wait_for_prompt_complete
+    wait_for_action_generation_change "$before_generation"
+    wait_for_sessions 2 "dead-target session"
+    wait_for_operation_quiet
+    wait_until 'both sidebars provisioned' 2 count_sidebars
+
+    target_window="$(tmuxc display-message -p -t "=$target:" '#{window_id}')"
+    target_pane="$(tmuxc list-panes -t "$target_window" -F '#{pane_id}|#{pane_title}' | awk -F '|' '$2 == "dotfiles-session-sidebar" { print $1; exit }')"
+    target_pid="$(tmuxc display-message -p -t "$target_pane" '#{pane_pid}')"
+    [ -n "$target_pane" ] && [ -n "$target_pid" ] || {
+        printf 'FAIL: target session has no live sidebar presenter to kill\n' >&2
+        return 1
+    }
+
+    # The presenter dies (OOM kill, a crash, an external kill); the pane stays
+    # as a dead remain-on-exit shell. SIGKILL: the presenter traps TERM.
+    kill -KILL "$target_pid" 2>/dev/null || true
+    target_pane_dead() { tmuxc display-message -p -t "$target_pane" '#{pane_dead}'; }
+    wait_until 'target sidebar presenter dead' 1 target_pane_dead
+    test_log "dead-target.presenter-killed pane=$target_pane pid=$target_pid"
+
+    # Back on the anchor, select the target through the real TUI and press Enter.
+    if [ "$(client_session)" != keyboard-anchor ]; then
+        tmuxc switch-client -t keyboard-anchor
+        wait_until 'client back on the anchor' keyboard-anchor client_session
+    fi
+    focus_sidebar_via_prefix
+    wait_for_sidebar_input_ready
+    wait_for_sidebar_row "$target"
+    for _ in $(seq 1 8); do
+        selected_name="$(sidebar_selected_name)"
+        [ "$selected_name" = "$target" ] && break
+        selected_index=0
+        for order_index in "${!session_order[@]}"; do
+            [ "${session_order[$order_index]}" = "$selected_name" ] && selected_index="$order_index"
+        done
+        if [ "$selected_index" -gt 1 ]; then key=$'\033[A'; else key=$'\033[B'; fi
+        send_keys "$key"
+        wait_for_sidebar_input_ready
+    done
+    [ "$(sidebar_selected_name)" = "$target" ] || {
+        printf 'FAIL: selection marker did not reach %s (actual=%s)\n' "$target" "$(sidebar_selected_name)" >&2
+        return 1
+    }
+    before_generation="$(action_generation)"
+    send_keys $'\r'
+    wait_for_action_generation_change "$before_generation"
+
+    # Oracle: the client is on the target and its sidebar is alive again.
+    wait_until "Enter switches to $target although its sidebar presenter had died" "$target" client_session
+    wait_until 'target sidebar respawned (pane alive)' 0 target_pane_dead
+    printf 'PASS: Enter recovered a session whose sidebar presenter had died\n'
 }
 
 run_delete_zero_stale_row_reproduction()
@@ -2696,6 +2768,11 @@ fi
 
 if [ "$SCENARIO" = delete-zero-stale-row ]; then
     run_delete_zero_stale_row_reproduction
+    exit 0
+fi
+
+if [ "$SCENARIO" = dead-target-sidebar ]; then
+    run_dead_target_sidebar_reproduction
     exit 0
 fi
 
