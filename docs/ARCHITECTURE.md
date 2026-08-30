@@ -61,6 +61,8 @@ graph TD
 9. **Switch Recovery**: When Enter cannot land on a session because its Presenter pane is dead (a killed or crashed presenter leaves a remain-on-exit shell) or never became ready, the switch does not poll into the provisioning budget: a dead pane is detected at once and, per `@session-dock-switch-recovery`, the user sees a popup with the diagnosis (pane state, exit status, readiness, lease, recent trace) and chooses respawn-and-retry / switch without a sidebar / cancel / save the diagnosis (`popup`, default), or the sidebar is respawned silently (`auto`), or the switch aborts as before (`off`). The transaction is released while the popup is open - holding it would block every other switch on the server for as long as the user deliberates - and the chosen retry runs as a fresh transaction. Transition and operation liveness is decided by owner pid (and, for operations, a deadline), never by lock age: a slow but alive switch is not torn down.
 10. **Caller-Owned Focus**: Subpane Pool movement preserves the active pane. Session-switch and user-entry callers own focus decisions.
 
+See also [ARCHITECTURE-EVOLUTION.md](ARCHITECTURE-EVOLUTION.md) for before/after diagrams of the eight points where the shape of the codebase changed.
+
 ## 4. Where the history is
 
 Each invariant above was introduced by one release; `git log --oneline -- docs/ARCHITECTURE.md`

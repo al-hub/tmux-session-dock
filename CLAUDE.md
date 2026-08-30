@@ -112,6 +112,9 @@ The releases that shaped the current design:
 | `v0.3.50` | Slot mutations serialized under one lock; hook-suppression flags carry owner and deadline; CI rejects a stale `dist/`. |
 | `v0.3.51` | Hooks gated inside the tmux server; hot paths batched into single round trips; readiness polling backed off. |
 
+`docs/ARCHITECTURE-EVOLUTION.md` draws the eight points where the shape of
+the codebase changed, before and after, with the release on each side.
+
 `docs/BACKLOG.md` records the four-lens architecture review behind
 `v0.3.49`–`v0.3.51`: what was fixed, the five principles those fixes converged
 on, and seven remaining items with evidence, proposed fix, size and risk. Read
@@ -122,6 +125,7 @@ written up there.
 
 - [README.md](README.md) / [README.ko.md](README.ko.md) — user-facing features, install, options.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — invariants and IPC design.
+- [docs/ARCHITECTURE-EVOLUTION.md](docs/ARCHITECTURE-EVOLUTION.md) — how the shape changed, release by release.
 - [docs/BACKLOG.md](docs/BACKLOG.md) — open items and review findings.
 - [docs/KEYBINDINGS.md](docs/KEYBINDINGS.md) — every binding, and which option overrides it.
 - [docs/THEMES.md](docs/THEMES.md) — theme catalog and how to add one.
