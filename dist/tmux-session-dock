@@ -4822,30 +4822,39 @@ smart_navigate_pane()
     subpane_info="$(sidebar_tmux_cmd list-panes -t "$active_win" -F '#{pane_id}|#{pane_title}|#{@dotfiles_sidebar_subpane}' 2>/dev/null | awk -F '|' '($2=="dotfiles-sidebar-subpane" || $3=="1"){print $1; exit}')"
 
     case "$dir" in
-        L|left)
-            # Geometric Left: look at the panes touching the active pane's left
-            # border. No neighbour (leftmost pane, or the dock is hidden): stay -
-            # plain `select-pane -L` would wrap to the rightmost pane. If the
-            # neighbour is the dock column (sidebar or subpane) enter the
-            # SIDEBAR - a work pane never lands on the subpane directly; the
-            # subpane is reached from the sidebar with Down. Otherwise let tmux
-            # pick the adjacent work pane (sidebar|w1|w2: Left from w2 -> w1).
-            local left_neighbours
-            left_neighbours="$(sidebar_tmux_cmd list-panes -t "$active_win" -F '#{pane_id} #{pane_left} #{pane_right} #{pane_top} #{pane_bottom} #{pane_active}' 2>/dev/null |
-                awk '$6 == 1 { al = $2; at = $4; ab = $5 }
-                     { id[NR] = $1; r[NR] = $3; t[NR] = $4; b[NR] = $5 }
-                     END { for (i = 1; i <= NR; i++) if (al - r[i] >= 1 && al - r[i] <= 2 && t[i] <= ab && b[i] >= at) print id[i] }')"
-            if [ -z "$left_neighbours" ]; then
-                :
-            elif [ -n "$sidebar_info" ] && [ "$active_pane" != "$sidebar_info" ] && [ "$active_pane" != "$subpane_info" ] &&
-                printf '%s\n' "$left_neighbours" | grep -qx -e "$sidebar_info" -e "${subpane_info:-__none__}"; then
-                sidebar_tmux_cmd select-pane -t "$sidebar_info" 2>/dev/null || true
-            else
-                sidebar_tmux_cmd select-pane -L 2>/dev/null || true
+        L|left|R|right)
+            # Geometric Left/Right with wrap-around. Neighbours touching the
+            # active pane's edge come first; none (edge of the window) wraps to
+            # the far side like tmux does, so from the sidebar Left lands on the
+            # rightmost work pane. Whenever the chosen pane is in the dock
+            # column (sidebar or subpane) the SIDEBAR is entered: a work pane
+            # never lands on the subpane directly, which stays reachable from
+            # the sidebar with Down.
+            local hdir="L" target
+            case "$dir" in R|right) hdir="R" ;; esac
+            target="$(pane_neighbours_in_direction "$active_win" "$hdir" | head -n 1)"
+            if [ -z "$target" ]; then
+                # Wrap: the pane on the opposite edge that overlaps this row.
+                target="$(sidebar_tmux_cmd list-panes -t "$active_win" -F '#{pane_id} #{pane_left} #{pane_right} #{pane_top} #{pane_bottom} #{pane_active}' 2>/dev/null |
+                    awk -v hdir="$hdir" '
+                        $6 == 1 { at = $4; ab = $5; self = $1 }
+                        { id[NR] = $1; l[NR] = $2; r[NR] = $3; t[NR] = $4; b[NR] = $5 }
+                        END {
+                            best = ""
+                            for (i = 1; i <= NR; i++) {
+                                if (id[i] == self || !(t[i] <= ab && b[i] >= at)) continue
+                                if (hdir == "L" && (best == "" || r[i] > bestv)) { best = id[i]; bestv = r[i] }
+                                if (hdir == "R" && (best == "" || l[i] < bestv)) { best = id[i]; bestv = l[i] }
+                            }
+                            print best
+                        }')"
             fi
-            ;;
-        R|right)
-            sidebar_tmux_cmd select-pane -R 2>/dev/null || true
+            [ -n "$target" ] || return 0
+            if [ -n "$sidebar_info" ] && { [ "$target" = "$sidebar_info" ] || [ "$target" = "${subpane_info:-__none__}" ]; }; then
+                target="$sidebar_info"
+            fi
+            [ "$target" != "$active_pane" ] || return 0
+            sidebar_tmux_cmd select-pane -t "$target" 2>/dev/null || true
             ;;
         U|up)
             sidebar_tmux_cmd select-pane -U 2>/dev/null || true

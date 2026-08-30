@@ -2,12 +2,11 @@
 # ==============================================================================
 # tests/tmux-single-sidebar/test-smart-pane.sh
 # Smart pane navigation (Alt+arrows):
-#   - Left is geometric: from w2 in "sidebar | w1 | w2" it lands on w1
-#   - Left from the pane next to the dock column enters the SIDEBAR, never the
-#     subpane below it
+#   - Left/Right are geometric: from w2 in "sidebar | w1 | w2" Left lands on w1
+#   - a move onto the dock column enters the SIDEBAR, never the subpane
 #   - the subpane is reached from the sidebar with Down
-#   - Right from the sidebar returns to the work pane
-#   - with the dock hidden, Left from the leftmost work pane stays put
+#   - at the window edge Left/Right wrap to the far side (sidebar -> w2,
+#     w2 -> sidebar), like tmux's own select-pane
 # ==============================================================================
 set -euo pipefail
 
@@ -57,13 +56,19 @@ nav R "$subpane"; expect "$w1" "Right from subpane -> w1"
 nav L "$w1"; expect "$sidebar" "Left from w1 -> sidebar again"
 nav R "$sidebar"; expect "$w1" "Right from sidebar -> w1"
 
-echo "=== [5/6] Left from the sidebar itself stays (leftmost) ==="
-t select-pane -t "$sidebar"; nav L "$sidebar"; expect "$sidebar" "Left from sidebar stays"
+echo "=== [5/6] wrap-around: Left from the sidebar reaches w2, Right from w2 reaches the sidebar ==="
+t select-pane -t "$sidebar"; nav L "$sidebar"; expect "$w2" "Left from sidebar wraps to w2"
+nav R "$w2"; expect "$sidebar" "Right from w2 wraps to the sidebar (never the subpane)"
+t select-pane -t "$subpane"; nav L "$subpane"; expect "$w2" "Left from the subpane wraps to w2 too"
+nav R "$w2"; expect "$sidebar" "Right from w2 wraps to the sidebar again"
+nav R "$sidebar"; expect "$w1" "Right from sidebar -> w1"
+nav R "$w1"; expect "$w2" "Right from w1 -> w2"
 
-echo "=== [6/6] dock hidden: Left from the leftmost work pane stays put ==="
+echo "=== [6/6] dock hidden: plain wrap between work panes ==="
 t kill-pane -t "$subpane"; t kill-pane -t "$sidebar"
 t select-pane -t "$w2"; nav L "$w2"; expect "$w1" "hidden dock: Left from w2 -> w1"
-nav L "$w1"; expect "$w1" "hidden dock: Left from w1 stays"
+nav L "$w1"; expect "$w2" "hidden dock: Left from w1 wraps to w2"
+nav R "$w2"; expect "$w1" "hidden dock: Right from w2 wraps to w1"
 
 echo "=========================================================================="
 echo "ALL TESTS PASS: Smart focus routing verified!"
