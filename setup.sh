@@ -103,8 +103,9 @@ usage() {
     echo -e "${BOLD}Commands:${NC}"
     echo -e "  ${CYAN}install${NC}       Compile bundle, register ~/.local/bin symlinks & configure tmux"
     echo -e "  ${CYAN}update${NC}        Pull latest upstream changes, rebuild dist & reload tmux"
-    echo -e "  ${CYAN}uninstall${NC}     Cleanly remove binaries, symlinks, and ~/.tmux.conf bindings"
+    echo -e "  ${CYAN}uninstall${NC}     Remove binaries, symlinks, ~/.tmux.conf bindings; detach the live server, keep sessions"
     echo -e "  ${CYAN}purge${NC}         Full uninstall + purge all runtime state, cache & history"
+    echo -e "                ${CYAN}--kill-server${NC} also ends the tmux server (asks first; ${CYAN}--yes${NC} to skip the prompt; ignored without a TTY)"
     echo -e "  ${CYAN}status${NC}        Check installation integrity, active version & dependencies"
     echo -e "  ${CYAN}build${NC}         Compile scripts/lib/ modules into single production dist/ bundle"
     echo -e "  ${CYAN}test${NC}          Run self-contained test matrix (Gate A~E, Subpane, Gradient)"
@@ -286,7 +287,7 @@ CONF_EOF
     fi
 
     # 5. Hot-reload active tmux server if running
-    if tmux info >/dev/null 2>&1; then
+    if tmux list-sessions >/dev/null 2>&1; then
         tmux source-file "$CONFIG_FILE" 2>/dev/null || true
         log_ok "Active tmux server configuration reloaded."
     fi
@@ -317,14 +318,74 @@ do_update() {
         cp "$SCRIPT_DIR/themes"/*.conf "$user_theme_dir/" 2>/dev/null || true
     fi
 
-    if tmux info >/dev/null 2>&1; then
+    if tmux list-sessions >/dev/null 2>&1; then
         tmux source-file "$CONFIG_FILE" 2>/dev/null || true
     fi
     log_ok "Update completed successfully!"
 }
 
+# Remove every dock artefact from the RUNNING tmux server while keeping the
+# user's sessions: hooks, key bindings, dock panes (sidebar / subpane slots),
+# the hidden hub session and the dock's global options. Only this repo's own
+# processes are terminated - never the tmux server, never by a loose name.
+detach_live_server() {
+    tmux list-sessions >/dev/null 2>&1 || return 0
+    local dock_re='tmux-session-dock|tmux-session-launcher|tmux-subpane-picker|tmux-theme-picker|tmux-help-viewer|tmux-command-palette'
+    local hook entry name index
+
+    # Hooks: every array entry whose command names a dock script. A bare
+    # `show-hooks -g` omits pane-focus-in/out on tmux 3.2, list those by name.
+    for hook in $(tmux show-hooks -g 2>/dev/null | awk '{print $1}' | sed 's/\[.*//' | sort -u) pane-focus-in pane-focus-out; do
+        while IFS= read -r entry; do
+            [ -n "$entry" ] || continue
+            name="${entry%%[*}"; index="${entry#*[}"; index="${index%%]*}"
+            tmux set-hook -gu "${name}[${index}]" 2>/dev/null || true
+        done < <(tmux show-hooks -g "$hook" 2>/dev/null | grep -E "$dock_re" | awk '{print $1}')
+    done
+
+    # Key bindings that run a dock script or popup.
+    while read -r _ table key; do
+        [ -n "$key" ] || continue
+        key="${key#\\}"   # list-keys prints \" for the double-quote key
+        tmux unbind-key -T "$table" "$key" 2>/dev/null || true
+    done < <(tmux list-keys 2>/dev/null | grep -E "$dock_re" | awk '{ for (i = 1; i <= NF; i++) if ($i == "-T") { print "k", $(i+1), $(i+2); break } }')
+
+    # Dock panes and the hidden hub session; work panes are untouched.
+    while IFS= read -r entry; do
+        [ -n "$entry" ] && tmux kill-pane -t "$entry" 2>/dev/null || true
+    done < <(tmux list-panes -a -F '#{pane_id}|#{pane_title}|#{@dotfiles_sidebar_pane}|#{@dotfiles_sidebar_subpane}' 2>/dev/null |
+        awk -F '|' '$2 == "dotfiles-session-sidebar" || $3 == "1" || $4 == "1" { print $1 }')
+    tmux kill-session -t "=dotfiles-subpane-hub" 2>/dev/null || true
+
+    # Dock options and hidden environment.
+    for name in $(tmux show-options -g 2>/dev/null | awk '{print $1}' | grep -E '^@(dotfiles_|dotfiles-|session-dock|sidebar_)' ); do
+        tmux set-option -gu "$name" 2>/dev/null || true
+    done
+    for name in $(tmux show-environment -gh 2>/dev/null | grep -o '^DOTFILES_SIDEBAR_[A-Za-z0-9_]*'); do
+        tmux set-environment -ghu "$name" 2>/dev/null || true
+    done
+    tmux set-option -gu focus-events 2>/dev/null || true
+    log_ok "Live tmux server detached from the dock (hooks, keys, dock panes, hub, options); your sessions are untouched."
+}
+
+kill_dock_processes() {
+    # Only the dock's own long-running processes (presenters, observer,
+    # helpers). Never a plain `pkill -f tmux-session-dock`: that matches every
+    # process whose command line merely contains the path - including this
+    # setup script and unrelated tools living next to it.
+    pkill -f '(tmux-session-dock|tmux-session-launcher)[^ ]* --(sidebar|observe)( |$)' 2>/dev/null || true
+    pkill -f 'tmux-session-dock-ime( |$)' 2>/dev/null || true
+}
+
 do_uninstall() {
-    local purge="${1:-0}"
+    local purge="${1:-0}" kill_server=0 assume_yes=0 arg
+    shift || true
+    for arg in "$@"; do
+        case "$arg" in
+            --kill-server) kill_server=1 ;;
+            --yes|-y) assume_yes=1 ;;
+        esac
+    done
     log_warn "Uninstalling tmux-session-dock..."
 
     # 1. Remove symlinks
@@ -369,13 +430,35 @@ do_uninstall() {
         log_ok "Purged state, cache, themes, and installation directory."
     fi
 
-    # 4. Terminate active tmux server and background processes so in-memory hooks are flushed
-    if tmux info >/dev/null 2>&1; then
-        tmux kill-server 2>/dev/null || true
-        log_ok "Terminated running tmux server to flush in-memory hooks."
+    # 4. Detach the running server (sessions survive) and stop dock processes.
+    detach_live_server
+    kill_dock_processes
+
+    # 5. Optional, explicit: restart-clean by killing the tmux server. Only on
+    # request, only with confirmation (or --yes), never when nobody can see
+    # the prompt (non-interactive stdin) - an uninstall driven by another
+    # script must not take the user's sessions down.
+    if [ "$kill_server" -eq 1 ] && tmux list-sessions >/dev/null 2>&1; then
+        local sessions
+        sessions="$(tmux list-sessions -F '#{session_name}' 2>/dev/null | tr '\n' ' ')"
+        if [ "$assume_yes" -eq 1 ]; then
+            tmux kill-server 2>/dev/null || true
+            log_ok "tmux server terminated (--kill-server --yes). Sessions ended: ${sessions:-none}"
+        elif [ -t 0 ]; then
+            printf '%b' "${YELLOW}This ends every tmux session (${sessions:-none}). Kill the tmux server? [y/N] ${NC}"
+            local answer=""
+            read -r answer || true
+            case "$answer" in
+                y|Y|yes|YES)
+                    tmux kill-server 2>/dev/null || true
+                    log_ok "tmux server terminated. Sessions ended: ${sessions:-none}"
+                    ;;
+                *) log_info "Kept the tmux server running." ;;
+            esac
+        else
+            log_warn "--kill-server ignored: no interactive terminal to confirm. Re-run with --yes to end the tmux server (sessions: ${sessions:-none})."
+        fi
     fi
-    pkill -f "tmux-session-dock" 2>/dev/null || true
-    pkill -f "tmux-session-launcher" 2>/dev/null || true
     log_ok "Uninstallation complete. Zero residual hooks."
 }
 

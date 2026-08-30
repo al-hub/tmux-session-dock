@@ -44,6 +44,7 @@ tmux-single-sidebar/test-failure-injection.sh
 tmux-single-sidebar/test-batch-restore-observability.sh
 tmux-single-sidebar/test-restore-history-no-pollution.sh
 tmux-single-sidebar/test-help-viewer.sh
+tmux-single-sidebar/test-setup-uninstall.sh
 tmux-single-sidebar/test-theme-persistence.sh
 tmux-single-sidebar/test-quick-jump.sh
 tmux-single-sidebar/test-ime-hook-e2e.sh
