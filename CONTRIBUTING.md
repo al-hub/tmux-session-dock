@@ -52,6 +52,34 @@ state. `test-transition-lock-liveness-contract.sh` is the model to copy.
 Each test creates its own tmux server on a private socket (`-L name-$$`) and
 its own `$HOME`; never assume the developer's server exists.
 
+**A screen is only true of the capture it was read from.** The dock repaints a
+row at a time, so a `capture-pane` taken during a repaint - a resize, a
+handover, a gradient frame - shows a row that is on screen as missing. Three
+tests have failed that way, each time by reading the same predicate twice:
+
+```bash
+while …; do
+    [ -n "$(row_for worker)" ] && break     # seen
+    sleep 0.2
+done
+[ -n "$(row_for worker)" ] || fail_test …   # captured again; can miss it
+```
+
+Have the loop record what it saw and assert the record, or require the screen
+to hold still (its geometry as well as its text) before sampling it. Waiting
+longer is not the fix and neither is a retry that hides a row which is really
+gone: a row that never appears must still fail on the deadline.
+
+Ask tmux about a client through `list-clients`, filtered by that client's tty.
+`display-message -c <tty>` cannot answer a per-client question: 3.2a rejects
+`-p -c` and 3.4 resolves the format against the most recently used session, so
+every client reports the same thing. The dock has `sidebar_client_field` for
+this; a test has `client_session` in `tests/lib/interactive_common.sh`.
+
+The CI matrix is tmux **3.2a and 3.4**, and several defects in this repository
+were visible on only one of them. A local 3.4 is worth building when a test
+fails on CI's 24.04 leg and passes on 22.04.
+
 ## Adding a `@session-dock-*` option
 
 There is no registry yet (see BACKLOG R5), so all of these need touching:

@@ -1,6 +1,6 @@
 # tmux-session-dock Architecture & IPC Design
 
-Describes `v0.3.62`. Numbers quoted here were measured on tmux 3.2a (WSL2);
+Describes `v0.3.63`. Numbers quoted here were measured on tmux 3.2a (WSL2);
 open items and the reasoning behind recent changes are in
 [BACKLOG.md](BACKLOG.md).
 

@@ -1,7 +1,7 @@
 # tmux-session-dock — orientation for an AI CLI session
 
 Read this first, then only what your task needs. Everything below is true as of
-`v0.3.62`; when it stops being true, fix it here in the same change.
+`v0.3.63`; when it stops being true, fix it here in the same change.
 
 ## What this is
 

@@ -1,6 +1,6 @@
 # Keybindings & Navigation Cheat Sheet
 
-Describes `v0.3.62`. Every row below is bound by `session-dock.tmux` (or by the
+Describes `v0.3.63`. Every row below is bound by `session-dock.tmux` (or by the
 ergonomics preset where noted); nothing here relies on an input-method alias.
 
 ## 1. Global Prefix Bindings (`Ctrl + a` with the ergonomics preset, otherwise your own prefix)
