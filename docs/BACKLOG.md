@@ -284,9 +284,16 @@ still its own.
 
 The spawn throttle is still process-local, so simultaneous presenters still each
 spawn an observer; that is now harmless rather than merely usually harmless, and
-is left alone. Note that a micro-benchmark starting eight observers at once
-converges to one both before and after - the race needs the real presenter path
-under load, which is why the full suite is the evidence here.
+is left alone.
+
+The next full run failed the same way, which settled what the remaining half
+was: the test, not the product. `observer_pids` counts processes named
+`--observe`, and a just-spawned one is still parsing 9k lines of bash before it
+reaches the claim and exits as the duplicate - on a loaded machine long enough
+for a single sample two seconds in to catch it. The test now waits for the
+count to settle and then asserts what the single sample could not, that the
+survivor is the process named in the lock (v0.3.62). A duplicate that really
+kept running still fails it.
 
 Related, and the reason this was written down together with it: the observer is
 started with `run-shell -b`, so tmux tracks the `sh -c` wrapper and reports its

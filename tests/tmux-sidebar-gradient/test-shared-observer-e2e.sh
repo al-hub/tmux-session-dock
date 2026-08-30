@@ -121,9 +121,26 @@ done
 deadline=$(( $(date +%s) + 10 ))
 while [ "$(date +%s)" -lt "$deadline" ] && [ -z "$(state_file)" ]; do sleep 0.2; done
 [ -n "$(state_file)" ] || fail_test 'no shared observer state file appeared'
-sleep 2
-count="$(observer_pids | wc -l | tr -d ' ')"
+# The invariant is that one observer *publishes*, not that one process is
+# momentarily named --observe. Presenters spawn an observer independently (the
+# throttle that stops them is process-local), and a just-spawned one is still
+# parsing 9k lines of bash before it reaches the claim and exits as the
+# duplicate - on a loaded machine that takes long enough to be caught by a
+# single sample, which is what made this test fail roughly once per full run.
+# So wait for the count to settle, and then assert the stronger thing the
+# single sample could not: that the survivor is the process holding the claim.
+settle_deadline=$(( $(date +%s) + 10 ))
+count=0
+while [ "$(date +%s)" -lt "$settle_deadline" ]; do
+    count="$(observer_pids | wc -l | tr -d ' ')"
+    [ "$count" -eq 1 ] && break
+    sleep 0.3
+done
 [ "$count" -eq 1 ] || fail_test "expected exactly one observer for this server, found $count"
+holder="$(cat "$LOCK_ROOT"/dotfiles-sidebar-ai-*.state.lock/pid 2>/dev/null | first_line)"
+[ -n "$holder" ] || fail_test 'the observer lock names no holder'
+[ "$holder" = "$(observer_pids)" ] ||
+    fail_test "the surviving observer $(observer_pids) is not the lock holder $holder"
 age=$(( $(date +%s) - $(state_ts) ))
 [ "$age" -le 3 ] || fail_test "state file is stale ($age s old)"
 grep -Pq $'^ai1\trunning\t%' "$(state_file)" || fail_test "state file does not report ai1 running: $(grep '^ai1' "$(state_file)" || true)"
