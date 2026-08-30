@@ -5,6 +5,7 @@
 #   section 2  IME (한/영): English on sidebar focus, restore on leave
 #   section 3  switch recovery
 #   section 4  activity gradient: on/off and cycle length in milliseconds
+#   section 5  awaiting: mark sessions that stopped and have not been visited
 # Toggle a row with Space or Enter; ↑/↓ (or k/j) move; Esc/q closes.
 # The gradient speed row opens an inline millisecond prompt instead.
 # ==============================================================================
@@ -42,6 +43,36 @@ DOCK_BIN="$REPO_DIR/dist/tmux-session-dock"
 # disagree about what a millisecond value means.
 [ -r "$REPO_DIR/scripts/lib/sidebar_domain_animation.sh" ] &&
     source "$REPO_DIR/scripts/lib/sidebar_domain_animation.sh"
+[ -r "$REPO_DIR/scripts/lib/sidebar_domain_activity.sh" ] &&
+    source "$REPO_DIR/scripts/lib/sidebar_domain_activity.sh"
+
+get_awaiting_enabled() {
+    local v
+    v="$(tmux show-option -gqv "@session-dock-awaiting" 2>/dev/null || true)"
+    case "$v" in off|false|0) printf 'off' ;; *) printf 'on' ;; esac
+}
+
+get_awaiting_blink() {
+    local v
+    v="$(tmux show-option -gqv "@session-dock-awaiting-blink" 2>/dev/null || true)"
+    case "$v" in
+        off|false|0) printf 'off' ;;
+        ''|always|true) printf 'always' ;;
+        *[!0-9]*) printf 'always' ;;
+        *) printf '%s' "$v" ;;
+    esac
+}
+
+get_awaiting_after() {
+    local v
+    v="$(tmux show-option -gqv "@session-dock-awaiting-after" 2>/dev/null || true)"
+    if declare -f sidebar_domain_activity_await_after >/dev/null 2>&1; then
+        sidebar_domain_activity_await_after "$v"
+        printf '%s' "$sidebar_awaiting_after_ms_result"
+        return 0
+    fi
+    case "$v" in ''|*[!0-9]*) printf '30000' ;; *) printf '%s' "$v" ;; esac
+}
 
 get_gradient_enabled() {
     local v
@@ -120,6 +151,10 @@ OPTIONS=(
     "#GRAD|활동 그라디언트 (Activity Gradient)|"
     "GRAD|Gradient on Active Sessions|"
     "GSPD|Wave Cycle (ms)|"
+    "#AWAIT|미확인 정지 (Awaiting)|"
+    "AWAIT|Awaiting Marker|"
+    "ABLINK|Blink Until Seen|"
+    "AAFTER|Mark After (ms)|"
 )
 
 is_header() { case "$1" in \#*) return 0 ;; *) return 1 ;; esac; }
@@ -213,6 +248,41 @@ draw_picker() {
                     desc="${DIM}그라디언트가 꺼져 있어 비활성 (현재 ${gms} ms)${RESET}"
                 fi
                 ;;
+            AWAIT)
+                if [ "$(get_awaiting_enabled)" = "on" ]; then
+                    is_active=true
+                    desc="멈춘 뒤 아직 안 가본 세션에 ● 표시 ${DIM}(Space: 끄기)${RESET}"
+                else
+                    desc="현재 ${BOLD}${YELLOW}OFF${RESET}${GRAY} — 표시 없음 (Space: 켜기)${RESET}"
+                fi
+                ;;
+            ABLINK)
+                local ablink
+                ablink="$(get_awaiting_blink)"
+                if [ "$(get_awaiting_enabled)" != "on" ]; then
+                    disabled=true
+                    desc="${DIM}Awaiting 표시가 꺼져 있어 비활성${RESET}"
+                elif [ "$ablink" = "off" ]; then
+                    desc="현재 ${BOLD}${YELLOW}OFF${RESET}${GRAY} — 정적 ● (Space: always / Enter: ms 지정)${RESET}"
+                elif [ "$ablink" = "always" ]; then
+                    is_active=true
+                    desc="확인할 때까지 계속 깜빡임 ${DIM}(Space: 끄기 / Enter: ms 지정)${RESET}"
+                else
+                    is_active=true
+                    desc="${BOLD}${EMERALD}${ablink} ms${RESET}${GRAY} 동안만 깜빡인 뒤 정적 ${DIM}(상태는 그대로 유지)${RESET}"
+                fi
+                ;;
+            AAFTER)
+                local aafter
+                aafter="$(get_awaiting_after)"
+                if [ "$(get_awaiting_enabled)" != "on" ]; then
+                    disabled=true
+                    desc="${DIM}Awaiting 표시가 꺼져 있어 비활성 (현재 ${aafter} ms)${RESET}"
+                else
+                    is_active=true
+                    desc="멈춘 뒤 ${BOLD}${EMERALD}${aafter} ms${RESET}${GRAY} 지나면 표시 ${DIM}(Enter: 직접 입력, ${SIDEBAR_AWAITING_AFTER_MS_MIN:-1000}~${SIDEBAR_AWAITING_AFTER_MS_MAX:-300000})${RESET}"
+                fi
+                ;;
             REST)
                 if [ "$IME_BACKEND" = "none" ] || [ "$IME_SETTING" = "off" ]; then
                     disabled=true
@@ -244,15 +314,16 @@ draw_picker() {
     printf "  ${DIM}이동:${RESET} ${BOLD}${YELLOW}[ ↑ / ↓ ]${RESET} ${DIM}| 토글 & 적용:${RESET} ${BOLD}${EMERALD}[ Space / Enter ]${RESET} ${DIM}| 값 입력:${RESET} ${BOLD}${EMERALD}[ 숫자 ]${RESET} ${DIM}| 닫기:${RESET} ${BOLD}${YELLOW}[ Esc / q ]${RESET}\n"
 }
 
-# Read a millisecond value on the footer line. Digits type, Backspace deletes,
-# Enter commits, Esc cancels; an out-of-range number is clamped rather than
-# refused, with the same clamp the presenter applies.
-prompt_gradient_speed() {
-    local entry="" key extra current
-    current="$(get_gradient_speed)"
+# Read a millisecond value on the footer line, for whichever option asked.
+# Digits type, Backspace deletes, Enter commits, Esc cancels; a value outside
+# the range is clamped rather than refused, with the same bounds the presenter
+# applies, so the popup and the dock cannot disagree about what a number means.
+prompt_ms_value() {
+    local option="$1" current="$2" min="$3" max="$4" label="$5"
+    local entry="" key extra
     while :; do
-        printf "\r\033[2K  ${BOLD}${EMERALD}주기(ms):${RESET} ${BOLD}%s${RESET}${DIM}▏${RESET}  ${GRAY}현재 %s · 범위 %s~%s · Enter 적용 · Esc 취소${RESET}" \
-            "$entry" "$current" "${SIDEBAR_ANIMATION_CYCLE_MS_MIN:-400}" "${SIDEBAR_ANIMATION_CYCLE_MS_MAX:-4000}"
+        printf "\r\033[2K  ${BOLD}${EMERALD}%s:${RESET} ${BOLD}%s${RESET}${DIM}▏${RESET}  ${GRAY}현재 %s · 범위 %s~%s · Enter 적용 · Esc 취소${RESET}" \
+            "$label" "$entry" "$current" "$min" "$max"
         IFS= read -rsn1 key || return 0
         case "$key" in
             $'\e')
@@ -261,19 +332,20 @@ prompt_gradient_speed() {
                 ;;
             ""|$'\n'|$'\r')
                 [ -n "$entry" ] || return 0
-                if declare -f sidebar_domain_animation_timing >/dev/null 2>&1; then
-                    sidebar_domain_animation_timing "$entry"
-                    entry="$sidebar_animation_timing_cycle_ms"
-                fi
-                tmux set-option -gq "@session-dock-gradient-speed" "$entry"
+                [ "$entry" -lt "$min" ] 2>/dev/null && entry="$min"
+                [ "$entry" -gt "$max" ] 2>/dev/null && entry="$max"
+                tmux set-option -gq "$option" "$entry"
                 return 0
                 ;;
             $'\177'|$'\b') entry="${entry%?}" ;;
-            [0-9]) [ "${#entry}" -lt 5 ] && entry+="$key" ;;
+            [0-9]) [ "${#entry}" -lt 6 ] && entry+="$key" ;;
         esac
     done
 }
 
+# key_is_enter lets one row mean two things: Space cycles between the keyword
+# values, Enter asks for a number. Every other row treats them the same.
+key_is_enter=false
 apply_selection() {
     local chosen_id
     chosen_id="$(option_id "${OPTIONS[$SELECTED_IDX]}")"
@@ -312,7 +384,31 @@ apply_selection() {
             ;;
         GSPD)
             [ "$(get_gradient_enabled)" = "on" ] || return 0
-            prompt_gradient_speed
+            prompt_ms_value "@session-dock-gradient-speed" "$(get_gradient_speed)" \
+                "${SIDEBAR_ANIMATION_CYCLE_MS_MIN:-400}" "${SIDEBAR_ANIMATION_CYCLE_MS_MAX:-4000}" "주기(ms)"
+            ;;
+        AWAIT)
+            if [ "$(get_awaiting_enabled)" = "on" ]; then
+                tmux set-option -gq "@session-dock-awaiting" off
+            else
+                tmux set-option -gq "@session-dock-awaiting" on
+            fi
+            ;;
+        ABLINK)
+            [ "$(get_awaiting_enabled)" = "on" ] || return 0
+            if [ "$key_is_enter" = true ]; then
+                prompt_ms_value "@session-dock-awaiting-blink" "$(get_awaiting_blink)" \
+                    100 600000 "깜빡임(ms)"
+            elif [ "$(get_awaiting_blink)" = "off" ]; then
+                tmux set-option -gq "@session-dock-awaiting-blink" always
+            else
+                tmux set-option -gq "@session-dock-awaiting-blink" off
+            fi
+            ;;
+        AAFTER)
+            [ "$(get_awaiting_enabled)" = "on" ] || return 0
+            prompt_ms_value "@session-dock-awaiting-after" "$(get_awaiting_after)" \
+                "${SIDEBAR_AWAITING_AFTER_MS_MIN:-1000}" "${SIDEBAR_AWAITING_AFTER_MS_MAX:-300000}" "표시까지(ms)"
             ;;
         REST)
             [ "$IME_BACKEND" != "none" ] && [ "$IME_SETTING" != "off" ] || return 0
@@ -352,7 +448,13 @@ while IFS= read -rsn1 key; do
             move_cursor 1
             draw_picker
             ;;
-        " "|""|$'\n'|$'\r')
+        " ")
+            key_is_enter=false
+            apply_selection
+            draw_picker
+            ;;
+        ""|$'\n'|$'\r')
+            key_is_enter=true
             apply_selection
             draw_picker
             ;;

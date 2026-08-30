@@ -12,6 +12,7 @@
 - **열기·저장·이동·선택**: `Prefix + s`로 세션 도크를 열고 닫습니다. 행을 선택해 `Enter`로 즉시 세션을 이동하며, 세션 생성·이름 변경·삭제/아카이브와 아카이브 복원을 도크 안에서 처리합니다.
 - **무깜빡임 전환**: 물리 페인을 옮기지 않고 각 윈도우의 Presenter를 통해 Native `switch-client`를 수행합니다.
 - **Gradient 효과**: 백그라운드 AI CLI의 활동 상태를 감지해 세션 행에 실시간 파형 gradient로 표시합니다. 선택한 세션만이 아니라 다른 세션의 활동도 확인할 수 있습니다. `Prefix + S`에서 켜고 끄거나 파형 주기(ms)를 지정할 수 있습니다.
+- **미확인 정지(Awaiting) 표시**: AI가 멈췄는데 아직 가보지 않은 세션에 `●` 가 붙고 헤더에 개수가 표시됩니다. 세션을 하나씩 열어보지 않고도 끝난 작업을 찾을 수 있습니다. "당신 차례"라는 뜻이지 "성공했다"는 뜻은 아닙니다.
 - **Subpane 스택**: 도크 옆 터미널 Subpane을 열고 닫고(`s`), 최대 3개까지 쌓으며(`Prefix + S`), 상단/하단을 전환(`p`)합니다. 각 슬롯의 높이는 세션 전환 후에도 유지됩니다.
 - **아카이브**: 셸 히스토리(`$HISTFILE`)를 오염시키지 않고 세션을 스냅샷으로 저장하고 일괄 복원합니다.
 
@@ -52,6 +53,9 @@ set -g @session-dock-subpane-count '1'    # [옵션] 도크 옆에 쌓을 터미
 set -g @session-dock-subpane-position 'bottom' # [옵션] 서브페인 스택 위치: bottom | top
 set -g @session-dock-gradient 'on'        # [옵션] AI CLI가 도는 세션 행의 활동 그라디언트: on | off
 set -g @session-dock-gradient-speed '1000' # [옵션] 파형 한 주기(ms), 400~4000 (한 주기 = 24프레임)
+set -g @session-dock-awaiting 'on'         # [옵션] AI가 멈췄고 아직 안 가본 세션에 ● 표시: on | off
+set -g @session-dock-awaiting-blink 'always' # [옵션] 그 표시의 깜빡임: always | off | ms (상태 자체는 시간으로 사라지지 않음)
+set -g @session-dock-awaiting-after '30000'  # [옵션] 멈춘 뒤 표시까지의 시간 ms (1000~300000)
 
 # 위 옵션은 모두 Prefix + S 팝업에서도 변경할 수 있습니다.
 # 키 재정의: @session-dock-theme-key, @session-dock-help-key,

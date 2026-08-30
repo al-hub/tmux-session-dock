@@ -36,8 +36,28 @@ The single per-server process (`--observe`) that samples every session's tracked
 _Avoid_: Fingerprint tracker, gradient detector, per-presenter observer
 
 **AI Activity State**:
-The asynchronous running, idle, or gone status of a session's tracked AI CLI, consumed by the presenter to represent work in progress.
+The status of a session's tracked AI CLI, consumed by the presenter to decide what the row shows. Exactly four: **Working**, **Awaiting**, **Idle**, **Absent**.
 _Avoid_: Animation state, waiting state
+
+**Working**:
+A session whose tracked AI CLI is changing its visible output. The only state the gradient animates.
+_Avoid_: Busy, active
+
+**Awaiting**:
+A session whose tracked AI CLI stopped changing its output long enough to be worth reporting, and that no client has visited since. It says the user is the one who moves this session forward - never that the work finished, which cannot be observed: a session blocked on an approval prompt is Awaiting too. Announced once; visiting the session or the AI moving again ends it, and no clock does.
+_Avoid_: Done, Finished, Complete, Waiting
+
+**Idle**:
+A session whose AI stopped and that has either been visited since, or has not been quiet long enough to report. Both render as nothing, so the two readings never need distinguishing on screen.
+_Avoid_: Quiet, stopped
+
+**Absent**:
+A session with no tracked AI CLI - one that never ran one, or whose AI exited. The wire value is `gone`.
+_Avoid_: Gone, dead, missing
+
+**Mark Column**:
+The second of the two columns to the left of a session name. It carries `*` for the session a client is on and `●` for an Awaiting session. **These can never both apply**, because being on a session is exactly what ends Awaiting; the single column depends on that. Narrowing acknowledgement to pane focus would break it and force the mark elsewhere.
+_Avoid_: Badge, indicator column
 
 **AI Activity Intensity**:
 A future measure of how continuously a running AI CLI changes, distinct from its running, idle, or gone state. Not implemented.

@@ -83,6 +83,15 @@ SIDEBAR_BUSY_SECONDS="${TMUX_SESSION_SIDEBAR_BUSY_SECONDS:-10}"
 SIDEBAR_ANIMATION_ENABLED="${TMUX_SESSION_SIDEBAR_ANIMATION_ENABLED:-true}"
 SIDEBAR_GRADIENT_OPTION="@session-dock-gradient"
 SIDEBAR_GRADIENT_SPEED_OPTION="@session-dock-gradient-speed"
+# Awaiting: a session whose AI CLI stopped and that the user has not visited
+# since. @session-dock-awaiting hides the mark, @session-dock-awaiting-blink
+# limits the blink, @session-dock-awaiting-after sets how long a stop must last
+# before it is worth reporting. All three are re-read once a second.
+SIDEBAR_AWAITING_ENABLED="${TMUX_SESSION_SIDEBAR_AWAITING_ENABLED:-true}"
+SIDEBAR_AWAITING_AFTER_MS="${TMUX_SESSION_SIDEBAR_AWAITING_AFTER_MS:-30000}"
+SIDEBAR_AWAITING_OPTION="@session-dock-awaiting"
+SIDEBAR_AWAITING_BLINK_OPTION="@session-dock-awaiting-blink"
+SIDEBAR_AWAITING_AFTER_OPTION="@session-dock-awaiting-after"
 # Animate the gradient in presenters whose session has no attached client too
 # (nobody sees those frames; only useful for headless captures such as tests).
 SIDEBAR_ANIMATE_DETACHED="${TMUX_SESSION_SIDEBAR_ANIMATE_DETACHED:-false}"
@@ -317,8 +326,10 @@ declare -A cached_pane_activity=()
 declare -A cached_pane_pid=()
 declare -A cached_pane_command=()
 declare -A previous_session_animate=()
+declare -A previous_session_awaiting=()
 declare -A _session_name_fit_cache=()
 declare -a session_animate=()
+declare -a session_awaiting=()
 declare -a session_animation_seed=()
 declare -a session_animation_refresh_indexes=()
 declare -a history_files=()
@@ -4244,8 +4255,10 @@ collect_sessions()
     fi
     observer_last_sample_epoch="$current_epoch_second"
     previous_session_animate=()
+    previous_session_awaiting=()
     for index in "${!session_names[@]}"; do
         previous_session_animate["${session_names[$index]}"]="${session_animate[$index]}"
+        previous_session_awaiting["${session_names[$index]}"]="${session_awaiting[$index]:-false}"
     done
     declare -A previous_session_ai_direct_pane_id=()
     local s_name prev_pane_id curr_pane_id session_switch_occurred resize_occurred client_switch_occurred pane_generation_changed
@@ -4405,6 +4418,7 @@ EOF
         session_status=()
         session_cli_state=()
         session_animate=()
+        session_awaiting=()
         session_animation_seed=()
         session_animation_refresh_indexes=()
         session_activity_age_cache=()
@@ -4709,9 +4723,13 @@ EOF
                 [ "${_SIDEBAR_ACTIVITY_LAST_CHANGED_AT[$name]+set}" = set ]; then
                 _SIDEBAR_ACTIVITY_LAST_CHANGED_AT["$name"]="$current_epoch_second"
             fi
+            # await_after 0: a presenter observing on its own must not publish an
+            # awaiting verdict, because each window keeps its own transition
+            # memory and they would contradict each other on screen.
             sidebar_domain_activity_observe cli_state_value observer_state_changed \
                 "$name" "$curr_pane_id" "$observer_pid" \
-                "$observer_alive" "$observer_observation" "$current_epoch_second" "$SIDEBAR_BUSY_SECONDS"
+                "$observer_alive" "$observer_observation" "$current_epoch_second" "$SIDEBAR_BUSY_SECONDS" \
+                0 false
             # Presenters have independent observer clocks. Publish the fingerprint
             # that reached a terminal state and honor it only when the local pane
             # still has that exact fingerprint. A later AI redraw therefore cannot
@@ -4735,6 +4753,8 @@ EOF
         fi
         animate_value=false
         [ "$cli_state_value" = running ] && animate_value=true
+        awaiting_value=false
+        [ "$cli_state_value" = awaiting ] && awaiting_value=true
         cached_session_cli_state["$name"]="$cli_state_value"
         if [ "${TMUX_SESSION_LAUNCHER_DEBUG:-0}" = "1" ]; then
             debug_log "state session=$name fp=$ai_fingerprint_value state=$cli_state_value animate=$animate_value changed=$observer_state_changed"
@@ -4771,6 +4791,7 @@ EOF
             session_cli_state[$index]="$cli_state_value"
             session_animation_seed[$index]="$animation_seed_value"
             session_animate[$index]="$animate_value"
+            session_awaiting[$index]="$awaiting_value"
         else
             session_names+=("$name")
             session_created+=("$created")
@@ -4778,10 +4799,22 @@ EOF
             session_cli_state+=("$cli_state_value")
             session_animation_seed+=("$animation_seed_value")
             session_animate+=("$animate_value")
+            session_awaiting+=("$awaiting_value")
             cached_session_row_index["$name"]="$index"
         fi
         session_ai_fingerprint["$name"]="$ai_fingerprint_value"
-        if [ "${previous_session_animate[$name]:-}" != "$animate_value" ]; then
+        if [ "$awaiting_value" = true ]; then
+            [ -n "${session_awaiting_since[$name]:-}" ] ||
+                session_awaiting_since["$name"]="${EPOCHSECONDS:-$SECONDS}"
+        else
+            unset 'session_awaiting_since[$name]'
+            unset 'session_awaiting_blink_done[$name]'
+        fi
+        # An idle -> awaiting move leaves animate false on both sides, so the
+        # animate comparison alone would never mark the row dirty and the mark
+        # would never be painted.
+        if [ "${previous_session_animate[$name]:-}" != "$animate_value" ] ||
+            [ "${previous_session_awaiting[$name]:-}" != "$awaiting_value" ]; then
             session_animation_refresh_indexes+=("$index")
         fi
         if [ "$row_cache_reusable" != true ]; then
@@ -4908,20 +4941,39 @@ row_is_visible()
     [ "$index" -ge "$scroll_offset" ] && [ "$index" -lt $((scroll_offset + visible_rows)) ]
 }
 
+# Column 1 is the cursor, column 2 says something about the session: `*` for the
+# one the client is on, `●` for one that stopped and has not been visited since.
+# The two can never both apply - being on the session is what clears awaiting -
+# so one column carries both. The result is always exactly two columns wide;
+# row_name_cell_width and the animated-name overwrite (which starts at column 4)
+# both depend on that.
 row_mark_value()
 {
     index="$1"
     name="${session_names[$index]}"
-
-    if [ "$index" -eq "$selected_index" ] && [ "$name" = "$current_session" ]; then
-        row_mark_result='>*'
-    elif [ "$index" -eq "$selected_index" ]; then
-        row_mark_result='> '
-    elif [ "$name" = "$current_session" ]; then
-        row_mark_result=' *'
-    else
-        row_mark_result='  '
+    local status_mark=' ' since elapsed_ms
+    if [ "$name" = "$current_session" ]; then
+        status_mark='*'
+    elif [ "$sidebar_awaiting_enabled" = true ] && [ "${session_awaiting[$index]:-false}" = true ]; then
+        status_mark="$SIDEBAR_AWAITING_GLYPH"
+        # Blink is the terminal's job (SGR 5): one escape, no frame loop, no
+        # wakeup. `always` never expires; a millisecond budget expires against
+        # the moment this presenter first saw the session waiting.
+        if [ "$sidebar_awaiting_blink_ms" -ne 0 ]; then
+            since="${session_awaiting_since[$name]:-0}"
+            elapsed_ms=$(( (${EPOCHSECONDS:-$SECONDS} - since) * 1000 ))
+            if [ "$sidebar_awaiting_blink_ms" -lt 0 ] || [ "$elapsed_ms" -lt "$sidebar_awaiting_blink_ms" ]; then
+                status_mark="${SIDEBAR_AWAITING_BLINK_ON}${SIDEBAR_AWAITING_GLYPH}${SIDEBAR_AWAITING_BLINK_OFF}"
+            fi
+        fi
     fi
+
+    if [ "$index" -eq "$selected_index" ]; then
+        row_mark_result=">$status_mark"
+        return 0
+    fi
+    row_mark_result=" $status_mark"
+    return 0
 }
 
 session_visible_rows()
@@ -4956,12 +5008,55 @@ history_visible_rows()
     printf '%s\n' "$rows"
 }
 
+# How many visible-or-not sessions are waiting for the user. The list scrolls
+# once there are more sessions than rows, so a per-row mark alone cannot answer
+# "is anything waiting for me?"; the header can.
+sidebar_awaiting_count()
+{
+    local index count=0
+    [ "$sidebar_awaiting_enabled" = true ] || { sidebar_awaiting_count_result=0; return 0; }
+    for index in "${!session_names[@]}"; do
+        [ "${session_awaiting[$index]:-false}" = true ] && count=$((count + 1))
+    done
+    sidebar_awaiting_count_result="$count"
+}
+sidebar_awaiting_count_result=0
+sidebar_awaiting_count_rendered=-1
+
+# Rows whose blink budget elapsed since the last check; queues them for repaint
+# and reports whether there were any. Nothing to do when the blink never
+# expires (`always`) or is off, which are the defaults and the cheap cases.
+declare -A session_awaiting_blink_done=()
+sidebar_awaiting_blink_expired()
+{
+    [ "$sidebar_awaiting_enabled" = true ] || return 1
+    [ "$sidebar_awaiting_blink_ms" -gt 0 ] || return 1
+    local index name since now="${EPOCHSECONDS:-$SECONDS}" found=1
+    for index in "${!session_names[@]}"; do
+        name="${session_names[$index]}"
+        [ "${session_awaiting[$index]:-false}" = true ] || continue
+        [ -n "${session_awaiting_blink_done[$name]:-}" ] && continue
+        since="${session_awaiting_since[$name]:-$now}"
+        if [ $(( (now - since) * 1000 )) -ge "$sidebar_awaiting_blink_ms" ]; then
+            session_awaiting_blink_done["$name"]=1
+            row_is_visible "$index" && session_animation_refresh_indexes+=("$index")
+            found=0
+        fi
+    done
+    return "$found"
+}
+
 render_header()
 {
     width="${cached_pane_width:-35}"
+    local text='sessions'
+    sidebar_awaiting_count
+    [ "$sidebar_awaiting_count_result" -gt 0 ] &&
+        text="sessions · ${sidebar_awaiting_count_result} awaiting"
+    sidebar_awaiting_count_rendered="$sidebar_awaiting_count_result"
     move_cursor 1 1
     clear_line
-    printf '%s' "$(truncate_text 'sessions' "$width")"
+    printf '%s' "$(truncate_text "$text" "$width")"
 }
 
 render_footer()
@@ -5418,8 +5513,48 @@ sidebar_gradient_apply()
 sidebar_gradient_refresh()
 {
     local out
-    out="$(tmux display-message -p "#{$SIDEBAR_GRADIENT_OPTION}|#{$SIDEBAR_GRADIENT_SPEED_OPTION}" 2>/dev/null || true)"
-    sidebar_gradient_apply "${out%%|*}" "${out#*|}"
+    local -a opt=()
+    out="$(tmux display-message -p "#{$SIDEBAR_GRADIENT_OPTION}|#{$SIDEBAR_GRADIENT_SPEED_OPTION}|#{$SIDEBAR_AWAITING_OPTION}|#{$SIDEBAR_AWAITING_BLINK_OPTION}|#{$SIDEBAR_AWAITING_AFTER_OPTION}" 2>/dev/null || true)"
+    IFS='|' read -r -a opt <<< "$out"
+    sidebar_gradient_apply "${opt[0]:-}" "${opt[1]:-}"
+    sidebar_awaiting_apply "${opt[2]:-}" "${opt[3]:-}" "${opt[4]:-}"
+}
+
+SIDEBAR_AWAITING_GLYPH=$'\u25cf'
+SIDEBAR_AWAITING_BLINK_ON=$'\033[5m'
+SIDEBAR_AWAITING_BLINK_OFF=$'\033[25m'
+
+# Effective awaiting configuration; replaced from the tmux options on every
+# re-read. blink_ms: -1 always, 0 off, >0 a budget in milliseconds.
+sidebar_awaiting_enabled="$SIDEBAR_AWAITING_ENABLED"
+sidebar_awaiting_blink_ms=-1
+sidebar_awaiting_after_ms="$SIDEBAR_AWAITING_AFTER_MS"
+declare -A session_awaiting_since=()
+
+sidebar_awaiting_apply()
+{
+    local raw_enabled="${1:-}" raw_blink="${2:-}" raw_after="${3:-}" enabled blink_ms after_ms
+    case "$raw_enabled" in
+        on|true|1)   enabled=true ;;
+        off|false|0) enabled=false ;;
+        *)           enabled="$SIDEBAR_AWAITING_ENABLED" ;;
+    esac
+    case "$raw_blink" in
+        off|false|0)   blink_ms=0 ;;
+        always|true|'') blink_ms=-1 ;;
+        *[!0-9]*)      blink_ms=-1 ;;
+        *)             blink_ms="$raw_blink" ;;
+    esac
+    sidebar_domain_activity_await_after "${raw_after:-$SIDEBAR_AWAITING_AFTER_MS}"
+    after_ms="$sidebar_awaiting_after_ms_result"
+    if [ "$enabled" = "$sidebar_awaiting_enabled" ] && [ "$blink_ms" = "$sidebar_awaiting_blink_ms" ] &&
+        [ "$after_ms" = "$sidebar_awaiting_after_ms" ]; then
+        return 0
+    fi
+    sidebar_awaiting_enabled="$enabled"
+    sidebar_awaiting_blink_ms="$blink_ms"
+    sidebar_awaiting_after_ms="$after_ms"
+    trace_event "awaiting.config enabled=$enabled blink_ms=$blink_ms after_ms=$after_ms"
 }
 
 sidebar_animation_visible()
@@ -5696,6 +5831,8 @@ run_ai_observer()
     local -A ai_pane_for_session=() observed_sessions=()
     local -A probed_pane_pid=() probed_ai_pane=()
     local name pane fp alive obs_state obs_changed body line idle_since="" shell_probe_epoch=0
+    local -A attached_sessions=()
+    local await_after_seconds=0
     state_path="$(ai_observer_state_path)"
     lock_dir="${state_path}.lock"
     interval="$SIDEBAR_AI_OBSERVATION_SECONDS"
@@ -5791,6 +5928,18 @@ run_ai_observer()
         topo_hash="$(printf '%s\n' "$panes_snapshot" | awk -F '\t' '{ print $1 "\t" $2 "\t" $4 "\t" $6 }' | cksum | awk '{ print $1 ":" $2 }')"
         clients_line="$(tmux list-clients -F '#{?client_control_mode,,#{client_session}}' 2>/dev/null | tr '\n' ' ')"
 
+        # The same client list decides acknowledgement: a session someone is
+        # sitting in has nothing to announce. No extra observation is made for
+        # this - clients_line is already collected for the presenters.
+        attached_sessions=()
+        for line in $clients_line; do
+            [ -n "$line" ] && attached_sessions["$line"]=1
+        done
+        sidebar_domain_activity_await_after \
+            "$(tmux show-option -gqv "$SIDEBAR_AWAITING_AFTER_OPTION" 2>/dev/null || printf '%s' "$SIDEBAR_AWAITING_AFTER_MS")"
+        await_after_seconds=$(( sidebar_awaiting_after_ms_result / 1000 ))
+        [ "$await_after_seconds" -lt 1 ] && await_after_seconds=1
+
         body=""
         for name in "${!observed_sessions[@]}"; do
             pane="${ai_pane_for_session[$name]:-}"
@@ -5804,7 +5953,9 @@ run_ai_observer()
             local pane_pid_value=""
             [ -n "$pane" ] && pane_pid_value="${cached_pane_pid[$pane]:-}"
             sidebar_domain_activity_observe obs_state obs_changed \
-                "$name" "$pane" "$pane_pid_value" "$alive" "$fp" "$now" "$SIDEBAR_BUSY_SECONDS"
+                "$name" "$pane" "$pane_pid_value" "$alive" "$fp" "$now" "$SIDEBAR_BUSY_SECONDS" \
+                "$await_after_seconds" \
+                "$([ -n "${attached_sessions[$name]:-}" ] && printf true || printf false)"
             [ "$obs_changed" = true ] && trace_event "ai-observer.state session=$name state=$obs_state pane=${pane:-none}"
             body+="${name}"$'\t'"${obs_state}"$'\t'"${pane}"$'\t'"${fp}"$'\n'
         done
@@ -6059,13 +6210,16 @@ sidebar_tick_prefetch()
 {
     local display
     sidebar_env_fetch_all "${TMUX_PANE:-${SELF_PANE:-}}" \
-        "#{session_name}|#{$SIDEBAR_GRADIENT_OPTION}|#{$SIDEBAR_GRADIENT_SPEED_OPTION}"
+        "#{session_name}|#{$SIDEBAR_GRADIENT_OPTION}|#{$SIDEBAR_GRADIENT_SPEED_OPTION}|#{$SIDEBAR_AWAITING_OPTION}|#{$SIDEBAR_AWAITING_BLINK_OPTION}|#{$SIDEBAR_AWAITING_AFTER_OPTION}"
     display="${SIDEBAR_ENV_MANY[__display]:-}"
-    _tick_session_name="${display%%|*}"
-    # The gradient options ride along in the same format: re-reading them costs
-    # no extra round trip, so a popup change lands within a second.
-    display="${display#*|}"
-    sidebar_gradient_apply "${display%%|*}" "${display##*|}"
+    # Every display option rides in the one format string the tick already
+    # sends, so re-reading them costs no extra round trip and a popup change
+    # lands within a second.
+    local -a opt=()
+    IFS='|' read -r -a opt <<< "$display"
+    _tick_session_name="${opt[0]:-}"
+    sidebar_gradient_apply "${opt[1]:-}" "${opt[2]:-}"
+    sidebar_awaiting_apply "${opt[3]:-}" "${opt[4]:-}" "${opt[5]:-}"
     _tick_prefetch_iter="$_tui_loop_iter"
 }
 
@@ -6321,6 +6475,10 @@ render_animation_state_changes()
         fi
     done
     [ -n "$animation_buffer" ] && printf '%s' "$animation_buffer"
+    # render_full owns the header, and the dirty-row path never calls it, so the
+    # count would go stale exactly when a session starts or stops waiting.
+    sidebar_awaiting_count
+    [ "$sidebar_awaiting_count_result" != "$sidebar_awaiting_count_rendered" ] && render_header
     if [ -n "$metrics_render_start" ]; then
         metrics_render_end="$(metrics_now_us)"
         animation_metrics_state_renders=$((animation_metrics_state_renders + 1))
@@ -8292,6 +8450,7 @@ tui_new_session()
     session_animation_seed_val "${session_name}:${created}"
     session_animation_seed+=("${session_animation_seed_result:-0}")
     session_animate+=("false")
+    session_awaiting+=("false")
     local new_idx=$(( ${#session_names[@]} - 1 ))
     cached_session_row_index["$session_name"]="$new_idx"
     selected_session="$session_name"
@@ -8776,6 +8935,11 @@ run_tui()
             # flags published *after* it, or a marker that lands in between
             # waits a whole cycle.
             _tick_prefetch_iter=-1
+            # A blink budget that ran out has to repaint the row to drop the
+            # escape.  Checking it here costs nothing: this tick already runs.
+            if sidebar_awaiting_blink_expired; then
+                render_animation_state_changes
+            fi
         fi
         if [ -n "$METRICS_FILE" ]; then
             maintenance_metrics_loops=$((maintenance_metrics_loops + 1))
@@ -9005,7 +9169,7 @@ run_tui()
                 ;;
             S|config-subpane)
                 trace_event "action.begin type=config-subpane"
-                tmux display-popup -E -w 70% -h 60% "$HOME/.local/bin/tmux-subpane-picker" 2>/dev/null || tmux display-popup -E -w 70% -h 60% "$LAUNCHER_DIR/tmux-subpane-picker" 2>/dev/null || true
+                tmux display-popup -E -w 70% -h 75% "$HOME/.local/bin/tmux-subpane-picker" 2>/dev/null || tmux display-popup -E -w 70% -h 75% "$LAUNCHER_DIR/tmux-subpane-picker" 2>/dev/null || true
                 request_full_render subpane-config-return
                 ;;
             p|P|swap-subpane-position)

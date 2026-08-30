@@ -21,6 +21,7 @@
 - **Open, save, move, and select**: Toggle the dock with `Prefix + s`, select a row, and press `Enter` to switch sessions immediately. Create, rename, archive/delete, and restore sessions from the dock.
 - **Zero-flicker switching**: Window-Local Presenters use native `switch-client` instead of physically moving panes.
 - **Gradient activity effect**: Detects background AI CLI activity and renders it as a live waveform gradient on session rows, including rows for non-selected sessions. Turn it off or set the wave speed in milliseconds from `Prefix + S`.
+- **Awaiting mark**: A session whose AI stopped and that you have not visited since gets a `●` beside its name, and the header counts them, so a finished run is visible without opening each session in turn. It says your attention is wanted, not that the work succeeded.
 - **Subpane stack**: Open/close a terminal subpane beside the dock (`s`), stack up to three of them (`Prefix + S`), swap the stack Top/Bottom (`p`); each slot keeps its own height across session switches.
 - **Archive**: Snapshot and batch-restore sessions without polluting `$HISTFILE`.
 
@@ -61,6 +62,9 @@ set -g @session-dock-subpane-count '1'    # [Optional] Terminal subpanes stacked
 set -g @session-dock-subpane-position 'bottom' # [Optional] Stack the subpanes below or above the dock: bottom | top
 set -g @session-dock-gradient 'on'        # [Optional] Activity gradient on rows whose AI CLI is working: on | off
 set -g @session-dock-gradient-speed '1000' # [Optional] One wave cycle in milliseconds, 400-4000 (24 frames per cycle)
+set -g @session-dock-awaiting 'on'         # [Optional] Mark sessions whose AI stopped and that you have not visited: on | off
+set -g @session-dock-awaiting-blink 'always' # [Optional] Blink that mark: always | off | milliseconds (the state itself never times out)
+set -g @session-dock-awaiting-after '30000'  # [Optional] How long a session must be quiet before it is marked, in ms (1000-300000)
 
 # Every option above is also editable from the Prefix + S popup.
 # Key overrides: @session-dock-theme-key, @session-dock-help-key,
