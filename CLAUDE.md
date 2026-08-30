@@ -28,7 +28,7 @@ scripts/tmux-{subpane,theme}-picker, tmux-help-viewer, tmux-command-palette
 scripts/tmux-session-dock-ime  small fast-path helper for the IME focus hooks
 dist/tmux-session-dock         generated single-file bundle, COMMITTED
 session-dock.tmux              TPM entry: reads options, installs keybindings
-tests/                         131 files; tests/ci.list is the CI set (129)
+tests/                         150 files; tests/ci.list is the CI set (137)
 themes/                        59 theme .conf files (drop-in, no code change)
 ```
 

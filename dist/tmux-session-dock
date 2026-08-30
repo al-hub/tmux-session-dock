@@ -5800,14 +5800,34 @@ sidebar_selection_sync_ack_ready()
 # glyph in any combination, so they are matched as a bounded run of the
 # characters row_mark_value is allowed to emit. Widen these together with any
 # change to render_header or row_mark_value.
+#
+# The name cell is narrower than the dock (19 columns of a 34-column dock), and
+# format_session_name fits the name into it, so a longer name is only ever
+# drawn as a prefix and an ellipsis. Demanding the whole name would leave every
+# session whose name outgrows the cell impossible to switch to - the client
+# moves and the switch then aborts as "sidebar content is not ready". So a row
+# holding a prefix of the name followed by the ellipsis counts as that session's
+# row. Two names sharing a prefix therefore share an accepted row; the readiness
+# wait also requires the target presenter's own handover flag to name this
+# session, which is what actually identifies the frame.
 sidebar_content_matches()
 {
-    local content="$1" session_name_value="$2" nl=$'\n' re_name mark_class
+    local content="$1" session_name_value="$2" nl=$'\n' re_name mark_class line cell
     re_name="$(printf '%s' "$session_name_value" | sed 's/[][\.*^$/+?(){}|]/\\&/g')"
     mark_class="[>*${SIDEBAR_AWAITING_GLYPH}[:space:]]"
     [[ "$nl$content$nl" =~ $nl[[:space:]]*sessions[[:space:]] ]] || return 1
-    [[ "$content" == *"$session_name_value"* ]] || return 1
-    [[ "$nl$content$nl" =~ $nl${mark_class}{0,2}[[:space:]]+$re_name([[:space:]]|$nl) ]]
+    if [[ "$content" == *"$session_name_value"* ]] &&
+        [[ "$nl$content$nl" =~ $nl${mark_class}{0,2}[[:space:]]+$re_name([[:space:]]|$nl) ]]; then
+        return 0
+    fi
+    while IFS= read -r line; do
+        case "$line" in *"$SIDEBAR_NAME_ELLIPSIS"*) ;; *) continue ;; esac
+        [[ "$nl$line$nl" =~ $nl${mark_class}{0,2}[[:space:]]+([^[:space:]].*)$ ]] || continue
+        cell="${BASH_REMATCH[1]%%"$SIDEBAR_NAME_ELLIPSIS"*}"
+        [ -n "$cell" ] || continue
+        [ "${session_name_value#"$cell"}" != "$session_name_value" ] && return 0
+    done <<< "$content"
+    return 1
 }
 
 sidebar_content_ready()
@@ -7919,10 +7939,10 @@ format_session_name()
 
         if [ "$total_cell_width" -gt "$width" ] && [ "$width" -gt 1 ]; then
             if declare -f sidebar_domain_animation_fit_cell_width >/dev/null 2>&1; then
-                text="$(sidebar_domain_animation_fit_cell_width "$name" "$((width - 1))")…"
+                text="$(sidebar_domain_animation_fit_cell_width "$name" "$((width - 1))")$SIDEBAR_NAME_ELLIPSIS"
                 text_visual_width="$(sidebar_domain_animation_measure_cell_width "$text")"
             else
-                text="${name:0:$((width - 1))}…"
+                text="${name:0:$((width - 1))}$SIDEBAR_NAME_ELLIPSIS"
                 text_visual_width="${#text}"
             fi
         else
@@ -8212,6 +8232,10 @@ sidebar_gradient_refresh()
 }
 
 SIDEBAR_AWAITING_GLYPH=$'\u25cf'
+# What format_session_name puts at the end of a name it had to fit into the
+# row's name cell. sidebar_content_matches reads it back to recognise a
+# truncated row, so the two must name the same character.
+SIDEBAR_NAME_ELLIPSIS=$'\u2026'
 # The blink is drawn here rather than handed to the terminal as SGR 5: too many
 # terminals (Windows Terminal among them) accept the escape and render nothing,
 # which turns the mark into a silent dot. Drawing it costs no tmux call and no

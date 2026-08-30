@@ -71,6 +71,7 @@ tmux-single-sidebar/test-missing-session-switch-graceful.sh
 tmux-single-sidebar/test-find-global-pane-regression.sh
 tmux-single-sidebar/test-mouse-width-resize-switch.sh
 tmux-single-sidebar/test-long-session-name-switching-flicker-detect.sh
+tmux-single-sidebar/test-long-session-name-switch-contract.sh
 tmux-single-sidebar/test-first-enter-warm-session-flicker-detect.sh
 tmux-single-sidebar/test-incremental-session-discovery-stale-footer-detect.sh
 tmux-single-sidebar/test-sidebar-ghost-row-stale-footer-detect.sh
