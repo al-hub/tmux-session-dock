@@ -2007,7 +2007,7 @@ provision_sidebar_window()
         pane_dead="${pane_state%%|*}"
         if [ "$pane_dead" = 1 ]; then
             pane_path="${pane_state#*|}"
-            [ -n "$pane_path" ] || pane_path="$REPO_ROOT"
+            [ -n "$pane_path" ] || pane_path="${REPO_ROOT:-${LAUNCHER_DIR:-$HOME}}"
             tmux set-option -wq -t "$window_id" "$SIDEBAR_WINDOW_READY_OPTION" 0 2>/dev/null || true
             trace_event "sidebar.lifecycle.respawn.begin window=$window_id pane=$existing_pane path=$pane_path"
             if tmux respawn-pane -k -t "$existing_pane" -c "$pane_path" "$SCRIPT_PATH --sidebar" 2>/dev/null; then
@@ -2145,6 +2145,145 @@ wait_for_sidebar_window_ready()
     return 1
 }
 
+# ------------------------------------------------------------------------------
+# Switch recovery. When Enter cannot land on a session because its sidebar is
+# unusable (dead presenter pane, never became ready, provisioning failed) the
+# user gets a popup with the diagnosis and a choice instead of a silent abort.
+#   @session-dock-switch-recovery  popup (default) | auto | off
+#     popup  show the diagnosis, let the user pick: respawn+retry, switch
+#            without the sidebar, cancel, save the diagnosis
+#     auto   respawn the sidebar and retry silently
+#     off    abort as before (footer message only)
+# ------------------------------------------------------------------------------
+SIDEBAR_TARGET_FAILURE=""
+SWITCH_RECOVERY_RETRY=0
+
+switch_recovery_mode()
+{
+    local mode
+    mode="$(sidebar_tmux_cmd show-option -gqv "@session-dock-switch-recovery" 2>/dev/null || true)"
+    case "$mode" in
+        auto|off|popup) printf '%s\n' "$mode" ;;
+        *) printf 'popup\n' ;;
+    esac
+}
+
+switch_recovery_diagnosis()
+{
+    # $1 session $2 window $3 reason -> writes a human readable report to stdout
+    local session_name_value="$1" window_id="$2" reason="$3"
+    local pane_id state dead status pid ready lease alive="no" started="" trace_file
+    pane_id="$(sidebar_window_pane "$window_id" 2>/dev/null || true)"
+    if [ -n "$pane_id" ]; then
+        state="$(sidebar_tmux_cmd display-message -p -t "$pane_id" '#{pane_dead}|#{pane_dead_status}|#{pane_pid}|#{t:pane_start_time}' 2>/dev/null || true)"
+        IFS='|' read -r dead status pid started <<< "$state"
+        [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && alive="yes"
+    fi
+    ready="$(sidebar_tmux_cmd show-option -wqv -t "$window_id" "$SIDEBAR_WINDOW_READY_OPTION" 2>/dev/null || true)"
+    lease="$(sidebar_tmux_cmd show-option -gqv "${SUBPANE_LEASE_OPTION:-@dotfiles_subpane_lease_window}" 2>/dev/null || true)"
+    printf 'target session : %s (window %s)\n' "$session_name_value" "$window_id"
+    printf 'failure        : %s\n' "$reason"
+    printf 'sidebar pane   : %s\n' "${pane_id:-none}"
+    if [ -n "$pane_id" ]; then
+        printf '  pane_dead    : %s%s\n' "${dead:-?}" "$([ "${dead:-0}" = 1 ] && printf ' (exit status %s%s)' "${status:-?}" "$([ "${status:-}" = 143 ] && printf ', SIGTERM' || { [ "${status:-}" = 137 ] && printf ', SIGKILL'; })" )"
+        printf '  presenter pid: %s (process alive: %s)\n' "${pid:-?}" "$alive"
+        [ -n "$started" ] && printf '  pane started : %s\n' "$started"
+    fi
+    printf 'window ready   : %s\n' "${ready:-unset}"
+    printf 'subpane lease  : %s\n' "${lease:-none}"
+    printf 'dock version   : %s\n' "$(grep -m1 '^VERSION=' "$SCRIPT_PATH" 2>/dev/null | cut -d'"' -f2 || echo '?')"
+    trace_file="${TMUX_SESSION_LAUNCHER_TRACE_FILE:-/tmp/tmux-session-launcher-trace.log}"
+    if [ "${TMUX_SESSION_LAUNCHER_TRACE:-0}" = 1 ] && [ -r "$trace_file" ]; then
+        printf '\nrecent trace (%s):\n' "$trace_file"
+        grep -a "switch\.\|sidebar.target\|sidebar.lifecycle" "$trace_file" 2>/dev/null | tail -n 10 | cut -c1-160 | sed 's/^/  /'
+    else
+        printf '\n(no trace: start the sidebar with TMUX_SESSION_LAUNCHER_TRACE=1 for event history)\n'
+    fi
+}
+
+# Popup body (runs inside `display-popup -E`). $1 diagnosis file, $2 choice file, $3 session.
+run_switch_recovery_popup()
+{
+    local diag_file="$1" choice_file="$2" session_name_value="$3" key
+    local BOLD=$'\033[1m' DIM=$'\033[2m' RESET=$'\033[0m' RED=$'\033[38;5;203m' YELLOW=$'\033[38;5;220m' CYAN=$'\033[38;5;51m' GRAY=$'\033[38;5;244m' EMERALD=$'\033[38;5;48m'
+    printf '\033[?25l'
+    trap 'printf "\033[?25h\033[0m"' EXIT
+    printf '%s' "cancel" > "$choice_file"
+    draw() {
+        clear 2>/dev/null || true
+        printf '%s%s⚠️  세션 전환 실패: %s%s\n\n' "$RED" "$BOLD" "$session_name_value" "$RESET"
+        sed "s/^/  /" "$diag_file" 2>/dev/null
+        printf '\n%s어떻게 진행할까요?%s\n' "$BOLD" "$RESET"
+        printf '  %s[1]%s 사이드바 재기동 후 전환   %s(respawn-pane → 재시도, 권장)%s\n' "$EMERALD$BOLD" "$RESET" "$GRAY" "$RESET"
+        printf '  %s[2]%s 사이드바 없이 전환        %s(switch-client만; 훅이 나중에 복구)%s\n' "$CYAN$BOLD" "$RESET" "$GRAY" "$RESET"
+        printf '  %s[3]%s 취소                      %s(현재 세션 유지)%s\n' "$YELLOW$BOLD" "$RESET" "$GRAY" "$RESET"
+        printf '  %s[4]%s 진단 저장                 %s(~/.local/state/dotfiles/switch-recovery-*.log)%s\n' "$DIM$BOLD" "$RESET" "$GRAY" "$RESET"
+        printf '\n%s키: 1 / 2 / 3 / 4 · Esc,q = 취소 · 이 팝업: @session-dock-switch-recovery popup|auto|off%s\n' "$DIM" "$RESET"
+    }
+    draw
+    while IFS= read -rsn1 key; do
+        case "$key" in
+            1|$'\r'|"") printf 'respawn' > "$choice_file"; return 0 ;;
+            2) printf 'switch-anyway' > "$choice_file"; return 0 ;;
+            3|q|Q|$'\e') printf 'cancel' > "$choice_file"; return 0 ;;
+            4)
+                local out="${XDG_STATE_HOME:-$HOME/.local/state}/dotfiles/switch-recovery-$(date +%Y%m%d-%H%M%S).log"
+                mkdir -p "$(dirname "$out")" 2>/dev/null || true
+                cp "$diag_file" "$out" 2>/dev/null && printf '\n  %s저장됨: %s%s\n' "$EMERALD" "$out" "$RESET"
+                ;;
+        esac
+    done
+    return 0
+}
+
+# Diagnose the failed target and ask the user (popup). Prints the chosen
+# action: respawn | switch-anyway | cancel. Runs with NO transaction held: a
+# popup can stay open for a long time and a presenter that starts meanwhile
+# clears any transition lease older than the stale timeout.
+switch_recovery_prompt()
+{
+    local session_name_value="$1" window_id="$2"
+    local reason="${SIDEBAR_TARGET_FAILURE:-}" action="cancel" diag_file choice_file probe_pane probe_dead
+    if [ -z "$reason" ]; then
+        # ensure_target_sidebar_window ran in a subshell; classify from live state.
+        probe_pane="$(sidebar_window_pane "$window_id" 2>/dev/null || true)"
+        if [ -z "$probe_pane" ]; then
+            reason="no-sidebar-pane"
+        else
+            probe_dead="$(sidebar_tmux_cmd display-message -p -t "$probe_pane" '#{pane_dead}' 2>/dev/null || true)"
+            [ "$probe_dead" = 1 ] && reason="dead-pane" || reason="not-ready"
+        fi
+    fi
+    trace_event "switch.recovery.begin session=$session_name_value window=$window_id reason=$reason mode=popup"
+    diag_file="$(mktemp "${TMPDIR:-/tmp}/dock-switch-recovery.XXXXXX" 2>/dev/null || echo "/tmp/dock-switch-recovery.$$")"
+    choice_file="$diag_file.choice"
+    switch_recovery_diagnosis "$session_name_value" "$window_id" "$reason" > "$diag_file" 2>/dev/null || true
+    trace_event "switch.recovery.popup session=$session_name_value window=$window_id reason=$reason diag=$diag_file"
+    sidebar_tmux_cmd display-popup -E -w 82% -h 70% "$(shell_quote "$SCRIPT_PATH") --switch-recovery-popup $(shell_quote "$diag_file") $(shell_quote "$choice_file") $(shell_quote "$session_name_value")" 2>/dev/null || true
+    action="$(cat "$choice_file" 2>/dev/null || echo cancel)"
+    rm -f "$diag_file" "$choice_file" 2>/dev/null || true
+    trace_event "switch.recovery.choice session=$session_name_value action=$action"
+    printf '%s\n' "$action"
+}
+
+# Respawn (or recreate) the target window's sidebar and wait until it is ready.
+# provision_sidebar_window respawns a dead pane in place.
+switch_recovery_respawn()
+{
+    local window_id="$1" width="${2:-$(sidebar_width)}"
+    local win_clean="${window_id//[^a-zA-Z0-9_]/_}"
+    printf -v "_cache_window_ready_${win_clean}" '0'
+    printf -v "_cache_window_pane_${win_clean}" ''
+    sidebar_tmux_cmd set-option -wq -t "$window_id" "$SIDEBAR_WINDOW_READY_OPTION" 0 2>/dev/null || true
+    provision_sidebar_window "$window_id" "$width" || true
+    if wait_for_sidebar_window_ready "$window_id"; then
+        trace_event "switch.recovery.respawn window=$window_id result=ready"
+        return 0
+    fi
+    trace_event "switch.recovery.respawn window=$window_id result=not-ready"
+    return 1
+}
+
 ensure_target_sidebar_window()
 {
     local session_name_value="$1" window_id="$2" width="${3:-$(sidebar_width)}"
@@ -2184,6 +2323,16 @@ ensure_target_sidebar_window()
             printf '%s\n' "$pane_id"
             return 0
         fi
+        # A dead pane (remain-on-exit shell of a presenter that exited) will
+        # never become ready by waiting; report it at once so the switch can
+        # recover (respawn) instead of burning the provisioning budget.
+        if [ "$pane_dead" = 1 ]; then
+            printf -v "$cache_ready_var" '0'
+            printf -v "$cache_pane_var" ''
+            SIDEBAR_TARGET_FAILURE="dead-pane"
+            trace_event "sidebar.target.ensure.end session=$session_name_value window=$window_id pane=$pane_id result=dead-pane"
+            return 1
+        fi
         # A new session hook can publish the pane metadata before the sidebar
         # process has installed its readiness option. Do not treat that short
         # cold-start interval as a missing target; wait within the existing
@@ -2192,6 +2341,7 @@ ensure_target_sidebar_window()
         wait_for_sidebar_window_ready "$window_id" || {
             printf -v "$cache_ready_var" '0'
             printf -v "$cache_pane_var" ''
+            SIDEBAR_TARGET_FAILURE="not-ready-existing"
             trace_event "sidebar.target.ensure.end session=$session_name_value window=$window_id pane=$pane_id result=not-ready-existing"
             return 1
         }
@@ -2201,12 +2351,14 @@ ensure_target_sidebar_window()
         provision_sidebar_window "$window_id" "$width" || {
             printf -v "$cache_ready_var" '0'
             printf -v "$cache_pane_var" ''
+            SIDEBAR_TARGET_FAILURE="provision-failed"
             trace_event "sidebar.target.ensure.end session=$session_name_value window=$window_id result=provision-failed"
             return 1
         }
         wait_for_sidebar_window_ready "$window_id" || {
             printf -v "$cache_ready_var" '0'
             printf -v "$cache_pane_var" ''
+            SIDEBAR_TARGET_FAILURE="not-ready"
             trace_event "sidebar.target.ensure.end session=$session_name_value window=$window_id result=not-ready"
             return 1
         }
@@ -2215,6 +2367,7 @@ ensure_target_sidebar_window()
     sidebar_window_ready "$window_id" || {
         printf -v "$cache_ready_var" '0'
         printf -v "$cache_pane_var" ''
+        SIDEBAR_TARGET_FAILURE="verify-failed"
         trace_event "sidebar.target.ensure.end session=$session_name_value window=$window_id pane=${pane_id:-none} result=verify-failed"
         return 1
     }
@@ -3019,7 +3172,53 @@ switch_session()
         switch_phase_start_us="$(metrics_now_us)"
     fi
     transition_phase_set ENSURE_TARGET_SIDEBAR "$operation_id"
+    SIDEBAR_TARGET_FAILURE=""
     sidebar_pane="$(ensure_target_sidebar_window "$session_name" "$target_window" "$(sidebar_width)" || true)"
+    if [ -z "$sidebar_pane" ]; then
+        local recovery_mode recovery_action retry_rc=0
+        recovery_mode="$(switch_recovery_mode)"
+        if [ "$recovery_mode" = popup ] && [ "${SWITCH_RECOVERY_RETRY:-0}" != 1 ]; then
+            # Release this transaction while the user decides; the choice
+            # restarts the switch as a fresh transaction.
+            selection_sync_set "$target_window" ""
+            transition_context_finish failed target-sidebar-unavailable "$operation_id"
+            sidebar_operation_set idle "$operation_id"
+            recovery_action="$(switch_recovery_prompt "$session_name" "$target_window")"
+            case "$recovery_action" in
+                respawn)
+                    switch_recovery_respawn "$target_window" "$(sidebar_width)" || true
+                    SWITCH_RECOVERY_RETRY=1
+                    switch_session "$session_name" || retry_rc=$?
+                    SWITCH_RECOVERY_RETRY=0
+                    trace_event "switch.recovery.end session=$session_name result=retried rc=$retry_rc"
+                    return "$retry_rc"
+                    ;;
+                switch-anyway)
+                    if [ -n "$client_tty" ]; then
+                        sidebar_tmux_cmd switch-client -c "$client_tty" -t "=$session_name:" 2>/dev/null || true
+                    else
+                        sidebar_port_switch_client "$client_tty" "$session_name" 2>/dev/null || true
+                    fi
+                    message_line "switched to $session_name without a sidebar"
+                    trace_event "switch.recovery.end session=$session_name result=raw-switch"
+                    trace_event "switch.end mode=raw-switch session=$session_name window=$target_window"
+                    return 0
+                    ;;
+                *)
+                    message_line "session switch cancelled"
+                    trace_event "switch.recovery.end session=$session_name result=cancelled"
+                    return 1
+                    ;;
+            esac
+        elif [ "$recovery_mode" = auto ]; then
+            trace_event "switch.recovery.begin session=$session_name window=$target_window reason=${SIDEBAR_TARGET_FAILURE:-unknown} mode=auto"
+            if switch_recovery_respawn "$target_window" "$(sidebar_width)"; then
+                sidebar_pane="$(ensure_target_sidebar_window "$session_name" "$target_window" "$(sidebar_width)" || true)"
+                [ -n "$sidebar_pane" ] && message_line "sidebar respawned for $session_name"
+            fi
+            trace_event "switch.recovery.end session=$session_name result=$([ -n "$sidebar_pane" ] && echo respawned || echo respawn-failed)"
+        fi
+    fi
     if [ -z "$sidebar_pane" ]; then
         selection_sync_set "$target_window" ""
         transition_context_finish failed target-sidebar-unavailable "$operation_id"
@@ -8856,6 +9055,10 @@ main()
         --restore-archive)
             restore_archive "${2:-}" "${3:-}" "${4:-false}"
             return $?
+            ;;
+        --switch-recovery-popup)
+            run_switch_recovery_popup "${2:-}" "${3:-}" "${4:-}"
+            return 0
             ;;
         --apply-ime-hook)
             declare -f sidebar_ime_apply >/dev/null 2>&1 && sidebar_ime_apply || true

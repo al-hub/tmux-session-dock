@@ -820,12 +820,84 @@ run_dead_target_sidebar_reproduction()
     }
     before_generation="$(action_generation)"
     send_keys $'\r'
+
+    # Default mode: a recovery popup with the diagnosis. Its keys reach the
+    # popup; "1" = respawn the sidebar and retry.
+    recovery_popup_open() { grep -c "switch.recovery.popup session=$target" "$RUN_DIR/trace.log" 2>/dev/null || echo 0; }
+    wait_until 'recovery popup opened' 1 recovery_popup_open
+    send_keys 1
     wait_for_action_generation_change "$before_generation"
 
     # Oracle: the client is on the target and its sidebar is alive again.
     wait_until "Enter switches to $target although its sidebar presenter had died" "$target" client_session
     wait_until 'target sidebar respawned (pane alive)' 0 target_pane_dead
-    printf 'PASS: Enter recovered a session whose sidebar presenter had died\n'
+    grep -q "switch.recovery.choice session=$target action=respawn" "$RUN_DIR/trace.log" || {
+        printf 'FAIL: the popup choice was not recorded as respawn\n' >&2
+        return 1
+    }
+    printf 'PASS: popup recovery respawned the sidebar and switched\n'
+    # Let the first switch finish its post-switch verification (content
+    # readiness of the respawned presenter) before that presenter is killed
+    # again; the transition-idle flag drops before that verification ends.
+    switches_ended() { grep -c "switch.end mode=window-local" "$RUN_DIR/trace.log" 2>/dev/null || echo 0; }
+    wait_until 'first recovered switch completed' 1 switches_ended
+    wait_for_sidebar_input_ready
+
+    # Auto mode: no popup, silent respawn. Return to the anchor through the
+    # TUI (so both presenters' notion of the current session stays coherent),
+    # kill the target presenter again, then Enter on it from the anchor.
+    tmuxc set-option -gq @session-dock-switch-recovery auto
+    select_row_and_enter() {   # select_row_and_enter <session>
+        local wanted="$1" tries
+        wait_for_sidebar_row "$wanted"
+        for tries in $(seq 1 8); do
+            [ "$(sidebar_selected_name)" = "$wanted" ] && break
+            send_keys $'\033[B'
+            wait_for_sidebar_input_ready
+        done
+        [ "$(sidebar_selected_name)" = "$wanted" ] || {
+            printf 'FAIL: selection marker did not reach %s (actual=%s)\n' "$wanted" "$(sidebar_selected_name)" >&2
+            return 1
+        }
+        before_generation="$(action_generation)"
+        send_keys $'\r'
+        wait_for_action_generation_change "$before_generation"
+    }
+    focus_sidebar_via_prefix
+    wait_for_sidebar_input_ready
+    select_row_and_enter keyboard-anchor || return 1
+    wait_until 'back on the anchor through the TUI' keyboard-anchor client_session
+    wait_until 'return switch completed' 2 switches_ended
+    wait_for_sidebar_input_ready
+
+    target_pane="$(tmuxc list-panes -t "$target_window" -F '#{pane_id}|#{pane_title}' | awk -F '|' '$2 == "dotfiles-session-sidebar" { print $1; exit }')"
+    target_pid="$(tmuxc display-message -p -t "$target_pane" '#{pane_pid}')"
+    kill -KILL "$target_pid" 2>/dev/null || true
+    wait_until 'target sidebar presenter dead again' 1 target_pane_dead
+    focus_sidebar_via_prefix
+    wait_for_sidebar_input_ready
+    wait_for_sidebar_row "$target"
+    for _ in $(seq 1 8); do
+        [ "$(sidebar_selected_name)" = "$target" ] && break
+        send_keys $'\033[B'
+        wait_for_sidebar_input_ready
+    done
+    [ "$(sidebar_selected_name)" = "$target" ] || {
+        printf 'FAIL: selection marker did not reach %s for the auto pass\n' "$target" >&2
+        return 1
+    }
+    popups_before="$(recovery_popup_open)"
+    before_generation="$(action_generation)"
+    send_keys $'\r'
+    wait_for_action_generation_change "$before_generation"
+    wait_until "auto mode switches to $target" "$target" client_session
+    wait_until 'target sidebar respawned (auto)' 0 target_pane_dead
+    wait_until 'second recovered switch completed' 3 switches_ended
+    [ "$(recovery_popup_open)" = "$popups_before" ] || {
+        printf 'FAIL: auto mode must not open the popup\n' >&2
+        return 1
+    }
+    printf 'PASS: auto recovery respawned the sidebar and switched without a popup\n'
 }
 
 run_delete_zero_stale_row_reproduction()

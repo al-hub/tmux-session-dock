@@ -90,6 +90,8 @@ OPTIONS=(
     "#IME|IME 한/영 (Input Method)|"
     "IME|IME → English on Sidebar Focus|"
     "REST|Restore IME on Leave|"
+    "#RECOV|세션 전환 복구 (Switch Recovery)|"
+    "RECOV|On Failure: Ask / Auto / Off|"
 )
 
 is_header() { case "$1" in \#*) return 0 ;; *) return 1 ;; esac; }
@@ -153,6 +155,17 @@ draw_picker() {
                     desc="사이드바 진입 시 영문 전환 ${DIM}· 백엔드 ${IME_BACKEND} (한글 상태에서도 j/k/d 단축키 동작)${RESET}"
                 fi
                 ;;
+            RECOV)
+                local recov
+                recov="$(tmux show-option -gqv @session-dock-switch-recovery 2>/dev/null || true)"
+                case "$recov" in auto|off) ;; *) recov="popup" ;; esac
+                is_active=true
+                case "$recov" in
+                    popup) desc="현재: ${BOLD}${EMERALD}ASK${RESET}${GRAY} — 대상 사이드바 이상 시 진단 팝업으로 선택 (Space: AUTO)${RESET}" ;;
+                    auto)  desc="현재: ${BOLD}${EMERALD}AUTO${RESET}${GRAY} — 사이드바 자동 재기동 후 전환, 팝업 없음 (Space: OFF)${RESET}" ;;
+                    off)   is_active=false; desc="현재: ${BOLD}${YELLOW}OFF${RESET}${GRAY} — 조용히 실패, footer 메시지만 (Space: ASK)${RESET}" ;;
+                esac
+                ;;
             REST)
                 if [ "$IME_BACKEND" = "none" ] || [ "$IME_SETTING" = "off" ]; then
                     disabled=true
@@ -203,6 +216,15 @@ apply_selection() {
                 IME_LAST_ON_MODE="$IME_SETTING"
                 dock_cmd --ime-set off
             fi
+            ;;
+        RECOV)
+            local recov
+            recov="$(tmux show-option -gqv @session-dock-switch-recovery 2>/dev/null || true)"
+            case "$recov" in
+                auto) tmux set-option -gq @session-dock-switch-recovery off ;;
+                off)  tmux set-option -gq @session-dock-switch-recovery popup ;;
+                *)    tmux set-option -gq @session-dock-switch-recovery auto ;;
+            esac
             ;;
         REST)
             [ "$IME_BACKEND" != "none" ] && [ "$IME_SETTING" != "off" ] || return 0
