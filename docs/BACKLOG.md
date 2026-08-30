@@ -44,8 +44,10 @@ owner or a deadline.
 Ranked by (probability × user impact) for the correctness items, then by
 (contributor time saved × frequency) for the rest. Two have already caused
 user-visible failures: **R8**, which broke session switching outright and is
-the one to take first, and **R1**. The numbers are identities, not an order -
-new findings are appended.
+the one to take first, and **R1**. **R10** is the highest-priority item that is
+not a defect: it is a policy that was never written down, and four separate
+findings fall out of the gap. The numbers are identities, not an order - new
+findings are appended.
 
 ### R1 — TUI help popup is unreachable on a TPM-only install · S · low risk
 
@@ -284,6 +286,94 @@ observer detached (`setsid`) would remove that message *and* change how tmux
 tracks the observer's lifetime, which is why it belongs with this item rather
 than on its own. The message itself was judged operator error, not a defect:
 select the bash and leave the wrapper alone.
+
+### R10 — the Awaiting settings have no written policy · policy first, then S · low risk
+
+Reported as "Mark After does not stop at the time I set". It is not a defect in
+Mark After. Measured on the live server on 2026-08-30, with
+`@session-dock-awaiting-after 10000`, by recording every transition the shared
+observer published:
+
+```
+22:47:48 dotfiles              running   silent=0s
+22:48:13 dotfiles              awaiting  silent=10s
+22:47:57 waiting-seesion-test  running   silent=0s
+22:48:18 waiting-seesion-test  awaiting  silent=10s
+```
+
+Both sessions were marked exactly ten seconds after their last output. An
+isolated server agrees: 20000 marks at 20 s, 10000 at 11 s. What did not stop
+was the *blink*, which `@session-dock-awaiting-blink` governs and which was
+unset, i.e. `always`. The two options are read as one thing by the user, and
+nothing in the product corrects that reading. Four findings sit on that gap;
+none is fixed, because each needs a decision before it needs code.
+
+**(a) The popup's `[✓]` column means three different things.** One renderer
+(`scripts/tmux-subpane-picker:303`) serves toggle rows (Space flips them),
+value rows (`Mark After (ms)`, `Wave Cycle (ms)` - Space and Enter both open a
+number prompt, there is nothing to flip) and multi-state rows (`Blink Until
+Seen`, `On Failure`). On a value row the check reports the *parent's* state:
+`AAFTER` is ticked whenever `Awaiting Marker` is on (`:275`). So the row reads
+as a switch that cannot be switched off. The footer legend - `토글 & 적용:
+[ Space / Enter ]` - names both actions in one breath and completes the
+misreading. Candidate: value rows show the value (`[10s]`, `[1.2s]`) instead of
+a tick, and keep `[ ]` + dim when the parent is off.
+
+**(b) The blink default is `always`, so out of the box the mark never settles.**
+`sidebar_awaiting_apply` maps an unset option to `blink_ms=-1`
+(`scripts/tmux-session-dock:5591`), and `row_mark_value` then skips the budget
+check entirely. This is documented (README:66) and the popup says it
+("확인할 때까지 계속 깜빡임"), but no test pins the default, and it is the state
+every new user starts in. Candidate: keep `always`, or default to a budget -
+the state itself never times out either way, so a budget loses no information.
+
+**(c) Mark After cannot be turned off, and the observer ignores the off
+switch.** `sidebar_domain_activity_await_after` clamps everything back into
+10000-300000; `off`, `0`, `-1` and an empty value all return a live threshold:
+
+```
+[]  -> 30000    [0]  -> 10000    [off] -> 30000    [-1] -> 30000
+[1] -> 10000    [9999] -> 10000  [999999] -> 300000
+```
+
+`await_after=0`, the value that does disable awaiting, is reachable only from
+one call site (`scripts/tmux-session-dock:4767`), where a presenter observing
+without a shared observer must not publish a verdict its neighbours would
+contradict. The only user-facing switch is `@session-dock-awaiting off`, and
+that stops the *drawing* only: the observer loop reads the threshold option but
+never the on/off one (`:5988`), so it keeps publishing `awaiting` into the state
+file while the mark is hidden. Turning the marker back on shows the backlog
+immediately rather than restarting the clock, which may well be what we want -
+it has simply never been decided.
+
+**(d) The busy window is environment-only, and the popup does not know it.**
+`SIDEBAR_BUSY_SECONDS` comes from `TMUX_SESSION_SIDEBAR_BUSY_SECONDS` and is
+read once at startup (`:79`); unlike every `@session-dock-*` option it is not
+re-read each second, so it needs a dock restart. It also sets Mark After's floor
+(`:94`, `SIDEBAR_BUSY_SECONDS * 1000`, itself floored at 1000). The libs are
+sourced before that line, so the derived value beats the lib's hardcoded
+`SIDEBAR_AWAITING_AFTER_MS_MIN=10000` in the dock and in `dist/`. The picker,
+though, sources only the lib (`scripts/tmux-subpane-picker:47`), so its floor is
+always 10000: lower the busy window and the dock accepts 5000 while the popup
+clamps typed values to 10000 (`:411`), advertises `10000~300000` (`:283`), and
+re-displays a stored 5000 as 10000. The popup and the dock then disagree about
+what a number means - the very thing `prompt_ms_value`'s comment says must not
+happen.
+
+Decide before writing code:
+
+1. Does the blink keep `always` as its default, or get a budget?
+2. Is Mark After allowed an off of its own, or is `Awaiting Marker` the single
+   switch for the whole feature?
+3. While the marker is off, should the observer stop computing `awaiting` - or
+   keep the verdict warm so turning it back on is instant?
+4. Does the busy window become a `@session-dock-*` option? If so the floor stops
+   being a source-time constant and the clamp has to move to call time.
+5. What does the popup's mark column mean - one meaning for every row, or one
+   per row kind, spelled out in the legend?
+
+Only (a) and (d) are safe to do without answering the rest; (d) is a real
+inconsistency today, (a) is the change that stops the report from recurring.
 
 ## Not planned
 
