@@ -5888,28 +5888,54 @@ run_ai_observer()
     interval="$SIDEBAR_AI_OBSERVATION_SECONDS"
     case "$interval" in ''|*[!0-9]*) interval=1 ;; esac
 
-    if ! mkdir "$lock_dir" 2>/dev/null; then
-        # Several presenters may spawn an observer in the same second.  The
-        # holder writes its pid right after mkdir; give it a moment before
-        # treating the lock as stale, otherwise two observers end up running.
-        local attempt
-        for attempt in 1 2 3 4 5 6 7 8 9 10; do
-            if ai_observer_pid >/dev/null 2>&1; then
-                trace_event "ai-observer.duplicate holder=$(cat "$lock_dir/pid" 2>/dev/null || true)"
-                return 0
-            fi
-            sleep 0.2
-        done
-        rm -rf "$lock_dir" 2>/dev/null || true
-        mkdir "$lock_dir" 2>/dev/null || return 1
+    # Several presenters may spawn an observer in the same second, and only one
+    # of them may keep running: two observers publish contradicting verdicts
+    # into one state file.  The claim is the pid file, not the directory. A
+    # directory taken with mkdir is held before the pid inside it is written,
+    # so for that moment it looks orphaned to everyone else - and a loser that
+    # waited out a grace period would delete a lock whose holder was merely
+    # slow to be scheduled, which is how two observers were seen. Writing the
+    # pid elsewhere and hard-linking it into place has no such moment: the name
+    # appears complete or not at all, and exactly one link can win.
+    mkdir -p "$lock_dir" 2>/dev/null || return 1
+    ai_observer_claim_lock()
+    {
+        local staging="$lock_dir/pid.$$"
+        printf '%s\n' "$$" > "$staging" 2>/dev/null || return 1
+        if ln "$staging" "$lock_dir/pid" 2>/dev/null; then
+            rm -f "$staging" 2>/dev/null || true
+            return 0
+        fi
+        rm -f "$staging" 2>/dev/null || true
+        return 1
+    }
+    if ! ai_observer_claim_lock; then
+        if ai_observer_pid >/dev/null 2>&1; then
+            trace_event "ai-observer.duplicate holder=$(cat "$lock_dir/pid" 2>/dev/null || true)"
+            return 0
+        fi
+        # The pid file names a process that is gone. Clear it once and race for
+        # it again; whoever loses that race is the duplicate.
+        rm -f "$lock_dir/pid" 2>/dev/null || true
+        if ! ai_observer_claim_lock; then
+            trace_event "ai-observer.duplicate holder=$(cat "$lock_dir/pid" 2>/dev/null || true)"
+            return 0
+        fi
     fi
-    printf '%s\n' "$$" > "$lock_dir/pid"
-    # Leave nothing behind: the lock and the state file belong to this server.
-    trap 'rm -rf "$lock_dir" "$state_path" "${state_path}.tmp.$$" 2>/dev/null; exit 0' EXIT INT TERM HUP
+    # Leave nothing behind, but never take down a lock that is someone else's:
+    # by the time this runs the pid file may already have been reclaimed.
+    trap 'if [ "$(cat "$lock_dir/pid" 2>/dev/null || true)" = "$$" ]; then rm -rf "$lock_dir" "$state_path" 2>/dev/null; fi; rm -f "${state_path}.tmp.$$" 2>/dev/null; exit 0' EXIT INT TERM HUP
     trace_event "ai-observer.start pid=$$ state=$state_path interval=$interval"
     sidebar_env_purge_legacy
 
     while true; do
+        # Someone else holding the claim means this process is the loser of a
+        # race it did not know it was in; leave rather than publish a second
+        # verdict into the same file.
+        if [ "$(cat "$lock_dir/pid" 2>/dev/null || true)" != "$$" ]; then
+            trace_event "ai-observer.exit reason=lock-lost holder=$(cat "$lock_dir/pid" 2>/dev/null || true)"
+            return 0
+        fi
         now="${EPOCHSECONDS:-$(date +%s)}"
         panes_snapshot="$(tmux list-panes -a -F '#{session_name}	#{pane_id}	#{pane_title}	#{pane_current_command}	#{pane_activity}:#{history_size}:#{cursor_y}:#{cursor_x}	#{pane_pid}' 2>/dev/null)" || {
             trace_event "ai-observer.exit reason=no-server"

@@ -245,7 +245,7 @@ or a header shaped unlike the three literals, would pass it. Feeding it a pane
 captured from a live presenter would bring the whole render path inside the
 contract.
 
-### R9 — two AI Activity Observers can run at once for a moment · S · low risk
+### R9 — two AI Activity Observers can run at once for a moment · S · low risk · FIXED v0.3.61
 
 The observer is meant to be one per server; `run_ai_observer` enforces it with a
 `mkdir` lock plus a pid file, and `ensure_ai_observer` throttles each presenter
@@ -270,11 +270,23 @@ The consequence today is mild - the state file has a single writer, the extra
 observer exits as soon as it can see the holder's pid, and nothing observed a
 wrong verdict - so this is a correctness tidy, not a live defect.
 
-Fix candidates, cheapest first: write the pid *before* releasing the mkdir (not
-possible directly, so instead treat "lock exists but no pid file yet" as held
-for a grace period rather than as orphaned); or have the loser verify with a
-second, longer poll before reclaiming; or move the spawn throttle into a
-server-wide flag so simultaneous presenters do not each spawn.
+**Fixed in v0.3.61.** It was seen a third time, in a full local run, which is
+what moved it. The claim is now the pid file rather than the directory: the pid
+is written to a staging name and hard-linked into place, so the name appears
+complete or not at all and exactly one link can win. There is no longer a moment
+where the lock is held but looks orphaned, and therefore no grace period to
+wait out and no reason to delete a lock whose holder is merely slow to be
+scheduled. A pid file naming a dead process is cleared once and raced for
+again. Two further guards: the observer re-checks the claim on every sweep and
+leaves if it is no longer the holder (the previous protocol let a superseded
+holder keep publishing), and its exit trap removes the lock only if the lock is
+still its own.
+
+The spawn throttle is still process-local, so simultaneous presenters still each
+spawn an observer; that is now harmless rather than merely usually harmless, and
+is left alone. Note that a micro-benchmark starting eight observers at once
+converges to one both before and after - the race needs the real presenter path
+under load, which is why the full suite is the evidence here.
 
 Related, and the reason this was written down together with it: the observer is
 started with `run-shell -b`, so tmux tracks the `sh -c` wrapper and reports its
