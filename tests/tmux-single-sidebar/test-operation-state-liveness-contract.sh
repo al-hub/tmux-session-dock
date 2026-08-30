@@ -102,5 +102,11 @@ for _ in $(seq 1 100); do
     sleep 0.05
 done
 [ "$accepted" = 1 ] || fail "presenter did not heal the orphaned operation after a key press"
+# The trace line is written just before the healing set-environment lands, so
+# poll for the value instead of reading it once.
+for _ in $(seq 1 100); do
+    [ "$(get_state)" = "idle:stale-cleared" ] && break
+    sleep 0.05
+done
 [ "$(get_state)" = "idle:stale-cleared" ] || fail "orphaned operation not cleared by the presenter: $(get_state)"
 printf 'PASS: presenter accepts input after the operation owner died\n'

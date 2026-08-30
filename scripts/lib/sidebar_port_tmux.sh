@@ -241,8 +241,12 @@ read_persisted_sidebar_subpane_position() {
 
 sidebar_layout_hook_guard_active() {
     local guard
-    guard="$(sidebar_tmux_cmd show-environment -gh "${SIDEBAR_LAYOUT_HOOK_GUARD_ENV:-DOTFILES_SIDEBAR_LAYOUT_HOOK_GUARD}" 2>/dev/null || true)"
-    case "$guard" in -*) guard="" ;; *) guard="${guard#*=}" ;; esac
+    if [ $# -ge 1 ]; then
+        guard="$1"
+    else
+        guard="$(sidebar_tmux_cmd show-environment -gh "${SIDEBAR_LAYOUT_HOOK_GUARD_ENV:-DOTFILES_SIDEBAR_LAYOUT_HOOK_GUARD}" 2>/dev/null || true)"
+        case "$guard" in -*) guard="" ;; *) guard="${guard#*=}" ;; esac
+    fi
     case "$guard" in
         ''|*[!0-9]*) return 1 ;;
     esac

@@ -55,8 +55,33 @@ wait_for_trace()
 window_id="$(tmux -L "$SOCKET" new-window -d -t '=hook-test:' -P -F '#{window_id}' 'sleep 300')"
 wait_for_trace "args=--ensure-sidebar-window $window_id"
 
+# Layout hooks are gated in the server on @dotfiles_sidebar_ready: a window
+# whose sidebar has not finished starting costs no process (it had nothing to
+# sync anyway). Wait for readiness so the split below exercises the hook.
+wait_for_window_ready()
+{
+    local deadline=$(( $(date +%s) + 10 ))
+    while [ "$(date +%s)" -lt "$deadline" ]; do
+        [ "$(tmux -L "$SOCKET" show-option -wqv -t "$1" @dotfiles_sidebar_ready 2>/dev/null)" = 1 ] && return 0
+        sleep 0.05
+    done
+    printf 'ERROR: window %s sidebar never became ready\n' "$1" >&2
+    return 1
+}
+wait_for_window_ready "$window_id"
+
 tmux -L "$SOCKET" split-window -d -h -t "$window_id" 'sleep 300'
 wait_for_trace "args=--sync-sidebar-layout $window_id"
+
+# The same hook must cost nothing in a window with no ready sidebar.
+plain_window="$(tmux -L "$SOCKET" -f "$TEST_TMUX_CONF" new-window -d -t '=hook-test:' -P -F '#{window_id}' 'sleep 300')"
+tmux -L "$SOCKET" set-option -wq -t "$plain_window" @dotfiles_sidebar_ready 0
+tmux -L "$SOCKET" split-window -d -h -t "$plain_window" 'sleep 300'
+sleep 0.5
+if grep -Fq -- "args=--sync-sidebar-layout $plain_window" "$RUN_DIR/trace.log" 2>/dev/null; then
+    printf 'FAIL: layout hook spawned a process for a window with no ready sidebar\n' >&2
+    exit 1
+fi
 
 tmux -L "$SOCKET" -f "$TEST_TMUX_CONF" new-session -d -s hook-created -c "$REPO_ROOT" 'sleep 300'
 wait_for_trace 'args=--ensure-sidebar-session hook-created'
@@ -70,6 +95,7 @@ if grep -Ein -- 'ensure-sidebar-window[[:space:]]+([^@[:space:]]|$).*returned 1|
 fi
 
 printf 'PASS: after-window hooks receive non-empty window_id\n'
+printf 'PASS: layout hook is gated off in a window with no ready sidebar\n'
 printf 'PASS: after-session hook receives session_name\n'
 printf 'PASS: no blank ensure-sidebar-window target or returned 1\n'
 printf 'artifacts=%s\n' "$RUN_DIR"
