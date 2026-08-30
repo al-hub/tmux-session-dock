@@ -1434,8 +1434,8 @@ sync_active_window()
         transition_defer_hook_sync active-window
         return 0
     fi
-    active_session="$(tmux display-message -p -c "$hook_client" '#S' 2>/dev/null || tmux display-message -p '#S' 2>/dev/null || true)"
-    active_window="$(tmux display-message -p -c "$hook_client" '#{window_id}' 2>/dev/null || tmux display-message -p '#{window_id}' 2>/dev/null || true)"
+    active_session="$(sidebar_client_field "$hook_client" '#S' || tmux display-message -p '#S' 2>/dev/null || true)"
+    active_window="$(sidebar_client_field "$hook_client" '#{window_id}' || tmux display-message -p '#{window_id}' 2>/dev/null || true)"
     [ -n "$active_session" ] && [ -n "$active_window" ] || return 0
     if is_infrastructure_session "$active_session"; then
         return 0
@@ -2591,7 +2591,7 @@ provision_managed_sidebars()
         client_tty="$(sidebar_owner_client || true)"
         [ -n "$client_tty" ] || client_tty="$(current_client_tty || true)"
         if [ -n "$client_tty" ]; then
-            active_win="$(sidebar_tmux_cmd display-message -p -c "$client_tty" '#{window_id}' 2>/dev/null || true)"
+            active_win="$(sidebar_client_field "$client_tty" '#{window_id}' || true)"
         fi
     fi
     if [ -z "$active_win" ] || is_infrastructure_session "$(sidebar_tmux_cmd display-message -p -t "$active_win" '#{session_name}' 2>/dev/null || true)"; then
@@ -2930,7 +2930,7 @@ toggle_current_sidebar()
     client_tty="$(sidebar_owner_client || true)"
     [ -n "$client_tty" ] || client_tty="$(current_client_tty || true)"
     if [ -n "$client_tty" ]; then
-        current_session_name="$(sidebar_tmux_cmd display-message -p -c "$client_tty" '#S' 2>/dev/null || true)"
+        current_session_name="$(sidebar_client_field "$client_tty" '#S' || true)"
     fi
     if [ -n "$target_arg" ]; then
         if [[ "$target_arg" == @* ]]; then
@@ -3375,7 +3375,7 @@ switch_session()
         client_tty="$(sidebar_tmux_cmd list-clients -F '#{client_control_mode}|#{client_tty}' 2>/dev/null | awk -F '|' '$1 != 1 { print $2; exit }' || true)"
     fi
     if [ -n "$client_tty" ] && [ -z "$source_session" ]; then
-        source_session="$(tmux display-message -p -c "$client_tty" '#S' 2>/dev/null || true)"
+        source_session="$(sidebar_client_field "$client_tty" '#S' || true)"
     fi
     [ -n "$source_session" ] || source_session="$current_session"
     if [ -z "$client_tty" ]; then
@@ -8492,8 +8492,8 @@ create_session_with_active_client_geometry()
     local client_tty client_x client_y
     client_tty="$(sidebar_tmux_cmd list-clients -F '#{client_tty}' 2>/dev/null | head -n 1 || true)"
     if [ -n "$client_tty" ]; then
-        client_x="$(sidebar_tmux_cmd display-message -c "$client_tty" -p '#{client_width}' 2>/dev/null || true)"
-        client_y="$(sidebar_tmux_cmd display-message -c "$client_tty" -p '#{client_height}' 2>/dev/null || true)"
+        client_x="$(sidebar_client_field "$client_tty" '#{client_width}' || true)"
+        client_y="$(sidebar_client_field "$client_tty" '#{client_height}' || true)"
     else
         client_x="$(sidebar_tmux_cmd display-message -p '#{client_width}' 2>/dev/null || true)"
         client_y="$(sidebar_tmux_cmd display-message -p '#{client_height}' 2>/dev/null || true)"

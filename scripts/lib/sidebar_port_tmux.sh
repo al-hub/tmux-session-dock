@@ -44,6 +44,24 @@ if ! declare -f sidebar_tmux_cmd >/dev/null 2>&1; then
     }
 fi
 
+# What is true of ONE named client?  `display-message -c` cannot answer it and
+# never could: tmux 3.2a rejects `-p -c` outright (usage, rc=1), and 3.4 accepts
+# it but uses -c only to choose where a message is shown - the format is
+# resolved against the most recently used session, so a client that has just
+# switched still reports the session it left, and two clients on two sessions
+# both report the same one.  list-clients formats once per client on every
+# version, so ask it and pick our own row.  Returns 1 when that client is gone,
+# which is a different answer from "the session is empty" and callers rely on
+# it to fall back.
+sidebar_client_field() {
+    local client_tty="${1:-}" fmt="${2:-}" out
+    [ -n "$client_tty" ] && [ -n "$fmt" ] || return 1
+    out="$(sidebar_tmux_cmd list-clients -F "#{client_tty}|$fmt" 2>/dev/null |
+        awk -F '|' -v tty="$client_tty" '!done && $1 == tty { sub(/^[^|]*\|/, ""); print; done = 1 }')"
+    [ -n "$out" ] || return 1
+    printf '%s\n' "$out"
+}
+
 sidebar_port_get_current_session() {
     sidebar_tmux_cmd display-message -p '#S' 2>/dev/null || echo ""
 }
@@ -550,7 +568,7 @@ toggle_sidebar_subpane_global() {
             client_tty="$(sidebar_tmux_cmd show-option -gqv "@dotfiles_sidebar_owner_client" 2>/dev/null || true)"
             [ -n "$client_tty" ] || client_tty="$(sidebar_tmux_cmd list-clients -F '#{client_tty}' 2>/dev/null | head -n 1 || true)"
             if [ -n "$client_tty" ]; then
-                active_win="$(sidebar_tmux_cmd display-message -p -c "$client_tty" '#{window_id}' 2>/dev/null || true)"
+                active_win="$(sidebar_client_field "$client_tty" '#{window_id}' || true)"
             fi
         fi
         if [ -z "$active_win" ] || (declare -f is_infrastructure_session >/dev/null 2>&1 && is_infrastructure_session "$(sidebar_tmux_cmd display-message -p -t "$active_win" '#{session_name}' 2>/dev/null || true)"); then

@@ -38,6 +38,7 @@ tmux-single-sidebar/test-operation-state-liveness-contract.sh
 tmux-single-sidebar/test-guard-flag-liveness-contract.sh
 tmux-single-sidebar/test-subpane-migrate-lock-contract.sh
 tmux-single-sidebar/test-hot-path-round-trips-contract.sh
+tmux-single-sidebar/test-client-field-contract.sh
 tmux-single-sidebar/test-gradient-option-contract.sh
 tmux-single-sidebar/test-window-ready-options.sh
 tmux-single-sidebar/test-width-restart-contract.sh
