@@ -10,6 +10,8 @@
 
 [**🇰🇷 한국어 설명서 (Korean Manual)**](README.ko.md) | [**Architecture**](docs/ARCHITECTURE.md) | [**Keybindings**](docs/KEYBINDINGS.md) | [**Theme Catalog**](docs/THEMES.md)
 
+> Working on this repo with an AI CLI? Start at [CLAUDE.md](CLAUDE.md).
+
 ---
 
 ## ✨ Major Additions over Stock tmux
@@ -19,7 +21,7 @@
 - **Open, save, move, and select**: Toggle the dock with `Prefix + s`, select a row, and press `Enter` to switch sessions immediately. Create, rename, archive/delete, and restore sessions from the dock.
 - **Zero-flicker switching**: Window-Local Presenters use native `switch-client` instead of physically moving panes.
 - **Gradient activity effect**: Detects background AI CLI activity and renders it as a live waveform gradient on session rows, including rows for non-selected sessions.
-- **Subpane**: Open/close the singleton terminal subpane (`s`), swap it Top/Bottom (`p`), and retain its height.
+- **Subpane stack**: Open/close a terminal subpane beside the dock (`s`), stack up to three of them (`Prefix + S`), swap the stack Top/Bottom (`p`); each slot keeps its own height across session switches.
 - **Archive**: Snapshot and batch-restore sessions without polluting `$HISTFILE`.
 
 ### 2. Theme management
@@ -29,7 +31,7 @@
 
 ### 3. Keybindings and status visibility
 
-- **Status and help**: `Prefix + h`/`?` opens the keybinding help, `Prefix + /` opens the searchable command palette, and `./setup.sh status` reports installation status.
+- **Status and help**: `Prefix + h` opens the keybinding help, `Prefix + /` opens the searchable command palette, `Prefix + S` opens the settings popup, and `./setup.sh status` reports installation status.
 - **No keybinding editor UI**: The dock does not currently provide an in-UI keybinding editor. Change bindings in the tmux configuration instead (such as `@session-dock-key`).
 - **Workspace-safe controls**: Safe split bindings and `Alt + s` provide fast dock focus navigation while preserving the workspace layout.
 
@@ -52,10 +54,15 @@ set -g @plugin 'al-hub/tmux-session-dock'
 set -g @session-dock-key 's'              # Toggle sidebar key (Prefix + s)
 set -g @session-dock-width '34'           # Sidebar column width
 set -g @session-dock-theme 'open-tokyonight' # Default theme
-set -g @session-dock-dotfiles-mode 'on'   # [Optional] Enable full ergonomics preset (Ctrl+a, path border, Alt-Nav)
+set -g @session-dock-dotfiles-mode 'on'   # [Optional] Enable full ergonomics preset (Ctrl+a, path border, Alt-Nav, Tab window switching)
 set -g @session-dock-ime 'restore'        # [Optional] IME → English on sidebar focus: off | on | restore (restore puts 한/영 back on leave)
 set -g @session-dock-switch-recovery 'popup' # [Optional] When Enter cannot land on a session (dead sidebar presenter): popup = show the diagnosis and ask | auto = respawn silently | off
+set -g @session-dock-subpane-count '1'    # [Optional] Terminal subpanes stacked beside the dock: 1 | 2 | 3
+set -g @session-dock-subpane-position 'bottom' # [Optional] Stack the subpanes below or above the dock: bottom | top
 
+# Every option above is also editable from the Prefix + S popup.
+# Key overrides: @session-dock-theme-key, @session-dock-help-key,
+# @session-dock-palette-key, @session-dock-quick-jump-key, @session-dock-ergonomics
 run '~/.tmux/plugins/tpm/tpm'
 ```
 Press `Prefix + I` inside tmux to install and activate.
@@ -104,27 +111,39 @@ cd ~/.local/share/tmux-session-dock
 | Keybinding | Action Description |
 | :--- | :--- |
 | **`Prefix + s`** | Toggle session dock sidebar open / close |
+| **`Prefix + S`** | ⚙️ Open the settings popup (subpane stack & position, IME, switch recovery) |
 | **`Prefix + T`** | 🎨 Open 59-theme interactive picker with live ANSI preview |
 | **`Prefix + /`** | ⌨️ Open searchable command palette |
-| **`Prefix + h`** / **`?`** | 📖 Open interactive help viewer popup |
+| **`Prefix + h`** | 📖 Open interactive help viewer popup |
 | **`Prefix + \|`** / **`%`** | Safe horizontal split (preserves dock layout) |
 | **`Prefix + _`** / **`"`** | Safe vertical split (preserves dock layout) |
 | **`Alt + s`** (`M-s`) | ⚡ Instant focus jump to session dock / return |
+| **`Alt + ←/→/↑/↓`** | 🧭 Geometric pane focus (wraps; enters the dock only from the pane beside it) |
+| **`Ctrl + Alt + ←/→/↑/↓`** | ↔️ Swap the focused work pane in that direction (never moves the dock) |
+| **`Prefix + Tab`** / **`Prefix + BTab`** | Next / previous window — only with `@session-dock-dotfiles-mode 'on'` |
+
+Inside the dock TUI: `j`/`k` or arrows to move, `Enter` to switch, `s` subpane,
+`p` swap position, `d` archive, `c` create, `r` rename, `/` filter, `o`/`Tab`
+archive view, `h` help, `q` close. Full table: [docs/KEYBINDINGS.md](docs/KEYBINDINGS.md).
 
 ---
 
 ## 🏗️ Architecture
 
-`tmux-session-dock` replaces physical pane migration (`move-pane`) with **Window-Local Thin Presenters** driven by a centralized **Logical Coordinator**:
+`tmux-session-dock` replaces physical pane migration (`move-pane`) with **Window-Local Thin Presenters**. There is no coordinator daemon: every managed window runs its own presenter, and they agree through shared tmux server state (hidden environment variables for transient bookkeeping, options for durable identity, pid locks for mutual exclusion).
 
 ```text
-tmux Server (@session_dock_owner_client)
- ├── Logical Coordinator (Singleton State Engine)
- ├── Subpane Hub Session (Singleton Terminal Lease)
+tmux Server
+ ├── shared state: transition flags (hidden env) · @dotfiles_sidebar_owner_client · pid locks
+ ├── AI Activity Observer (one per server)
+ ├── Subpane Hub Session (singleton terminal lease, 1..3 slots)
  └── Managed Windows
-      ├── Window 1: Thin Presenter 1 ── Native switch-client ── Work Panes
-      └── Window 2: Thin Presenter 2 ── Native switch-client ── Work Panes
+      ├── Window 1: Thin Presenter 1 ── native switch-client ── Work Panes
+      └── Window 2: Thin Presenter 2 ── native switch-client ── Work Panes
 ```
+
+Full design and invariants: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Open items and the reasoning behind recent work: [docs/BACKLOG.md](docs/BACKLOG.md).
 
 ---
 

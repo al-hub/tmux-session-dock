@@ -16,6 +16,14 @@ $$\mathbf{Pattern:\quad} \texttt{<category>-<family>[-<flavor>][-focus].conf}$$
 | **`[OS]`** | Ubuntu Aubergine, Apple Terminal Pro, Fedora Blue, Arch Cyan, Debian Magenta, NixOS Lavender | 6 Platform signatures |
 | **`[RETRO]`** | CRT Phosphor Green, CRT Amber (0% blue light), Commodore 64 Blue, DOS CGA Blue, Game Boy DMG, Windows 95 Teal | 6 Retro hardware themes |
 
-## 2. Live Rich Preview Inspector
+## 2. Adding a theme
+
+A theme is a single `.conf` file; no code change is needed. Drop it in
+`themes/` (or `~/.config/tmux/themes/` to keep it out of the repo) and the
+picker finds it by scanning the directory. The filename prefix decides the
+category badge, so `eye-my-theme.conf` lands under `[EYE]`. Copy an existing
+file to get the full key set - every bundled theme defines the same keys.
+
+## 3. Live Rich Preview Inspector
 
 Press `Prefix + T` to open the interactive theme picker with live ANSI TrueColor preview chips and ergonomics metadata.

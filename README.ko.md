@@ -12,7 +12,7 @@
 - **열기·저장·이동·선택**: `Prefix + s`로 세션 도크를 열고 닫습니다. 행을 선택해 `Enter`로 즉시 세션을 이동하며, 세션 생성·이름 변경·삭제/아카이브와 아카이브 복원을 도크 안에서 처리합니다.
 - **무깜빡임 전환**: 물리 페인을 옮기지 않고 각 윈도우의 Presenter를 통해 Native `switch-client`를 수행합니다.
 - **Gradient 효과**: 백그라운드 AI CLI의 활동 상태를 감지해 세션 행에 실시간 파형 gradient로 표시합니다. 선택한 세션만이 아니라 다른 세션의 활동도 확인할 수 있습니다.
-- **Subpane**: 싱글톤 터미널 Subpane을 열고 닫고(`s`), 상단/하단을 즉시 전환(`p`)하며, 높이를 유지합니다.
+- **Subpane 스택**: 도크 옆 터미널 Subpane을 열고 닫고(`s`), 최대 3개까지 쌓으며(`Prefix + S`), 상단/하단을 전환(`p`)합니다. 각 슬롯의 높이는 세션 전환 후에도 유지됩니다.
 - **아카이브**: 셸 히스토리(`$HISTFILE`)를 오염시키지 않고 세션을 스냅샷으로 저장하고 일괄 복원합니다.
 
 ### 2. 테마 관리
@@ -45,10 +45,15 @@ set -g @plugin 'al-hub/tmux-session-dock'
 set -g @session-dock-key 's'              # 사이드바 토글 키 (기본: Prefix + s)
 set -g @session-dock-width '34'           # 사이드바 너비
 set -g @session-dock-theme 'open-tokyonight' # 기본 테마
-set -g @session-dock-dotfiles-mode 'on'   # [옵션] Ctrl+a, 상단 경로 보더, Alt+화살표 인체공학 프리셋 활성화
-set -g @session-dock-ime 'restore'        # [옵션] 사이드바 진입 시 IME 영문 전환: off | on | restore (restore = 나갈 때 원래 한/영 복원). Prefix+S 팝업에서도 토글
+set -g @session-dock-dotfiles-mode 'on'   # [옵션] Ctrl+a, 상단 경로 보더, Alt+화살표, Tab 윈도우 이동 프리셋
+set -g @session-dock-ime 'restore'        # [옵션] 사이드바 진입 시 IME 영문 전환: off | on | restore (restore = 나갈 때 원래 한/영 복원)
 set -g @session-dock-switch-recovery 'popup' # [옵션] Enter 전환 실패(대상 사이드바 presenter 사망 등) 시: popup = 진단 팝업으로 선택 | auto = 자동 재기동 | off
+set -g @session-dock-subpane-count '1'    # [옵션] 도크 옆에 쌓을 터미널 서브페인 개수: 1 | 2 | 3
+set -g @session-dock-subpane-position 'bottom' # [옵션] 서브페인 스택 위치: bottom | top
 
+# 위 옵션은 모두 Prefix + S 팝업에서도 변경할 수 있습니다.
+# 키 재정의: @session-dock-theme-key, @session-dock-help-key,
+# @session-dock-palette-key, @session-dock-quick-jump-key, @session-dock-ergonomics
 run '~/.tmux/plugins/tpm/tpm'
 ```
 
@@ -94,14 +99,18 @@ cd ~/.local/share/tmux-session-dock
 ## ⌨️ 주요 단축키 가이드
 
 | 단축키 | 기능 설명 |
-| :--- | :--- | :--- |
+| :--- | :--- |
 | **`Prefix + s`** | 세션 도크 사이드바 열기 / 닫기 (토글) |
-| **`Prefix + T`** | 🎨 59종 프리미엄 테마 피커 팝업 열기 (실시간 프리뷰) |
+| **`Prefix + S`** | ⚙️ 설정 팝업 (서브페인 스택·위치, IME, 전환 복구) |
+| **`Prefix + T`** | 🎨 59종 테마 피커 팝업 (실시간 ANSI 프리뷰) |
 | **`Prefix + /`** | ⌨️ 전체 단축키 검색 (커맨드 팔레트) |
-| **`Prefix + h`** / **`?`** | 📖 인터랙티브 도움말 가이드 팝업 열기 |
-| **`Prefix + \|`** / **`%`** | 작업 영역 가로 분할 (사이드바 보호) |
-| **`Prefix + _`** / **`"`** | 작업 영역 세로 분할 (사이드바 보호) |
-| **`Alt + s`** (`M-s`) | ⚡ 세션 도크 0ms 즉시 포커스 점프 / 복귀 |
+| **`Prefix + h`** | 📖 인터랙티브 도움말 팝업 |
+| **`Prefix + \|`** / **`%`** | 작업 영역 가로 분할 (도크 레이아웃 보존) |
+| **`Prefix + _`** / **`"`** | 작업 영역 세로 분할 (도크 레이아웃 보존) |
+| **`Alt + s`** (`M-s`) | ⚡ 세션 도크로 즉시 포커스 점프 / 복귀 |
+| **`Alt + ←/→/↑/↓`** | 🧭 기하학적 페인 포커스 이동 (양끝 순환, 도크는 바로 옆 페인에서만 진입) |
+| **`Ctrl + Alt + ←/→/↑/↓`** | ↔️ 포커스된 작업 페인을 해당 방향으로 교환 (도크는 이동하지 않음) |
+| **`Prefix + Tab`** / **`Prefix + BTab`** | 다음 / 이전 윈도우 — `@session-dock-dotfiles-mode 'on'` 일 때만 |
 
 ---
 

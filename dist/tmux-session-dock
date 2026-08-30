@@ -11068,6 +11068,9 @@ read_key()
         h|H|\?) key_result=help ;;
         ' ') key_result=mark ;;
         a|A) key_result=mark-all ;;
+        # `S` is an alias of `s` here; the stack size and position live in the
+        # Prefix + S popup. The config-subpane arm below is therefore
+        # unreachable from the keyboard - see docs/BACKLOG.md R2.
         s|S) key_result=toggle-subpane ;;
         p|P) key_result=swap-subpane-position ;;
         q|Q|$'\x03') key_result=quit ;;

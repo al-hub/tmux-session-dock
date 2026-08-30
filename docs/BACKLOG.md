@@ -5,7 +5,7 @@ run against `v0.3.48` on 2026-08-30. This file records what was fixed, what was
 deliberately left, and the evidence for each remaining item so the next change
 does not have to rediscover it.
 
-Line references are against the tag named in each entry. Runtime numbers were
+Line references drift; treat them as a starting point and confirm with `grep`. Runtime numbers were
 measured on tmux 3.2a (WSL2) by putting a counting shim in front of the `tmux`
 binary; the method is reproducible with any wrapper that logs `exec`s.
 
@@ -56,25 +56,33 @@ line earlier already has the fallback (`:8953`).
 Fix: give the help popup the same `LAUNCHER_DIR/../scripts/` fallback, or copy
 both popup scripts into `dist/` from `scripts/build-dist.sh`.
 
-### R2 — `S` in the TUI is documented but unreachable · S · low risk
+### R2 — the keymap has four hand-maintained copies · S (drift) / M (structural) · low risk
 
-`read_key` maps both `s` and `S` to `toggle-subpane`
-(`scripts/tmux-session-dock:8512`), so the `S|config-subpane` arm at `:8951`
-can never be reached from the keyboard. `docs/KEYBINDINGS.md:30` and
-`scripts/tmux-help-viewer:53` both document `S` as the stack configurator.
+`read_key` maps both `s` and `S` to `toggle-subpane`, so the `S|config-subpane`
+arm in `run_tui` can never be reached from the keyboard. The docs were
+corrected to match the code (the stack configurator is `Prefix + S`) and the
+`case` now carries a comment pointing here, so this is no longer a drift - it
+is an open product question: should `S` inside the TUI open the configurator,
+as three documents used to claim? If yes, that is a one-line change plus a
+test; if no, the dead arm should be deleted.
 
-Decide which is true, then make the other match. The same pass should clear the
-rest of the keymap drift the review found: keys documented in
-`scripts/tmux-help-viewer` that are bound nowhere in the repo (`Escape`, `p`,
-`v`, `n`, `Ctrl+\`, `Prefix + ?`), `M-arrow`/`C-M-arrow` bound in
-`session-dock.tmux` but absent from `docs/KEYBINDINGS.md`, and the
-`tmux-command-palette` alias that names a command (`tmux-session-launcher
---open-sidebar`) the code no longer issues.
+Fixed in the same documentation pass: `docs/KEYBINDINGS.md` now lists
+`M-arrow`, `C-M-arrow` and the preset-only `Tab`/`BTab`, records which option
+overrides each binding, and states that `Prefix + ?` is tmux's own key list
+rather than this plugin's help popup; `scripts/tmux-help-viewer` no longer
+advertises `Ctrl+a Escape`, `Ctrl+a p`, `Ctrl+a v`, `Ctrl+a n` or `Ctrl + \`,
+none of which this repo binds.
 
-Structural fix (larger): turn `read_key`'s `case` into a table and generate the
-TUI section of `docs/KEYBINDINGS.md` and the help viewer from it, with a test
-that diffs generated against committed. Global keys can be generated the same
-way from `tmux list-keys -N`, which the palette already parses at runtime.
+What survives is the cause, not the symptom: the keymap has no single source.
+`read_key`'s `case`, `session-dock.tmux`'s `bind-key` calls,
+`docs/KEYBINDINGS.md` and `scripts/tmux-help-viewer` are four hand-maintained
+copies, and `scripts/tmux-command-palette`'s alias map still names a command
+(`tmux-session-launcher --open-sidebar`) the code no longer issues.
+
+Fix: make `read_key` a table, generate the TUI section and the help viewer
+from it, generate the global table from `tmux list-keys -N` (which the palette
+already parses at runtime), and add a test that diffs generated against
+committed.
 
 ### R3 — Provisioning lock falls through instead of giving up · S · low risk
 
@@ -122,8 +130,11 @@ Parallelism is blocked by exactly two things, both fixable: the leak sweep in
 kill a neighbour's server), and the default trace path is a shared
 `/tmp` file when a test enables `TRACE=1` without naming one.
 
-Also worth doing here: 8 of the 18 `test-keyboard-e2e.sh` scenarios have no CI
-wrapper, so they never run; `--health` should fail on an unwrapped scenario.
+Two concrete symptoms to fix while in here: 8 of the 18 `test-keyboard-e2e.sh`
+scenarios have no CI wrapper, so they never run (`--health` should fail on an
+unwrapped scenario), and `test-session-name-zero.sh` fails in roughly half of
+full-suite runs while passing every time on its own - a wait budget that is
+adequate on an idle machine and not on a loaded one.
 
 ### R7 — Monolith split · L · medium risk
 

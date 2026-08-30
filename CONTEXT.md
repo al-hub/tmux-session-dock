@@ -2,6 +2,9 @@
 
 Session Dock keeps a navigable presenter beside tmux work panes while preserving terminal continuity across managed windows.
 
+These are the words the code, the tests, the commit messages and the docs use.
+Prefer them over the alternatives listed under each entry.
+
 ## Language
 
 **Presenter Window**:
@@ -37,5 +40,29 @@ The asynchronous running, idle, or gone status of a session's tracked AI CLI, co
 _Avoid_: Animation state, waiting state
 
 **AI Activity Intensity**:
-A future measure of how continuously a running AI CLI changes, distinct from its running, idle, or gone state.
+A future measure of how continuously a running AI CLI changes, distinct from its running, idle, or gone state. Not implemented.
 _Avoid_: Busy state, gradient state
+
+**Transition**:
+One session switch, from the moment a target is chosen until the client is on it and its presenter has rendered a frame for it. Owned by exactly one process, which holds the Transition Lock for its duration.
+_Avoid_: Switch operation, transaction
+
+**Transition Lock**:
+The server-wide `mkdir`+pid lock that admits one Transition at a time. Liveness is decided by the owner process, never by how long the lock has existed.
+_Avoid_: Switch lease, transition timeout
+
+**Slot Mutation Lock**:
+The server-wide `mkdir`+pid lock held while Subpane Slots are joined or parked, so two processes never interleave moves of the same slot. Distinct from the transaction marker, which only asks observers to skip snapshots.
+_Avoid_: Subpane lock, hub lock
+
+**Guard Flag**:
+A tmux option that suppresses hooks while a toggle or restore is in flight. Carries the owner pid and a deadline, so a writer that dies cannot suppress the server forever.
+_Avoid_: Busy flag, batch flag
+
+**Hook Gate**:
+The `if-shell -F` condition wrapped around a layout or focus hook so the tmux server itself decides whether the hook is worth a process.
+_Avoid_: Hook filter, early return
+
+**Switch Recovery**:
+What happens when a Transition cannot reach its target because that window's presenter pane is dead or never became ready: a diagnosis is shown and the user chooses (`popup`), the presenter is respawned silently (`auto`), or the switch aborts (`off`).
+_Avoid_: Retry, failover
