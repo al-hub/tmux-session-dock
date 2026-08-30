@@ -2,6 +2,15 @@
 # Typed Tmux Port & Adapter Isolation Module
 set -euo pipefail
 
+# Sidebar pane identity.  Defined here (the first tmux-facing module) so the
+# port functions below and the lib-only test harnesses share one definition.
+SIDEBAR_TITLE="dotfiles-session-sidebar"
+SIDEBAR_WINDOW_PANE_OPTION="@dotfiles_sidebar_pane_id"
+SIDEBAR_WINDOW_READY_OPTION="@dotfiles_sidebar_ready"
+
+# The core entrypoint defines the real tracer; lib-only harnesses get a no-op.
+declare -f trace_event >/dev/null 2>&1 || eval 'trace_event() { :; }'
+
 if ! declare -f sidebar_tmux_cmd >/dev/null 2>&1; then
     sidebar_tmux_cmd() {
         if [ "${TMUX_SESSION_LAUNCHER_TRACE:-0}" = "1" ] && declare -f trace_event >/dev/null 2>&1; then
@@ -110,12 +119,28 @@ sidebar_tmux_list_user_sessions() {
         awk -F "$tab" '$1 != "dotfiles-subpane-hub" { print $0 }'
 }
 
+# The sidebar pane of a window: the pane carrying the sidebar title (or the
+# @dotfiles_sidebar_pane mark).  When no such pane exists any stored pane
+# metadata is stale and is cleared here, together with the in-process
+# readiness cache the switch path keeps per window.
 sidebar_window_pane() {
-    local window_id="${1:-}"
+    local window_id="${1:-}" actual_pane stored_pane
     [ -n "$window_id" ] || return 0
-    local title="${SIDEBAR_TITLE:-dotfiles-session-sidebar}"
-    sidebar_tmux_cmd list-panes -t "$window_id" -F '#{pane_id}|#{@dotfiles_sidebar_pane}|#{pane_title}' 2>/dev/null |
-        awk -F '|' -v title="$title" '$2 == "1" || $3 == title { print $1; exit }'
+    actual_pane="$(sidebar_tmux_cmd list-panes -t "$window_id" -F '#{pane_id}|#{@dotfiles_sidebar_pane}|#{pane_title}' 2>/dev/null |
+        awk -F '|' -v title="$SIDEBAR_TITLE" '$2 == "1" || $3 == title { print $1; exit }' || true)"
+    if [ -z "$actual_pane" ]; then
+        local win_clean="${window_id//[^a-zA-Z0-9_]/_}"
+        printf -v "_cache_window_ready_${win_clean}" '0'
+        printf -v "_cache_window_pane_${win_clean}" ''
+        stored_pane="$(sidebar_tmux_cmd show-option -wqv -t "$window_id" "$SIDEBAR_WINDOW_PANE_OPTION" 2>/dev/null || true)"
+        if [ -n "$stored_pane" ]; then
+            sidebar_tmux_cmd set-option -wq -t "$window_id" "$SIDEBAR_WINDOW_PANE_OPTION" "" 2>/dev/null || true
+            sidebar_tmux_cmd set-option -wq -t "$window_id" "$SIDEBAR_WINDOW_READY_OPTION" 0 2>/dev/null || true
+            trace_event "sidebar.stale-metadata window=$window_id stored_pane=$stored_pane ready=0 reason=pane-missing"
+        fi
+        return 0
+    fi
+    printf '%s\n' "$actual_pane"
 }
 
 sidebar_window_subpane() {
@@ -549,7 +574,10 @@ toggle_sidebar_subpane_global() {
     fi
 }
 
-provision_sidebar_window() {
+# Test-harness primitive: split one titled sidebar pane into a window without
+# the lifecycle machinery (locks, reconcile, respawn, layout restore) of the
+# core provision_sidebar_window.  Not used by production code.
+sidebar_port_split_sidebar_pane() {
     local window_id="${1:-}" width="${2:-30}" cmd="${3:-}" subpane_enabled="${4:-}"
     [ -n "$window_id" ] || return 1
     local win_sess

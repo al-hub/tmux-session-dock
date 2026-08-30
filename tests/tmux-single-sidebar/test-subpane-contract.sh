@@ -13,7 +13,7 @@ source "$SCRIPT_DIR/scripts/lib/sidebar_port_tmux.sh"
 source "$SCRIPT_DIR/scripts/tmux-session-launcher" --source-only 2>/dev/null || true
 
 # Provision sidebar
-provision_sidebar_window "$win_id" 30
+sidebar_port_split_sidebar_pane "$win_id" 30
 launcher_pane="$(sidebar_window_pane "$win_id" || true)"
 [ -n "$launcher_pane" ] || { echo "FAIL: launcher pane not created"; tmux -L "$SOCKET" kill-server; exit 1; }
 

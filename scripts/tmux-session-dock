@@ -74,7 +74,6 @@ if [ "$(type -t tmux 2>/dev/null || true)" != function ]; then
     }
 fi
 
-SIDEBAR_TITLE="dotfiles-session-sidebar"
 SIDEBAR_WIDTH="${TMUX_SESSION_SIDEBAR_WIDTH:-35}"
 SIDEBAR_WIDTH_STATE_FILE="${TMUX_SESSION_SIDEBAR_WIDTH_STATE_FILE:-${XDG_STATE_HOME:-$HOME/.local/state}/dotfiles/tmux-sidebar-width}"
 SIDEBAR_BUSY_SECONDS="${TMUX_SESSION_SIDEBAR_BUSY_SECONDS:-10}"
@@ -96,6 +95,9 @@ SIDEBAR_AI_OBSERVER_IDLE_EXIT_SECONDS="${TMUX_SESSION_SIDEBAR_AI_OBSERVER_IDLE_E
 # is not prompting, which unblocks a read stuck without a timer).
 SIDEBAR_WATCHDOG_MODE="${TMUX_SESSION_SIDEBAR_WATCHDOG:-log}"
 SIDEBAR_WATCHDOG_STALE_SECONDS="${TMUX_SESSION_SIDEBAR_WATCHDOG_STALE_SECONDS:-10}"
+# A busy operation (save/delete/restore) is trusted only while its owner
+# process is alive and this many seconds have not passed since it began.
+SIDEBAR_OPERATION_TTL_SECONDS="${TMUX_SESSION_SIDEBAR_OPERATION_TTL_SECONDS:-120}"
 SIDEBAR_TRANSITION_RENDER_PENDING_GRACE_SECONDS="${TMUX_SESSION_SIDEBAR_TRANSITION_RENDER_PENDING_GRACE_SECONDS:-3}"
 SIDEBAR_FORCE_REFRESH_CHECK_SECONDS="${TMUX_SESSION_SIDEBAR_FORCE_REFRESH_CHECK_SECONDS:-1}"
 SIDEBAR_KEY_MAINTENANCE_COOLDOWN_MS="${TMUX_SESSION_SIDEBAR_KEY_MAINTENANCE_COOLDOWN_MS:-250}"
@@ -116,8 +118,6 @@ SIDEBAR_OPERATION_OPTION="@dotfiles_sidebar_operation"
 SIDEBAR_MANAGED_OPTION="@dotfiles_sidebar_managed"
 SIDEBAR_MODEL_OPTION="@dotfiles_sidebar_model"
 SIDEBAR_ENABLED_OPTION="@dotfiles_sidebar_enabled"
-SIDEBAR_WINDOW_PANE_OPTION="@dotfiles_sidebar_pane_id"
-SIDEBAR_WINDOW_READY_OPTION="@dotfiles_sidebar_ready"
 SIDEBAR_WINDOW_GENERATION_OPTION="@dotfiles_sidebar_generation"
 SIDEBAR_HOOK_GUARD_OPTION="@dotfiles_sidebar_hook_guard"
 # Deadline (epoch ns) until which layout hooks are the product's own doing.
@@ -561,18 +561,53 @@ sidebar_operation_state()
     sidebar_env_get "$(sidebar_runtime_env_key "$SIDEBAR_OPERATION_OPTION")"
 }
 
+# Operation state format: "<state>:<operation_id>[:<owner_pid>:<deadline_epoch>]".
+# The owner pid and deadline let every reader recognise an operation whose
+# process died (SIGKILL, server stall) or overran its budget, so one crashed
+# presenter cannot leave every other presenter refusing input forever.  A
+# two-field value (older writers, tests) is trusted as before.
+sidebar_operation_is_stale()
+{
+    local value="$1" rest owner_pid deadline now
+    rest="${value#*:}"           # id[:pid:deadline]
+    case "$rest" in *:*:*) ;; *) return 1 ;; esac
+    rest="${rest#*:}"            # pid:deadline
+    owner_pid="${rest%%:*}"
+    deadline="${rest#*:}"
+    case "$owner_pid" in ''|*[!0-9]*) return 1 ;; esac
+    if ! kill -0 "$owner_pid" 2>/dev/null; then
+        return 0
+    fi
+    case "$deadline" in ''|*[!0-9]*) return 1 ;; esac
+    now="${EPOCHSECONDS:-$(date +%s)}"
+    [ "$now" -gt "$deadline" ]
+}
+
 sidebar_operation_busy()
 {
-    case "$(sidebar_operation_state)" in
-        saving:*|deleting:*|restoring:*|moving:*) return 0 ;;
+    local value
+    value="$(sidebar_operation_state)"
+    case "$value" in
+        saving:*|deleting:*|restoring:*|moving:*) ;;
         *) return 1 ;;
     esac
+    if sidebar_operation_is_stale "$value"; then
+        trace_event "operation.stale-clear state=$value"
+        sidebar_env_set "$(sidebar_runtime_env_key "$SIDEBAR_OPERATION_OPTION")" "idle:stale-cleared"
+        return 1
+    fi
+    return 0
 }
 
 sidebar_operation_set()
 {
-    local state="$1" operation_id="${2:-none}"
-    sidebar_env_set "$(sidebar_runtime_env_key "$SIDEBAR_OPERATION_OPTION")" "$state:$operation_id"
+    local state="$1" operation_id="${2:-none}" value
+    case "$state" in
+        saving|deleting|restoring|moving)
+            value="$state:$operation_id:$$:$(( ${EPOCHSECONDS:-$(date +%s)} + SIDEBAR_OPERATION_TTL_SECONDS ))" ;;
+        *) value="$state:$operation_id" ;;
+    esac
+    sidebar_env_set "$(sidebar_runtime_env_key "$SIDEBAR_OPERATION_OPTION")" "$value"
     trace_event "operation.state state=$state operation_id=$operation_id"
 }
 
@@ -588,7 +623,7 @@ sidebar_operation_is_owner()
     [ -n "$expected_id" ] || return 1
     current_state="$(sidebar_operation_state)"
     case "$current_state" in
-        *:"$expected_id") return 0 ;;
+        *:"$expected_id"|*:"$expected_id":*) return 0 ;;
         *) return 1 ;;
     esac
 }
@@ -661,6 +696,7 @@ transition_lock_acquire()
     if mkdir "$lock_dir" 2>/dev/null; then
         printf '%s\n' "${BASHPID:-$$}" > "$lock_dir/pid" 2>/dev/null || true
         SIDEBAR_TRANSITION_LOCK_DIR="$lock_dir"
+        SIDEBAR_TRANSITION_LOCK_PID="${BASHPID:-$$}"
         trace_event "transition.lock result=acquired path=$lock_dir"
         return 0
     fi
@@ -671,6 +707,7 @@ transition_lock_acquire()
         if mkdir "$lock_dir" 2>/dev/null; then
             printf '%s\n' "${BASHPID:-$$}" > "$lock_dir/pid" 2>/dev/null || true
             SIDEBAR_TRANSITION_LOCK_DIR="$lock_dir"
+            SIDEBAR_TRANSITION_LOCK_PID="${BASHPID:-$$}"
             trace_event "transition.lock result=reclaimed path=$lock_dir owner=$owner_pid"
             return 0
         fi
@@ -679,14 +716,25 @@ transition_lock_acquire()
     return 1
 }
 
+# Only the process that acquired the lock may remove it.  A lock that was
+# reclaimed by another switch after this process lost it (dead-pid reclaim)
+# belongs to that switch now; deleting it here would end their transaction.
 transition_lock_release()
 {
-    local lock_dir="${SIDEBAR_TRANSITION_LOCK_DIR:-}"
+    local lock_dir="${SIDEBAR_TRANSITION_LOCK_DIR:-}" owner_pid
     [ -n "$lock_dir" ] || return 0
+    owner_pid="$(cat "$lock_dir/pid" 2>/dev/null || true)"
+    if [ -n "$owner_pid" ] && [ "$owner_pid" != "${SIDEBAR_TRANSITION_LOCK_PID:-}" ]; then
+        trace_event "transition.lock result=release-skipped path=$lock_dir owner=$owner_pid self=${SIDEBAR_TRANSITION_LOCK_PID:-none}"
+        SIDEBAR_TRANSITION_LOCK_DIR=""
+        SIDEBAR_TRANSITION_LOCK_PID=""
+        return 0
+    fi
     rm -f "$lock_dir/pid" 2>/dev/null || true
     rmdir "$lock_dir" 2>/dev/null || true
     trace_event "transition.lock result=released path=$lock_dir"
     SIDEBAR_TRANSITION_LOCK_DIR=""
+    SIDEBAR_TRANSITION_LOCK_PID=""
 }
 
 transition_is_active()
@@ -698,7 +746,10 @@ transition_is_active()
             # Cross-check: if the filesystem lock is absent or its owning
             # process is dead, this transition is stale.  Auto-clear the
             # option so subsequent switches are not permanently blocked.
-            local lock_dir owner_pid lock_age_ms=0 lock_mtime_ms=0 now_ms=0
+            # Liveness is the only criterion: a slow but alive switch (a
+            # provisioning wait can legitimately run 5 s) must never be
+            # torn down by an age heuristic.
+            local lock_dir owner_pid
             lock_dir="$(transition_lock_path)"
             if [ ! -d "$lock_dir" ]; then
                 trace_event "transition.stale-clear reason=lock-dir-absent state=$state path=$lock_dir"
@@ -712,18 +763,6 @@ transition_is_active()
                 rmdir "$lock_dir" 2>/dev/null || true
                 transition_state_set "$(printf '%s' "$state" | sed 's/result=[^;]*/result=stale-cleared/')"
                 return 1
-            fi
-            # Lease timeout safety: if a transition lock has been running > 2500ms, clear it
-            if [ -d "$lock_dir" ]; then
-                lock_mtime_ms="$(stat -c %Y "$lock_dir" 2>/dev/null || stat -c %Y "$lock_dir/pid" 2>/dev/null || echo 0)"
-                now_ms="$(date +%s)"
-                if [ "$lock_mtime_ms" -gt 0 ] && [ "$((now_ms - lock_mtime_ms))" -ge 3 ]; then
-                    trace_event "transition.stale-clear reason=lock-lease-timeout state=$state mtime=$lock_mtime_ms now=$now_ms"
-                    rm -f "$lock_dir/pid" 2>/dev/null || true
-                    rmdir "$lock_dir" 2>/dev/null || true
-                    transition_state_set "$(printf '%s' "$state" | sed 's/result=[^;]*/result=stale-cleared/')"
-                    return 1
-                fi
             fi
             return 0
             ;;
@@ -1133,17 +1172,6 @@ install_sidebar_hooks()
     _sidebar_hooks_installed=true
 }
 
-sidebar_layout_hook_guard_active()
-{
-    local guard now
-    guard="$(sidebar_env_get "$SIDEBAR_LAYOUT_HOOK_GUARD_ENV")"
-    case "$guard" in
-        ''|*[!0-9]*) return 1 ;;
-    esac
-    now="$(date +%s%N)"
-    [ "$guard" -gt "$now" ]
-}
-
 set_sidebar_layout_hook_guard()
 {
     local duration_ms="${1:-500}"
@@ -1315,29 +1343,6 @@ find_global_sidebar_pane()
     sidebar_tmux_global_sidebar_pane
 }
 
-
-sidebar_window_pane()
-{
-    local window_id="$1" actual_pane stored_pane
-    actual_pane="$(sidebar_tmux_cmd list-panes -t "$window_id" \
-        -F '#{pane_id}|#{pane_title}' 2>/dev/null |
-        awk -F '|' -v title="$SIDEBAR_TITLE" '$2 == title { print $1; exit }' || true)"
-    if [ -z "$actual_pane" ]; then
-        if [ -n "$window_id" ]; then
-            local win_clean="${window_id//[^a-zA-Z0-9_]/_}"
-            printf -v "_cache_window_ready_${win_clean}" '0'
-            printf -v "_cache_window_pane_${win_clean}" ''
-        fi
-        stored_pane="$(sidebar_tmux_cmd show-option -wqv -t "$window_id" "$SIDEBAR_WINDOW_PANE_OPTION" 2>/dev/null || true)"
-        if [ -n "$stored_pane" ]; then
-            sidebar_tmux_cmd set-option -wq -t "$window_id" "$SIDEBAR_WINDOW_PANE_OPTION" "" 2>/dev/null || true
-            sidebar_tmux_cmd set-option -wq -t "$window_id" "$SIDEBAR_WINDOW_READY_OPTION" 0 2>/dev/null || true
-            trace_event "sidebar.stale-metadata window=$window_id stored_pane=$stored_pane ready=0 reason=pane-missing"
-        fi
-        return 0
-    fi
-    printf '%s\n' "$actual_pane"
-}
 
 sidebar_provisioning_active()
 {
@@ -2155,7 +2160,12 @@ wait_for_sidebar_window_ready()
 #     auto   respawn the sidebar and retry silently
 #     off    abort as before (footer message only)
 # ------------------------------------------------------------------------------
-SIDEBAR_TARGET_FAILURE=""
+# Result contract of ensure_target_sidebar_window (called directly, never in a
+# subshell, so the caller sees both values): pane id on success, reason on
+# failure (dead-pane | not-ready-existing | provision-failed | not-ready |
+# verify-failed | invalid-target | manage-failed).
+ensure_target_result_pane=""
+ensure_target_result_reason=""
 SWITCH_RECOVERY_RETRY=0
 
 switch_recovery_mode()
@@ -2238,22 +2248,12 @@ run_switch_recovery_popup()
 
 # Diagnose the failed target and ask the user (popup). Prints the chosen
 # action: respawn | switch-anyway | cancel. Runs with NO transaction held: a
-# popup can stay open for a long time and a presenter that starts meanwhile
-# clears any transition lease older than the stale timeout.
+# popup can stay open for a long time and would block every other switch on
+# the server while it does.
 switch_recovery_prompt()
 {
     local session_name_value="$1" window_id="$2"
-    local reason="${SIDEBAR_TARGET_FAILURE:-}" action="cancel" diag_file choice_file probe_pane probe_dead
-    if [ -z "$reason" ]; then
-        # ensure_target_sidebar_window ran in a subshell; classify from live state.
-        probe_pane="$(sidebar_window_pane "$window_id" 2>/dev/null || true)"
-        if [ -z "$probe_pane" ]; then
-            reason="no-sidebar-pane"
-        else
-            probe_dead="$(sidebar_tmux_cmd display-message -p -t "$probe_pane" '#{pane_dead}' 2>/dev/null || true)"
-            [ "$probe_dead" = 1 ] && reason="dead-pane" || reason="not-ready"
-        fi
-    fi
+    local reason="${ensure_target_result_reason:-unknown}" action="cancel" diag_file choice_file
     trace_event "switch.recovery.begin session=$session_name_value window=$window_id reason=$reason mode=popup"
     diag_file="$(mktemp "${TMPDIR:-/tmp}/dock-switch-recovery.XXXXXX" 2>/dev/null || echo "/tmp/dock-switch-recovery.$$")"
     choice_file="$diag_file.choice"
@@ -2288,17 +2288,30 @@ ensure_target_sidebar_window()
 {
     local session_name_value="$1" window_id="$2" width="${3:-$(sidebar_width)}"
     local pane_id pane_state pane_dead pane_pid ready
-    [ -n "$session_name_value" ] && [ -n "$window_id" ] || return 1
-    mark_session_managed "$session_name_value" || return 1
+    ensure_target_result_pane=""
+    ensure_target_result_reason=""
+    [ -n "$session_name_value" ] && [ -n "$window_id" ] || { ensure_target_result_reason="invalid-target"; return 1; }
+    mark_session_managed "$session_name_value" || { ensure_target_result_reason="manage-failed"; return 1; }
 
     local win_clean="${window_id//[^a-zA-Z0-9_]/_}"
     local cache_ready_var="_cache_window_ready_${win_clean}"
     local cache_pane_var="_cache_window_pane_${win_clean}"
     if [ "${!cache_ready_var:-}" = 1 ] && [ -n "${!cache_pane_var:-}" ]; then
+        # The cache says this window was ready on an earlier switch; the
+        # presenter may have died since (remain-on-exit keeps the pane), so
+        # confirm liveness with one lookup before trusting it.
         pane_id="${!cache_pane_var}"
-        trace_event "sidebar.target.ensure.end session=$session_name_value window=$window_id pane=$pane_id result=ready-fast"
-        printf '%s\n' "$pane_id"
-        return 0
+        pane_state="$(sidebar_tmux_cmd display-message -p -t "$pane_id" '#{pane_dead}|#{pane_pid}' 2>/dev/null || true)"
+        pane_dead="${pane_state%%|*}"
+        pane_pid="${pane_state#*|}"
+        if [ "$pane_dead" = 0 ] && [ -n "$pane_pid" ]; then
+            trace_event "sidebar.target.ensure.end session=$session_name_value window=$window_id pane=$pane_id result=ready-fast"
+            ensure_target_result_pane="$pane_id"
+            return 0
+        fi
+        printf -v "$cache_ready_var" '0'
+        printf -v "$cache_pane_var" ''
+        trace_event "sidebar.target.ensure.cache-invalid session=$session_name_value window=$window_id pane=$pane_id dead=${pane_dead:-none} pid=${pane_pid:-none}"
     fi
 
     pane_id="$(sidebar_window_pane "$window_id" || true)"
@@ -2320,7 +2333,7 @@ ensure_target_sidebar_window()
             printf -v "$cache_ready_var" '1'
             printf -v "$cache_pane_var" '%s' "$pane_id"
             trace_event "sidebar.target.ensure.end session=$session_name_value window=$window_id pane=$pane_id pid=$pane_pid result=ready-fast"
-            printf '%s\n' "$pane_id"
+            ensure_target_result_pane="$pane_id"
             return 0
         fi
         # A dead pane (remain-on-exit shell of a presenter that exited) will
@@ -2329,7 +2342,7 @@ ensure_target_sidebar_window()
         if [ "$pane_dead" = 1 ]; then
             printf -v "$cache_ready_var" '0'
             printf -v "$cache_pane_var" ''
-            SIDEBAR_TARGET_FAILURE="dead-pane"
+            ensure_target_result_reason="dead-pane"
             trace_event "sidebar.target.ensure.end session=$session_name_value window=$window_id pane=$pane_id result=dead-pane"
             return 1
         fi
@@ -2341,7 +2354,7 @@ ensure_target_sidebar_window()
         wait_for_sidebar_window_ready "$window_id" || {
             printf -v "$cache_ready_var" '0'
             printf -v "$cache_pane_var" ''
-            SIDEBAR_TARGET_FAILURE="not-ready-existing"
+            ensure_target_result_reason="not-ready-existing"
             trace_event "sidebar.target.ensure.end session=$session_name_value window=$window_id pane=$pane_id result=not-ready-existing"
             return 1
         }
@@ -2351,14 +2364,14 @@ ensure_target_sidebar_window()
         provision_sidebar_window "$window_id" "$width" || {
             printf -v "$cache_ready_var" '0'
             printf -v "$cache_pane_var" ''
-            SIDEBAR_TARGET_FAILURE="provision-failed"
+            ensure_target_result_reason="provision-failed"
             trace_event "sidebar.target.ensure.end session=$session_name_value window=$window_id result=provision-failed"
             return 1
         }
         wait_for_sidebar_window_ready "$window_id" || {
             printf -v "$cache_ready_var" '0'
             printf -v "$cache_pane_var" ''
-            SIDEBAR_TARGET_FAILURE="not-ready"
+            ensure_target_result_reason="not-ready"
             trace_event "sidebar.target.ensure.end session=$session_name_value window=$window_id result=not-ready"
             return 1
         }
@@ -2367,14 +2380,14 @@ ensure_target_sidebar_window()
     sidebar_window_ready "$window_id" || {
         printf -v "$cache_ready_var" '0'
         printf -v "$cache_pane_var" ''
-        SIDEBAR_TARGET_FAILURE="verify-failed"
+        ensure_target_result_reason="verify-failed"
         trace_event "sidebar.target.ensure.end session=$session_name_value window=$window_id pane=${pane_id:-none} result=verify-failed"
         return 1
     }
     printf -v "$cache_ready_var" '1'
     printf -v "$cache_pane_var" '%s' "$pane_id"
     trace_event "sidebar.target.ensure.end session=$session_name_value window=$window_id pane=$pane_id result=ready"
-    printf '%s\n' "$pane_id"
+    ensure_target_result_pane="$pane_id"
 }
 
 provision_managed_sidebars()
@@ -3172,8 +3185,8 @@ switch_session()
         switch_phase_start_us="$(metrics_now_us)"
     fi
     transition_phase_set ENSURE_TARGET_SIDEBAR "$operation_id"
-    SIDEBAR_TARGET_FAILURE=""
-    sidebar_pane="$(ensure_target_sidebar_window "$session_name" "$target_window" "$(sidebar_width)" || true)"
+    ensure_target_sidebar_window "$session_name" "$target_window" "$(sidebar_width)" || true
+    sidebar_pane="$ensure_target_result_pane"
     if [ -z "$sidebar_pane" ]; then
         local recovery_mode recovery_action retry_rc=0
         recovery_mode="$(switch_recovery_mode)"
@@ -3182,7 +3195,6 @@ switch_session()
             # restarts the switch as a fresh transaction.
             selection_sync_set "$target_window" ""
             transition_context_finish failed target-sidebar-unavailable "$operation_id"
-            sidebar_operation_set idle "$operation_id"
             recovery_action="$(switch_recovery_prompt "$session_name" "$target_window")"
             case "$recovery_action" in
                 respawn)
@@ -3211,9 +3223,10 @@ switch_session()
                     ;;
             esac
         elif [ "$recovery_mode" = auto ]; then
-            trace_event "switch.recovery.begin session=$session_name window=$target_window reason=${SIDEBAR_TARGET_FAILURE:-unknown} mode=auto"
+            trace_event "switch.recovery.begin session=$session_name window=$target_window reason=${ensure_target_result_reason:-unknown} mode=auto"
             if switch_recovery_respawn "$target_window" "$(sidebar_width)"; then
-                sidebar_pane="$(ensure_target_sidebar_window "$session_name" "$target_window" "$(sidebar_width)" || true)"
+                ensure_target_sidebar_window "$session_name" "$target_window" "$(sidebar_width)" || true
+                sidebar_pane="$ensure_target_result_pane"
                 [ -n "$sidebar_pane" ] && message_line "sidebar respawned for $session_name"
             fi
             trace_event "switch.recovery.end session=$session_name result=$([ -n "$sidebar_pane" ] && echo respawned || echo respawn-failed)"
@@ -3353,7 +3366,6 @@ switch_session()
     if [ -n "$sidebar_pane" ]; then
         tmux select-pane -t "$sidebar_pane" >/dev/null 2>&1 || {
             transition_context_finish failed sidebar-focus "$operation_id"
-            sidebar_operation_set idle "$operation_id"
             trace_event "switch.abort reason=sidebar-focus-failed session=$session_name window=$target_window pane=$sidebar_pane"
             return 1
         }
@@ -3367,7 +3379,6 @@ switch_session()
     fi
     if ! wait_for_sidebar_input_ready "$target_window" "$sidebar_pane"; then
         transition_context_finish failed sidebar-input-unready "$operation_id"
-        sidebar_operation_set idle "$operation_id"
         message_line "session switch failed: sidebar input is not ready"
         trace_event "switch.abort reason=sidebar-input-unready session=$session_name window=$target_window pane=${sidebar_pane:-none}"
         return 1
@@ -3406,7 +3417,6 @@ switch_session()
     fi
     if ! wait_for_sidebar_content_ready "$target_window" "$session_name"; then
         transition_context_finish failed sidebar-content-unready "$operation_id"
-        sidebar_operation_set idle "$operation_id"
         message_line "session switch failed: sidebar content is not ready"
         trace_event "switch.abort reason=sidebar-content-unready session=$session_name window=$target_window pane=${sidebar_pane:-none}"
         return 1
@@ -3415,7 +3425,6 @@ switch_session()
     selection_sync_set "$target_window" ""
     selection_sync_ack_set "$target_window" ""
     transition_context_finish success window-local-ready "$operation_id"
-    sidebar_operation_set idle "$operation_id"
     trace_event "switch.end mode=window-local session=$session_name pane=$sidebar_pane client=$client_tty result=ready"
     # Diagnostic capture must not extend the user-visible transition boundary.
     # The transaction is complete once switch.end is emitted; record the

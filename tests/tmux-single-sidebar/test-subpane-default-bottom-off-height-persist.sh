@@ -32,7 +32,7 @@ tmuxc new-session -d -s "test-main" -x 120 -y 40 'sleep 60'
 tmuxc set-option -gq '@dotfiles_sidebar_owner_client' "/dev/null"
 
 win_id="$(tmuxc display-message -t "test-main:" -p '#{window_id}')"
-provision_sidebar_window "$win_id" 35
+sidebar_port_split_sidebar_pane "$win_id" 35
 launcher_pane="$(sidebar_window_pane "$win_id")"
 [ -n "$launcher_pane" ] || { echo "FAIL: launcher pane missing"; exit 1; }
 
@@ -92,7 +92,7 @@ sleep 0.3
 echo "=== [4/4] Starting NEW fresh tmux server and verifying cold boot invariants ==="
 tmuxc new-session -d -s "test-restart" -x 120 -y 40 'sleep 60'
 win_id2="$(tmuxc display-message -t "test-restart:" -p '#{window_id}')"
-provision_sidebar_window "$win_id2" 35
+sidebar_port_split_sidebar_pane "$win_id2" 35
 launcher_pane2="$(sidebar_window_pane "$win_id2")"
 
 # Invariant 1: Fresh boot must still be OFF

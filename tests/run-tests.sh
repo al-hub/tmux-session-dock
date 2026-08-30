@@ -91,6 +91,13 @@ health_check() {
         fi
     done < <(cd "$TESTS_DIR" && find . -path ./lib -prune -o -type f -name 'test-*.sh' -print | sed 's#^\./##' | sort)
 
+    # Every shell function has exactly one home. A function defined in both a
+    # lib module and the core entrypoint is dead in one of them, and lib-only
+    # test harnesses would exercise a different body than production runs.
+    while IFS= read -r entry; do
+        echo -e "${RED}[HEALTH] function defined twice (lib + core): ${entry}${NC}"; problems=$((problems + 1))
+    done < <(grep -hoE '^[A-Za-z_][A-Za-z0-9_]*\(\)' "$REPO_ROOT/scripts/tmux-session-dock" "$REPO_ROOT"/scripts/lib/*.sh | sort | uniq -d)
+
     if [ "$problems" -eq 0 ]; then
         echo -e "${GREEN}[HEALTH] ok${NC} — ci: $(read_list "$CI_LIST" | wc -l), manual: $(read_list "$MANUAL_LIST" | wc -l)"
         return 0

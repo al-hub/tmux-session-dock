@@ -50,7 +50,7 @@ SIG_FILE="$RUN_DIR/sigwinch_received"
 TEST_PRESENTER_CMD="bash -c 'trap \"echo winch >> \\\"$SIG_FILE\\\"\" WINCH; touch \"$RUN_DIR/ready\"; while true; do sleep 0.1; done'"
 
 # Provision sidebar running the test presenter command
-sb_pane="$(provision_sidebar_window "$win_b" 30 "$TEST_PRESENTER_CMD")"
+sb_pane="$(sidebar_port_split_sidebar_pane "$win_b" 30 "$TEST_PRESENTER_CMD")"
 [ -n "$sb_pane" ] || { echo "FAIL: failed to provision sidebar in win_b"; exit 1; }
 
 # Wait for test presenter to become ready
@@ -90,7 +90,7 @@ TEST_HOT_CMD="bash -c 'trap \"echo hot_winch >> \\\"$SIG_FILE_HOT\\\"\" WINCH; t
 
 # Clean up existing sidebar and provision fresh one in win_a
 destroy_sidebar_window "$win_a"
-sb_pane_a="$(provision_sidebar_window "$win_a" 30 "$TEST_HOT_CMD")"
+sb_pane_a="$(sidebar_port_split_sidebar_pane "$win_a" 30 "$TEST_HOT_CMD")"
 [ -n "$sb_pane_a" ] || { echo "FAIL: failed to provision sidebar in win_a"; exit 1; }
 
 deadline=$(( $(date +%s) + 5 ))

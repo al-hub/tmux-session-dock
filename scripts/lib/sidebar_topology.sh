@@ -36,7 +36,14 @@ topology_ensure_window() {
     topology_inspect "$window_id" sb sub work act_w
 
     if [ -z "$sb" ]; then
-        provision_sidebar_window "$window_id" "$width" "" "$subpane_enabled" >/dev/null 2>&1 || true
+        # With the core loaded, provisioning goes through its lifecycle
+        # (locks, reconcile, respawn); the lib-only harness has just the
+        # split primitive.  topology_ensure_window itself is test-only.
+        if declare -f provision_sidebar_window >/dev/null 2>&1; then
+            provision_sidebar_window "$window_id" "$width" "" "$subpane_enabled" >/dev/null 2>&1 || true
+        else
+            sidebar_port_split_sidebar_pane "$window_id" "$width" "" "$subpane_enabled" >/dev/null 2>&1 || true
+        fi
         topology_inspect "$window_id" sb sub work act_w
     fi
 
