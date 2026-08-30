@@ -243,6 +243,48 @@ or a header shaped unlike the three literals, would pass it. Feeding it a pane
 captured from a live presenter would bring the whole render path inside the
 contract.
 
+### R9 — two AI Activity Observers can run at once for a moment · S · low risk
+
+The observer is meant to be one per server; `run_ai_observer` enforces it with a
+`mkdir` lock plus a pid file, and `ensure_ai_observer` throttles each presenter
+to one spawn every five seconds. Under load that is not quite enough, and it has
+been seen twice:
+
+- Restarting four presenters at once on a live server left two observers
+  running. They converged on their own after about six seconds.
+- `test-shared-observer-e2e` failed once in a loaded full run with "expected
+  exactly one observer for this server, found 2", and passed twice when run
+  alone.
+
+The window is between taking the lock and writing the pid into it: the holder
+does `mkdir` and only then `printf ... > "$lock_dir/pid"`, while a loser polls
+`ai_observer_pid` (which needs that file) ten times at 0.2 s and, if it never
+appears, deletes the lock directory and takes it. A holder that is slow to get
+scheduled therefore looks orphaned. The throttle does not help: it is a
+process-local variable, so four presenters starting together each get their own
+five-second budget and all four spawn.
+
+The consequence today is mild - the state file has a single writer, the extra
+observer exits as soon as it can see the holder's pid, and nothing observed a
+wrong verdict - so this is a correctness tidy, not a live defect.
+
+Fix candidates, cheapest first: write the pid *before* releasing the mkdir (not
+possible directly, so instead treat "lock exists but no pid file yet" as held
+for a grace period rather than as orphaned); or have the loser verify with a
+second, longer poll before reclaiming; or move the spawn throttle into a
+server-wide flag so simultaneous presenters do not each spawn.
+
+Related, and the reason this was written down together with it: the observer is
+started with `run-shell -b`, so tmux tracks the `sh -c` wrapper and reports its
+death. Killing that wrapper (as any `pkill -f` matching the command line will,
+including one typed by an operator) produces the status message
+`'env ... --observe ...' terminated by signal 15`. The bash underneath traps
+`EXIT INT TERM HUP` and exits quietly; the wrapper has no trap. Spawning the
+observer detached (`setsid`) would remove that message *and* change how tmux
+tracks the observer's lifetime, which is why it belongs with this item rather
+than on its own. The message itself was judged operator error, not a defect:
+select the bash and leave the wrapper alone.
+
 ## Not planned
 
 - Raising the subpane slot limit above 3 (R4 makes it possible, it is not itself
