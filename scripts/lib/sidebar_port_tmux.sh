@@ -515,6 +515,21 @@ ensure_sidebar_subpane_window() {
     enabled="$(sidebar_subpane_get_enabled)"
 
     if [ "$enabled" = "1" ]; then
+        if declare -f subpane_hub_get_lease_holder >/dev/null 2>&1; then
+            local current_lease
+            current_lease="$(subpane_hub_get_lease_holder 2>/dev/null || true)"
+            if [ -n "$current_lease" ] && [ "$current_lease" != "$window_id" ]; then
+                if sidebar_tmux_cmd display-message -p -t "$current_lease" '#{window_id}' >/dev/null 2>&1; then
+                    local client_windows
+                    client_windows="$(sidebar_tmux_cmd list-clients -F '#{window_id}' 2>/dev/null || true)"
+                    if ! printf '%s\n' "$client_windows" | grep -qx "$window_id"; then
+                        trace_event "subpane.ensure.skip reason=background-window window=$window_id lease_holder=$current_lease"
+                        return 0
+                    fi
+                fi
+            fi
+        fi
+
         local expected_count=1
         if declare -f subpane_hub_get_count >/dev/null 2>&1; then
             expected_count="$(subpane_hub_get_count)"
