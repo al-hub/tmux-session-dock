@@ -1,7 +1,7 @@
 # tmux-session-dock — orientation for an AI CLI session
 
 Read this first, then only what your task needs. Everything below is true as of
-`v0.3.64`; when it stops being true, fix it here in the same change.
+`v0.3.65`; when it stops being true, fix it here in the same change.
 
 ## What this is
 
@@ -128,6 +128,7 @@ The releases that shaped the current design:
 | `v0.3.58` | The settings popup stopped showing a tick on rows that hold a number, and Space can leave a millisecond budget again. |
 | `v0.3.61` | The AI Activity Observer claims its lock by hard-linking a pid file, so there is no moment where the lock is held but looks orphaned. |
 | `v0.3.64` | `fallback_session` ignores internal infrastructure sessions (`dotfiles-subpane-hub`) so deleting the current session switches cleanly to a surviving user session instead of collapsing the workspace. |
+| `v0.3.65` | `ensure_sidebar_subpane_window` checks active client attachment before migrating subpanes, preventing background session creation (`c` key) from stealing subpanes from the active workspace. |
 
 `docs/ARCHITECTURE-EVOLUTION.md` draws the nine points where the shape of
 the codebase changed, before and after, with the release on each side.
