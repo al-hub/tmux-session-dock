@@ -123,6 +123,18 @@ if [ "$1" = "--preview" ]; then
             echo "  • Benefit   : Low saturation & brightness = lowest arousal (Wilms 2018)"
             echo "  • Best For  : Stress reduction, deadline days & long pairing sessions"
             ;;
+        eye-presbyopia-*)
+            echo "  • Benefit   : 560-590nm Topaz amber, zero chromatic defocus & high acuity"
+            echo "  • Best For  : Presbyopia (aging eyes), accommodation fatigue & small font reading"
+            ;;
+        eye-fovea-*)
+            echo "  • Benefit   : Macular carotenoid (Lutein/Zeaxanthin) 400-460nm HEV attenuation"
+            echo "  • Best For  : Macular protection, long coding sessions & phototoxicity defense"
+            ;;
+        eye-low-scatter-*)
+            echo "  • Benefit   : Rayleigh anti-scatter warm graphite, eliminates veiling glare"
+            echo "  • Best For  : Long-term general coding without color tint or astigmatic halo"
+            ;;
         disp-oled-*)
             echo "  • Benefit   : 100% True Black (#000000) pixel power shutoff"
             echo "  • Best For  : OLED / QD-OLED monitors & laptop battery saving"

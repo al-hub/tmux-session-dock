@@ -1,7 +1,7 @@
 # tmux-session-dock — orientation for an AI CLI session
 
 Read this first, then only what your task needs. Everything below is true as of
-`v0.3.67`; when it stops being true, fix it here in the same change.
+`v0.3.68`; when it stops being true, fix it here in the same change.
 
 ## What this is
 
@@ -131,6 +131,7 @@ The releases that shaped the current design:
 | `v0.3.65` | `ensure_sidebar_subpane_window` checks active client attachment before migrating subpanes, preventing background session creation (`c` key) from stealing subpanes from the active workspace. |
 | `v0.3.66` | `restore_archive` migrates subpane lease to restored session window after switch-client, preventing subpanes from vanishing when opening archived sessions via `o` key. |
 | `v0.3.67` | `delete_session_after_archive` evacuates subpane lease to surviving fallback session before killing the session, preventing subpane processes and content from being reset on session deletion. |
+| `v0.3.68` | Expand eye ergonomics themes to 21 canonical variants (+6 themes: presbyopia-acuity, fovea-lutein, low-scatter-slate in standard and focus pairs) with clinical visual physiology & VDT physics grounding. |
 
 `docs/ARCHITECTURE-EVOLUTION.md` draws the nine points where the shape of
 the codebase changed, before and after, with the release on each side.
