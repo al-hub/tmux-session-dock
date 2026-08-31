@@ -40,6 +40,7 @@ tmux-single-sidebar/test-guard-flag-liveness-contract.sh
 tmux-single-sidebar/test-subpane-migrate-lock-contract.sh
 tmux-single-sidebar/test-subpane-create-session-preserve-contract.sh
 tmux-single-sidebar/test-subpane-restore-session-preserve-contract.sh
+tmux-single-sidebar/test-subpane-delete-session-content-preserve-contract.sh
 tmux-single-sidebar/test-hot-path-round-trips-contract.sh
 tmux-single-sidebar/test-client-field-contract.sh
 tmux-single-sidebar/test-gradient-option-contract.sh

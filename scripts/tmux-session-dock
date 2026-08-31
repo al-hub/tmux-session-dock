@@ -7631,6 +7631,37 @@ delete_session_after_archive()
         return 1
     fi
 
+    # Subpane lease evacuation: If the doomed session holds subpanes, safely migrate
+    # them to the fallback session or park them to the hub before killing the session.
+    if [ "$(tmux show-option -gqv "${SIDEBAR_SUBPANE_OPTION:-@dotfiles_sidebar_subpane_enabled}" 2>/dev/null || echo 0)" = 1 ]; then
+        local doomed_lease_holder
+        doomed_lease_holder="$(subpane_hub_get_lease_holder 2>/dev/null || true)"
+        if [ -n "$doomed_lease_holder" ]; then
+            local lease_sess
+            lease_sess="$(sidebar_tmux_cmd display-message -p -t "$doomed_lease_holder" '#{session_name}' 2>/dev/null || true)"
+            if [ "$lease_sess" = "$session_name" ]; then
+                trace_event "delete.subpane-evacuate.begin session=$session_name lease_holder=$doomed_lease_holder fallback=${next_session:-none}"
+                if [ -n "$next_session" ] && session_exists "$next_session"; then
+                    local next_win
+                    next_win="$(sidebar_tmux_cmd display-message -p -t "=$next_session:" '#{window_id}' 2>/dev/null || true)"
+                    if [ -n "$next_win" ]; then
+                        local next_sidebar
+                        next_sidebar="$(sidebar_window_pane "$next_win" || true)"
+                        if [ -n "$next_sidebar" ]; then
+                            ensure_sidebar_subpane_window "$next_win" "$next_sidebar" true || true
+                        fi
+                    fi
+                fi
+                local remaining_lease
+                remaining_lease="$(subpane_hub_get_lease_holder 2>/dev/null || true)"
+                if [ "$remaining_lease" = "$doomed_lease_holder" ]; then
+                    destroy_sidebar_subpane "$doomed_lease_holder" || true
+                fi
+                trace_event "delete.subpane-evacuate.end session=$session_name"
+            fi
+        fi
+    fi
+
     if [ "$archive_fast_path" = true ]; then
         debug_log "delete_session_after_archive kill-session fast path session=$session_name"
         tmux kill-session -t "=$session_name" 2>/dev/null || true
