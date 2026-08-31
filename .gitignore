@@ -15,4 +15,6 @@ tests/lib/pty-bridge
 
 # AI agent workspaces
 .agents/
+.claude/
+.codex/
 skills-lock.json

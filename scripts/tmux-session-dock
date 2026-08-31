@@ -7499,10 +7499,22 @@ delete_all_sessions_after_archive()
 
 fallback_session()
 {
-    deleting="$1"
+    local deleting="$1"
+    local session
 
-    tmux list-sessions -F '#{session_name}' 2>/dev/null |
-        awk -v deleting="$deleting" '$0 != deleting { print; exit }'
+    while IFS= read -r session; do
+        [ -n "$session" ] || continue
+        [ "$session" = "$deleting" ] && continue
+        if declare -f is_infrastructure_session >/dev/null 2>&1; then
+            is_infrastructure_session "$session" && continue
+        elif [ "$session" = "dotfiles-subpane-hub" ]; then
+            continue
+        fi
+        printf '%s\n' "$session"
+        return 0
+    done <<EOF
+$(tmux list-sessions -F '#{session_name}' 2>/dev/null || true)
+EOF
 }
 
 shell_quote()
