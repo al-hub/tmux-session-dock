@@ -522,7 +522,7 @@ ensure_sidebar_subpane_window() {
                 if sidebar_tmux_cmd display-message -p -t "$current_lease" '#{window_id}' >/dev/null 2>&1; then
                     local client_windows
                     client_windows="$(sidebar_tmux_cmd list-clients -F '#{window_id}' 2>/dev/null || true)"
-                    if ! printf '%s\n' "$client_windows" | grep -qx "$window_id"; then
+                    if [ -n "$client_windows" ] && ! printf '%s\n' "$client_windows" | grep -qx "$window_id"; then
                         trace_event "subpane.ensure.skip reason=background-window window=$window_id lease_holder=$current_lease"
                         return 0
                     fi
