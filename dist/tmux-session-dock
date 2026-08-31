@@ -5372,8 +5372,17 @@ ensure_sidebar_for_session()
     [ -n "$session_name_value" ] || return 1
     mark_session_managed "$session_name_value" || return 1
     window_id="$(tmux list-windows -t "=$session_name_value:" -F '#{window_id}' 2>/dev/null | head -n 1)"
-    [ -n "$window_id" ] || return 1
-    provision_sidebar_window "$window_id" "$width" || return 1
+    local sub_opt=""
+    if declare -f subpane_hub_get_lease_holder >/dev/null 2>&1; then
+        local cur_holder
+        cur_holder="$(subpane_hub_get_lease_holder 2>/dev/null || true)"
+        if [ -n "$cur_holder" ] && [ "$cur_holder" != "$window_id" ]; then
+            if sidebar_tmux_cmd display-message -p -t "$cur_holder" '#{window_id}' >/dev/null 2>&1; then
+                sub_opt=0
+            fi
+        fi
+    fi
+    provision_sidebar_window "$window_id" "$width" "" "$sub_opt" || return 1
     if [ "$defer_ready" != true ]; then
         wait_for_sidebar_window_ready "$window_id" || return 1
     fi
