@@ -8090,6 +8090,17 @@ restore_archive()
         else
             trace_event "restore.switch-client.warning session=$restore_name error=switch-failed"
         fi
+        if [ "$(tmux show-option -gqv "${SIDEBAR_SUBPANE_OPTION:-@dotfiles_sidebar_subpane_enabled}" 2>/dev/null || echo 0)" = 1 ]; then
+            local target_win_subpane="${active_window_target:-}"
+            [ -n "$target_win_subpane" ] || target_win_subpane="$(tmux display-message -p -t "$restore_name" '#{window_id}' 2>/dev/null || true)"
+            if [ -n "$target_win_subpane" ]; then
+                local restore_sidebar_pane
+                restore_sidebar_pane="$(sidebar_window_pane "$target_win_subpane" || true)"
+                if [ -n "$restore_sidebar_pane" ]; then
+                    ensure_sidebar_subpane_window "$target_win_subpane" "$restore_sidebar_pane" true || true
+                fi
+            fi
+        fi
         trace_event "restore.history.begin session=$restore_name"
         if ! append_archive_history_once "$archive_path"; then
             trace_event "restore.history.warning session=$restore_name error=history-import-failed"

@@ -501,7 +501,7 @@ destroy_sidebar_subpane() {
 }
 
 ensure_sidebar_subpane_window() {
-    local window_id="${1:-}" launcher_pane="${2:-}"
+    local window_id="${1:-}" launcher_pane="${2:-}" force="${3:-false}"
     [ -n "$window_id" ] || return 0
     local win_sess
     win_sess="$(sidebar_tmux_cmd display-message -p -t "$window_id" '#{session_name}' 2>/dev/null || true)"
@@ -515,7 +515,7 @@ ensure_sidebar_subpane_window() {
     enabled="$(sidebar_subpane_get_enabled)"
 
     if [ "$enabled" = "1" ]; then
-        if declare -f subpane_hub_get_lease_holder >/dev/null 2>&1; then
+        if [ "$force" != true ] && declare -f subpane_hub_get_lease_holder >/dev/null 2>&1; then
             local current_lease
             current_lease="$(subpane_hub_get_lease_holder 2>/dev/null || true)"
             if [ -n "$current_lease" ] && [ "$current_lease" != "$window_id" ]; then
